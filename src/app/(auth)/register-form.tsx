@@ -48,7 +48,7 @@ export function RegisterForm() {
       </div>
       <p className="text-xs text-muted-foreground">
         Preenche <strong className="font-medium text-foreground">email ou utilizador</strong>{" "}
-        (pelo menos um) para entrar e receber convites.
+        (pelo menos um) para entrar.
       </p>
       <div>
         <label className="mb-1 block text-sm font-medium">Password</label>

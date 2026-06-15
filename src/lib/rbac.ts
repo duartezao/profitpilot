@@ -1,3 +1,5 @@
+import { TEAM_INVITES_ENABLED, TEAM_MEMBERSHIP_ENABLED } from "@/lib/feature-flags";
+
 export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
 
 const ROLE_RANK: Record<WorkspaceRole, number> = {
@@ -13,8 +15,15 @@ export function roleRank(role: string): number {
   return ROLE_RANK[role as WorkspaceRole] ?? 0;
 }
 
-/** Só o proprietário gere membros (convites, papéis, remoção). */
+/** Só o proprietário gere membros (papéis, remoção). */
 export function canManageMembers(actorRole: string): boolean {
+  if (!TEAM_MEMBERSHIP_ENABLED) return false;
+  return actorRole === "owner";
+}
+
+/** Só o proprietário envia convites. */
+export function canInviteMembers(actorRole: string): boolean {
+  if (!TEAM_INVITES_ENABLED) return false;
   return actorRole === "owner";
 }
 

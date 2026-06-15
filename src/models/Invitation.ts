@@ -12,6 +12,13 @@ const InvitationSchema = new Schema(
     email: { type: String, trim: true, lowercase: true, sparse: true },
     /** Convite por utilizador (conta existente, com ou sem email). */
     username: { type: String, trim: true, lowercase: true, sparse: true },
+    /** Utilizador destinatário quando a conta já existe. */
+    invitedUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      sparse: true,
+      index: true,
+    },
     role: {
       type: String,
       enum: ["admin", "editor", "viewer"],

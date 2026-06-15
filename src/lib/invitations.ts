@@ -59,9 +59,20 @@ function inviteeOrFilter(
 }
 
 function invitationMatchesUser(
-  inv: { email?: string | null; username?: string | null },
-  user: Pick<InviteUserRef, "email" | "username">,
+  inv: {
+    email?: string | null;
+    username?: string | null;
+    invitedUserId?: mongoose.Types.ObjectId | null;
+  },
+  user: Pick<InviteUserRef, "id" | "email" | "username">,
 ): boolean {
+  if (
+    inv.invitedUserId &&
+    user.id &&
+    String(inv.invitedUserId) === user.id
+  ) {
+    return true;
+  }
   const e = user.email?.trim().toLowerCase();
   const u = user.username ? normalizeUsername(user.username) : null;
   if (inv.email && e && inv.email === e) return true;
@@ -127,10 +138,16 @@ async function expireStaleInvites(filter: Record<string, unknown>) {
 }
 
 export async function listPendingInvitationsForUser(
-  user: Pick<InviteUserRef, "email" | "username">,
+  user: Pick<InviteUserRef, "email" | "username"> & { id?: string },
 ): Promise<PendingInvitationView[]> {
   await connectToDatabase();
-  const or = inviteeOrFilter(user.email, user.username);
+  const or: Record<string, unknown>[] = inviteeOrFilter(
+    user.email,
+    user.username,
+  );
+  if (user.id && mongoose.isValidObjectId(user.id)) {
+    or.push({ invitedUserId: new mongoose.Types.ObjectId(user.id) });
+  }
   if (!or.length) return [];
 
   const now = new Date();
@@ -250,11 +267,24 @@ export async function createWorkspaceInvitation(input: {
 
   if (target.type === "email") {
     email = target.email;
-    const existingUser = await User.findOne({ email }).lean();
-    if (existingUser) inviteeUserId = existingUser._id;
+    const existingUser = await User.findOne({ email })
+      .select("username email")
+      .lean();
+    if (existingUser) {
+      inviteeUserId = existingUser._id;
+      if (existingUser.username) {
+        username = normalizeUsername(existingUser.username);
+      }
+    }
   } else {
-    username = target.username;
+    username = normalizeUsername(target.username);
     inviteeUserId = new mongoose.Types.ObjectId(target.userId);
+    const existingUser = await User.findById(target.userId)
+      .select("email username")
+      .lean();
+    if (existingUser?.email) {
+      email = existingUser.email.trim().toLowerCase();
+    }
   }
 
   if (inviteeUserId) {
@@ -289,6 +319,7 @@ export async function createWorkspaceInvitation(input: {
     workspaceId: wsId,
     ...(email ? { email } : {}),
     ...(username ? { username } : {}),
+    ...(inviteeUserId ? { invitedUserId: inviteeUserId } : {}),
     role: input.role,
     storeAccess: input.storeAccess,
     token: newToken(),
@@ -319,24 +350,39 @@ export async function acceptInvitation(
   }
 
   const userOid = new mongoose.Types.ObjectId(user.id);
+  const storeAccess = normalizeStoreAccess(inv.storeAccess);
   const existing = await Membership.findOne({
     userId: userOid,
     workspaceId: inv.workspaceId,
-    status: "active",
   });
-  if (existing) {
+
+  if (existing?.status === "active") {
     inv.status = "accepted";
     await inv.save();
-    return { ok: false, error: "Já tens acesso a este workspace." };
+    return { ok: true, workspaceId: String(inv.workspaceId) };
   }
 
-  await Membership.create({
-    userId: userOid,
-    workspaceId: inv.workspaceId,
-    role: inv.role,
-    storeAccess: normalizeStoreAccess(inv.storeAccess),
-    status: "active",
-  });
+  if (existing) {
+    await Membership.updateOne(
+      { _id: existing._id },
+      {
+        $set: {
+          role: inv.role,
+          storeAccess,
+          status: "active",
+        },
+        $unset: { expiresAt: "" },
+      },
+    );
+  } else {
+    await Membership.create({
+      userId: userOid,
+      workspaceId: inv.workspaceId,
+      role: inv.role,
+      storeAccess,
+      status: "active",
+    });
+  }
 
   inv.status = "accepted";
   await inv.save();
@@ -346,7 +392,7 @@ export async function acceptInvitation(
 
 export async function declineInvitation(
   invitationId: string,
-  user: Pick<InviteUserRef, "email" | "username">,
+  user: Pick<InviteUserRef, "id" | "email" | "username">,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await connectToDatabase();
   const inv = await Invitation.findById(invitationId);
