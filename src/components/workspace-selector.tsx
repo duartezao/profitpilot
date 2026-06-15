@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { Briefcase, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
 import {
@@ -40,6 +40,15 @@ export function WorkspaceSelector({
   const current = workspaces.find((w) => w.id === currentId);
   const itemCls =
     "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted disabled:opacity-60";
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   async function pickWorkspace(workspaceId: string) {
     if (workspaceId === currentId) {
@@ -104,14 +113,18 @@ export function WorkspaceSelector({
       {open && (
         <>
           <div
-            className="fixed inset-0 z-[100] bg-black/20 dark:bg-black/40"
+            className="fixed inset-0 z-[200] bg-background/80 backdrop-blur-[1px] md:bg-black/20 md:dark:bg-black/40"
             onClick={() => setOpen(false)}
             aria-hidden
           />
           <div
             className={cn(
-              "absolute left-0 z-[110] w-full min-w-[16rem] rounded-lg border border-border bg-surface p-1 shadow-sm",
-              menuPlacement === "top" ? "bottom-full mb-1" : "top-full mt-1",
+              "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-md",
+              "max-md:fixed max-md:inset-x-3 max-md:top-[3.25rem]",
+              menuPlacement === "top"
+                ? "md:absolute md:inset-x-auto md:bottom-full md:top-auto md:mb-1"
+                : "md:absolute md:inset-x-auto md:top-full md:mt-1",
+              "md:left-0 md:w-full md:min-w-[16rem]",
             )}
             onMouseDown={(e) => e.stopPropagation()}
           >

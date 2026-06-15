@@ -9,6 +9,11 @@ import { Workspace } from "@/models/Workspace";
 import { Membership } from "@/models/Membership";
 import { Session } from "@/models/Session";
 import { normalizeStoreAccess, type StoreAccess } from "@/lib/store-access";
+import {
+  isEmailLike,
+  normalizeUsername,
+  validateUsername,
+} from "@/lib/username";
 
 const SESSION_COOKIE = "pp_session";
 // Validade da sessão na BD (renovada a cada visita — "sliding").
@@ -39,6 +44,44 @@ export async function verifyPassword(
   } catch {
     return false;
   }
+}
+
+async function findUserByLoginIdentifier(identifier: string) {
+  const raw = identifier.trim();
+  if (!raw) return null;
+
+  if (isEmailLike(raw)) {
+    return User.findOne({ email: raw.toLowerCase() });
+  }
+
+  const username = normalizeUsername(raw);
+  return User.findOne({ username });
+}
+
+/** Contas antigas sem username — gera um a partir do email. */
+async function ensureUsername(userId: mongoose.Types.ObjectId, email: string) {
+  const existing = await User.findById(userId).select("username").lean();
+  if (existing?.username) return;
+
+  const base =
+    normalizeUsername(email.split("@")[0] || "user").replace(
+      /[^a-z0-9._-]/g,
+      "",
+    ) || "user";
+  let candidate = base.slice(0, 30);
+  let suffix = 0;
+
+  while (
+    await User.findOne({
+      username: candidate,
+      _id: { $ne: userId },
+    })
+  ) {
+    suffix += 1;
+    candidate = `${base.slice(0, Math.max(1, 26 - String(suffix).length))}${suffix}`;
+  }
+
+  await User.updateOne({ _id: userId }, { $set: { username: candidate } });
 }
 
 /** Cria uma sessão para o utilizador e define o cookie httpOnly. */
@@ -172,6 +215,7 @@ export type CurrentUser = {
   id: string;
   name: string;
   email: string;
+  username: string | null;
   workspaceId: string;
   workspaceName: string;
   role: string;
@@ -226,6 +270,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     id: String(user._id),
     name: user.name,
     email: user.email,
+    username: user.username ?? null,
     workspaceId: workspace ? String(workspace._id) : "",
     workspaceName: workspace?.name ?? "",
     role: membership?.role ?? "viewer",
@@ -246,21 +291,33 @@ export async function logout() {
 /** Regista um utilizador, cria o workspace e a membership de owner. */
 export async function registerUser(input: {
   name: string;
+  username: string;
   email: string;
   password: string;
   workspaceName?: string;
 }) {
   await connectToDatabase();
   const email = input.email.toLowerCase().trim();
+  const username = normalizeUsername(input.username);
+  const usernameError = validateUsername(username);
+  if (usernameError) {
+    throw new Error(usernameError);
+  }
 
-  const existing = await User.findOne({ email });
-  if (existing) {
+  const existingEmail = await User.findOne({ email });
+  if (existingEmail) {
     throw new Error("Já existe uma conta com este email.");
+  }
+
+  const existingUsername = await User.findOne({ username });
+  if (existingUsername) {
+    throw new Error("Este utilizador já está em uso. Escolhe outro.");
   }
 
   const passwordHash = await hashPassword(input.password);
   const user = await User.create({
     name: input.name.trim(),
+    username,
     email,
     passwordHash,
   });
@@ -281,18 +338,22 @@ export async function registerUser(input: {
   return { userId: String(user._id) };
 }
 
-/** Autentica um utilizador existente. */
-export async function loginUser(input: { email: string; password: string }) {
+/** Autentica um utilizador existente (email ou utilizador). */
+export async function loginUser(input: {
+  identifier: string;
+  password: string;
+}) {
   await connectToDatabase();
-  const email = input.email.toLowerCase().trim();
-  const user = await User.findOne({ email });
+  const user = await findUserByLoginIdentifier(input.identifier);
   if (!user) {
-    throw new Error("Email ou password incorretos.");
+    throw new Error("Utilizador ou password incorretos.");
   }
   const ok = await verifyPassword(user.passwordHash, input.password);
   if (!ok) {
-    throw new Error("Email ou password incorretos.");
+    throw new Error("Utilizador ou password incorretos.");
   }
+
+  await ensureUsername(user._id, user.email);
 
   const membership = await Membership.findOne({
     userId: user._id,

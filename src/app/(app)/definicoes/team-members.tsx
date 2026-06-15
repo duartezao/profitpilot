@@ -57,6 +57,11 @@ function MemberRow({
     <tr className="border-t border-border align-middle">
       <td className="px-4 py-3">
         <Sensitive as="p" className="font-medium">{member.name}</Sensitive>
+        {member.username && (
+          <Sensitive as="p" className="text-xs text-muted-foreground">
+            @{member.username}
+          </Sensitive>
+        )}
         <Sensitive as="p" className="text-xs text-muted-foreground">{member.email}</Sensitive>
         {member.isSelf && (
           <span className="text-xs text-muted-foreground">(tu)</span>

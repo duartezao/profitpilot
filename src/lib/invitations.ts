@@ -13,6 +13,12 @@ import {
   type StoreAccess,
 } from "@/lib/store-access";
 import { canAssignRole } from "@/lib/rbac";
+import {
+  isEmailLike,
+  normalizeUsername,
+  validateEmail,
+  validateUsername,
+} from "@/lib/username";
 import type {
   PendingInvitationView,
   SentInvitationView,
@@ -28,6 +34,39 @@ function inviteExpiry(): Date {
 
 function newToken(): string {
   return randomBytes(24).toString("base64url");
+}
+
+/** Resolve email ou @utilizador para o email do convite. */
+export async function resolveInviteIdentifier(
+  identifier: string,
+): Promise<{ ok: true; email: string } | { ok: false; error: string }> {
+  const raw = identifier.trim();
+  if (!raw) {
+    return { ok: false, error: "Preenche o email ou utilizador." };
+  }
+
+  if (isEmailLike(raw)) {
+    const email = raw.toLowerCase();
+    const emailError = validateEmail(email);
+    if (emailError) return { ok: false, error: emailError };
+    return { ok: true, email };
+  }
+
+  const username = normalizeUsername(raw);
+  const usernameError = validateUsername(username);
+  if (usernameError) return { ok: false, error: usernameError };
+
+  await connectToDatabase();
+  const user = await User.findOne({ username }).select("email").lean();
+  if (!user) {
+    return {
+      ok: false,
+      error:
+        "Utilizador não encontrado. Para convidar alguém sem conta, usa o email.",
+    };
+  }
+
+  return { ok: true, email: user.email };
 }
 
 async function workspaceStoreCount(workspaceId: mongoose.Types.ObjectId) {
@@ -168,7 +207,7 @@ export async function createWorkspaceInvitation(input: {
   if (pending) {
     return {
       ok: false,
-      error: "Já existe um convite pendente para este email.",
+      error: "Já existe um convite pendente para esta pessoa.",
     };
   }
 
