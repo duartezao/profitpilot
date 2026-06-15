@@ -310,31 +310,25 @@ export async function sumManualCogsForPeriod(
 ): Promise<number> {
   if (!storeIds.length) return 0;
 
-  const match: Record<string, unknown> = {
-    storeId: { $in: storeIds },
-    ...(storeTimeZone
-      ? orderDateMatchInTimezone(slice, storeTimeZone)
-      : orderDateMatch(slice)),
-  };
+  let dayKeys: string[];
+  if (slice.specificDates?.length) {
+    dayKeys = [...slice.specificDates];
+  } else if (storeTimeZone) {
+    dayKeys = dayKeysBetweenInTimezone(
+      slice.start,
+      slice.end,
+      normalizeStoreTimezone(storeTimeZone),
+    );
+  } else {
+    dayKeys = [];
+    let cur = startOfDay(slice.start);
+    const end = startOfDay(slice.end);
+    while (cur <= end) {
+      dayKeys.push(formatDateInput(cur));
+      cur = addDays(cur, 1);
+    }
+  }
 
-  const orderDays = await Order.aggregate<{ _id: string }>([
-    { $match: match },
-    {
-      $group: {
-        _id: storeTimeZone
-          ? {
-              $dateToString: {
-                format: "%Y-%m-%d",
-                date: "$orderDate",
-                timezone: normalizeStoreTimezone(storeTimeZone),
-              },
-            }
-          : { $dateToString: { format: "%Y-%m-%d", date: "$orderDate" } },
-      },
-    },
-  ]);
-
-  const dayKeys = orderDays.map((r) => r._id);
   if (!dayKeys.length) return 0;
 
   const rows = await ManualCogsDay.aggregate<{ total: number }>([

@@ -887,10 +887,19 @@ async function aggregateDailyOrders(
   );
 
   if (cogsMode === "day" && storeOids.length === 1) {
-    const dayKeys = [...result.keys()];
+    const dayKeys = dayKeysInSlice(slice, storeTimeZone);
     const dayCogs = await sumManualCogsByDay(storeOids[0], dayKeys);
-    for (const [dateKey, data] of result) {
+    for (const dateKey of dayKeys) {
+      const data = result.get(dateKey) ?? {
+        revenue: 0,
+        cogs: 0,
+        shipping: 0,
+        fees: 0,
+        refunds: 0,
+        orders: 0,
+      };
       data.cogs = dayCogs.get(dateKey) ?? 0;
+      result.set(dateKey, data);
     }
   }
 

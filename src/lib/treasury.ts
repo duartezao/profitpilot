@@ -15,15 +15,15 @@ import {
   shippingSumBaseExpr,
 } from "@/lib/order-money";
 import type { CogsMode } from "@/lib/cogs-modes";
-import { endOfDay, formatRangeLabel } from "@/lib/period";
+import { endOfDay, formatRangeLabel, orderDateMatch } from "@/lib/period";
 import {
   normalizeStoreTimezone,
   orderDateMatchInTimezone,
 } from "@/lib/store-timezone";
+import { sumManualCogsForPeriod } from "@/lib/manual-cogs";
 import { canAccessStore, type StoreAccess } from "@/lib/store-access";
 import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import { sumManualCashByStores } from "@/lib/cash-entries";
-import { orderDateMatch } from "@/lib/period";
 
 const INCOMING_PAYOUT_STATUSES = new Set([
   "pending",
@@ -319,27 +319,30 @@ async function sumOrderOutflowsSince(
   timeZone?: string | null,
 ): Promise<{ cogs: number; shipping: number }> {
   const slice = { start: since, end: endOfDay(new Date()) };
-  const dateMatch = timeZone
-    ? orderDateMatchInTimezone(slice, normalizeStoreTimezone(timeZone))
+  const tz = timeZone ? normalizeStoreTimezone(timeZone) : null;
+  const dateMatch = tz
+    ? orderDateMatchInTimezone(slice, tz)
     : orderDateMatch(slice);
 
-  const cogsExpr =
-    cogsMode === "order" || cogsMode === "day"
-      ? orderModeCogsSumExpr
-      : cogsSumBaseExpr;
+  let cogs = 0;
+  if (cogsMode === "day") {
+    cogs = await sumManualCogsForPeriod([storeId], slice, tz);
+  } else {
+    const cogsExpr =
+      cogsMode === "order" ? orderModeCogsSumExpr : cogsSumBaseExpr;
+    const cogsRows = await Order.aggregate<{ cogs: number }>([
+      { $match: { storeId, ...dateMatch } },
+      { $group: { _id: null, cogs: cogsExpr } },
+    ]);
+    cogs = cogsRows[0]?.cogs ?? 0;
+  }
 
-  const rows = await Order.aggregate<{ cogs: number; shipping: number }>([
+  const shippingRows = await Order.aggregate<{ shipping: number }>([
     { $match: { storeId, ...dateMatch } },
-    {
-      $group: {
-        _id: null,
-        cogs: cogsExpr,
-        shipping: shippingSumBaseExpr,
-      },
-    },
+    { $group: { _id: null, shipping: shippingSumBaseExpr } },
   ]);
 
-  return { cogs: rows[0]?.cogs ?? 0, shipping: rows[0]?.shipping ?? 0 };
+  return { cogs, shipping: shippingRows[0]?.shipping ?? 0 };
 }
 
 function resolveSinceDate(
@@ -526,9 +529,6 @@ export async function buildWorkspaceTreasury(
     const out = outflowMap.get(sid)!;
     const since = out.since;
     const sinceLabel = formatRangeLabel(since, endOfDay(new Date()));
-    const startKey =
-      (startDate ? dayKey(startDate) : null) ??
-      since.toISOString().slice(0, 10);
 
     const payoutToBase = async (p: {
       net?: number | null;
@@ -576,12 +576,7 @@ export async function buildWorkspaceTreasury(
       currency,
       todayKey,
     );
-    const startingBalance = await moneyToBase(
-      startingBalanceRaw,
-      storeCurrency,
-      currency,
-      startKey,
-    );
+    const startingBalance = startingBalanceRaw;
 
     const outflowsTotal = out.cogs + out.shipping + out.adSpend;
     const manual = manualCashMap.get(sid) ?? { manualIn: 0, manualOut: 0 };
