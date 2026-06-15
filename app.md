@@ -1,0 +1,1808 @@
+# ProfitPilot
+
+> Dropshipping Analytics Hub — gestão e análise de lucro real de múltiplas lojas.
+
+## Objetivo
+
+Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas de dropshipping em simultâneo**, com:
+
+* **Visão consolidada** — ver todas as lojas ao mesmo tempo num único dashboard, e fazer drill-down loja a loja.
+* **Histórico permanente** — guardar todos os dados (mesmo de lojas removidas ou de plataformas que cancelaste), sem depender da retenção limitada da Shopify/WooCommerce.
+* **Lucro real (Net Profit)** — não apenas revenue bruto, mas o lucro depois de COGS, envio, taxas de pagamento, ad spend, chargebacks, custos de apps e impostos. **REV** nas métricas = vendas líquidas (Shopify Net sales).
+
+> Alternativa própria ao **Triple Whale** e **Polar Analytics**, focada em dropshipping, com controlo total dos dados.
+
+---
+
+# Requisitos Obrigatórios (não-negociáveis)
+
+> Estas regras aplicam-se a **todo** o desenvolvimento, independentemente do agente/modelo usado no Cursor. Devem ser seguidas do início ao fim, sem exceções.
+
+1. **Web App (PWA)** — é uma aplicação web instalável. Tem de poder ser adicionada ao ecrã inicial de **iPhone, iPad e Android** e funcionar como app, continuando a ser 100% web (sem build nativa).
+2. **Responsividade 100%** — todos os ecrãs funcionam e ficam bem em **telemóvel, tablet e desktop**. Mobile-first. Nada pode ficar cortado, sobreposto ou inutilizável em ecrãs pequenos.
+3. **UI clean, sem aspeto de IA** — sem emojis na interface, sem gradientes, sem cores neon. Estética sóbria de ferramenta financeira (ver secção "Design e UI").
+4. **Segurança em primeiro lugar** — credenciais sempre encriptadas, isolamento total de dados por utilizador (ver secção "Segurança").
+5. **Lucro real exato** — todos os custos (COGS, taxas, ads, refunds, chargebacks, apps) entram no cálculo. O cálculo de lucro tem testes.
+6. **Histórico permanente** — nada de dados se perde; soft delete e snapshots diários.
+7. **Este documento (`app.md`) é a fonte de verdade.** Antes de implementar qualquer parte, consultar a secção correspondente. Manter o documento atualizado quando algo mudar.
+8. **Terminar o que se começa** — cada funcionalidade é entregue completa (frontend + backend + responsividade + segurança), não pela metade.
+
+---
+
+# Web App / PWA e Responsividade
+
+> Funciona no browser e instala-se no telemóvel como se fosse uma app.
+
+## PWA (instalável)
+
+* **Progressive Web App** com `manifest.json` (nome, ícones, cor, `display: standalone`) e **service worker**.
+* **Instalável** no iPhone/iPad (Safari → "Adicionar ao ecrã principal") e Android (Chrome → "Instalar app").
+* Abre em **ecrã inteiro** (sem barra do browser), com ícone e splash próprios.
+* **Funciona offline** para consulta (cache dos últimos dados vistos); sincroniza quando volta a ligação.
+* **Notificações push** (web push) para alertas e resumo diário, quando o dispositivo permite.
+* Continua a ser **100% web** — uma única base de código, sem app nativa nem app stores.
+
+## Responsividade (obrigatória em tudo)
+
+* **Mobile-first**: desenhar primeiro para telemóvel, depois escalar para tablet e desktop.
+* **Breakpoints** consistentes (Tailwind: `sm`, `md`, `lg`, `xl`).
+* Layouts adaptáveis: cartões empilham no telemóvel, tabelas grandes ganham **scroll horizontal** ou viram cartões.
+* **Navegação adaptada**: menu lateral no desktop, menu inferior/hambúrguer no telemóvel.
+* Áreas de toque grandes, fontes legíveis, gráficos que encolhem sem perder leitura.
+* **Critério de aceitação**: cada ecrã é testado em larguras de ~375px (telemóvel), ~768px (tablet) e ~1280px+ (desktop) antes de dar como concluído.
+
+---
+
+# Tecnologias
+
+## Frontend
+
+* Next.js (App Router)
+* TypeScript
+* Tailwind CSS
+* Shadcn/UI
+* Recharts (ou Tremor para dashboards financeiros)
+* TanStack Query (cache e sincronização de dados no cliente)
+* Zustand (estado global leve)
+* **PWA**: `manifest.json` + service worker (ex.: Serwist / next-pwa) para instalar no telemóvel e funcionar offline
+
+## Backend
+
+* Next.js API Routes / Route Handlers
+* Node.js
+* **BullMQ + Redis** — filas para sincronização periódica e import histórico
+* **Zod** — validação de payloads dos webhooks e da API
+
+## Base de Dados
+
+* **MongoDB** — dados operacionais (orders, products, customers)
+* **Redis** — cache, rate-limiting e filas
+* (Opcional) **ClickHouse / TimescaleDB** — métricas agregadas e séries temporais para queries rápidas em grandes volumes
+
+## Integrações externas (essenciais para o lucro real)
+
+* **Shopify Admin API (GraphQL)** — app do Dev Dashboard, ligada por **Client ID + Chave secreta** via client credentials grant (ver "Ligação à Shopify")
+* **Meta Ads API** (Facebook/Instagram) — ad spend
+* **TikTok Ads API** — ad spend
+* **Google Ads API** — ad spend
+* **Stripe / PayPal / Shopify Payments** — taxas de transação reais
+* **Fornecedores** (AliExpress, CJ Dropshipping, Zendrop) — COGS e custo de envio
+
+## Infraestrutura
+
+* Docker / Docker Compose
+* VPS (Hetzner / DigitalOcean)
+* Cloudflare (CDN, proxy, WAF)
+* Backups automáticos diários da base de dados (regra de ouro do "histórico permanente")
+
+---
+
+# Design e UI
+
+> Aparência profissional de ferramenta financeira séria. Nada de "cara de app feita por IA".
+
+## Princípios
+
+* **Clean e minimalista** — muito espaço em branco, hierarquia clara, foco nos números.
+* **Sem emojis** na interface. Ícones consistentes de uma única biblioteca (ex.: Lucide), monocromáticos.
+* **Sem gradientes**, sem sombras exageradas, sem cores "neon". Superfícies planas.
+* **Paleta sóbria e neutra** — fundo neutro, 1 cor de destaque discreta, verde/vermelho apenas para indicar lucro/prejuízo.
+* **Tipografia limpa** (ex.: Inter / Geist), números tabulares alinhados para ler valores rapidamente.
+* **Densidade controlada** — tabelas e dashboards densos mas legíveis, estilo painel financeiro (ex.: Linear, Stripe Dashboard).
+* **Consistência total** — mesmos espaçamentos, mesmos cantos, mesmos componentes em toda a app.
+* **Dark mode e light mode** sóbrios.
+
+## Referência visual canónica (obrigatória)
+
+> Os mockups em `assets/` são a **direção de design aprovada**. A app final tem de ficar **100% alinhada** com esta estética e organização (ver secção "Mockups e Wireframes Detalhados"). Qualquer ecrã novo segue a mesma linguagem visual.
+
+## Design Tokens (valores concretos)
+
+> Resumo abaixo. A **fonte completa e canónica** (cores hex, tipografia, componentes, Tailwind config e variáveis CSS) está em **`design-system.md`** — seguir esse ficheiro a 100%.
+
+* **Tipografia**: Inter (ou Geist). Números **tabulares** (`font-variant-numeric: tabular-nums`). Títulos semibold, corpo regular.
+* **Cores (light)**: fundo `#FFFFFF`, superfície/cartão `#FFFFFF` com borda `#E5E7EB`, texto principal `#111827`, texto secundário `#6B7280`.
+* **Cores (dark)**: fundo `#0F172A`/`#111827`, cartão `#1E293B`, borda `#334155`, texto `#F1F5F9`.
+* **Accent** (discreto): azul `#2563EB` (apenas para item ativo, links e seleção).
+* **Semânticas**: lucro/positivo verde `#16A34A`; prejuízo/negativo vermelho `#DC2626`; aviso âmbar `#D97706`. Usadas **só** em valores e estados, nunca como decoração.
+* **Cantos**: `rounded-lg` (~8px) em cartões e botões.
+* **Sombras**: nenhuma ou muito subtil (`shadow-sm`); preferir **borda** a sombra.
+* **Espaçamento**: grelha base de 4px; padding de cartão 16–24px; gaps consistentes (16px).
+* **Cartões de KPI**: rótulo pequeno em cima, valor grande, variação (verde/vermelho) e sparkline.
+* **Tabelas**: cabeçalho leve, linhas com separador subtil, números alinhados à direita, tags de status em pill.
+* **Ícones**: Lucide, traço fino, monocromáticos (cor do texto).
+* **Sem**: gradientes, neon, sombras pesadas, emojis, ilustrações "cartoon".
+
+## Velocidade (a app tem de ser rápida)
+
+* Tempo de carregamento percetível mínimo: **métricas pré-calculadas** (dailyMetrics) em vez de calcular em runtime.
+* **Cache** (Redis + TanStack Query) e dados servidos do servidor (RSC) quando possível.
+* **Skeletons** em vez de spinners; nada de ecrãs em branco.
+* Paginação e virtualização em tabelas grandes.
+* Sem animações desnecessárias; transições subtis e rápidas.
+
+---
+
+# Funcionalidades
+
+## Gestão de Lojas
+
+### Deve permitir
+
+* Adicionar loja
+* Editar loja
+* Desativar loja (mantém dados, pausa sincronização)
+* Reativar loja
+* **Arquivar loja** (remove das vistas ativas mas mantém todo o histórico)
+* **Agrupar lojas** por marca/nicho/país (ex.: "Lojas PT", "Lojas Pet")
+* **Definir moeda base** por workspace para consolidar tudo numa única moeda
+
+### Plataformas suportadas
+
+* Shopify
+* WooCommerce
+
+Futuro:
+
+* Etsy
+* Amazon
+* eBay
+* TikTok Shop
+
+### Conexão e sincronização
+
+* **Webhooks** para eventos em tempo real (`orders/create`, `orders/updated`, `refunds/create`, `products/update`)
+* **Sincronização inicial histórica** ao adicionar uma loja — com opção de escolher o **dia de início** (importar tudo o disponível **ou** apenas a partir de uma data X, ex.: "só desde 01/01/2026")
+* **Sincronização incremental** agendada — **um único pedido Vercel Cron de 4 em 4 horas** (`/api/cron/sync`) sincroniza em lote todas as lojas ativas de todos os workspaces (orders, payouts, **sessões/funil Shopify**). Dias históricos de sessões ficam na BD (gzip); só dias em falta ou o dia atual voltam a ser pedidos à Shopify. Em dev local, `instrumentation.ts` só corre fora da Vercel.
+* Estado de sincronização visível por loja (última sync, erros, atraso)
+
+### Ligação à Shopify — Client ID + Chave secreta (Client Credentials Grant)
+
+> Método de ligação: app criada no **Shopify Dev Dashboard** ([docs](https://shopify.dev/docs/apps/build/dev-dashboard)). Desde **1 jan 2026** a Shopify deixou de mostrar tokens `shpat_` permanentes; em vez disso usa-se o **client credentials grant** ([docs](https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/client-credentials-grant)): a app troca **Client ID + Chave secreta** por um access token de curta duração (~24h), diretamente com a loja, sem interação do utilizador. Só funciona em **lojas da própria organização** (o nosso caso).
+
+**Como funciona**
+
+1. Criar uma app no Dev Dashboard (`dev.shopify.com/dashboard`) e configurar os **scopes** (Admin API access scopes) na configuração da app.
+2. **Instalar a app na loja** (mesma organização) e, em **Settings → Credenciais**, copiar o **ID de cliente (Client ID)** e a **Chave secreta (Client secret)**.
+3. No nosso sistema, ao adicionar uma loja, o utilizador cola: **domínio Shopify** (`xxx.myshopify.com`, ligação API), **URL público** (`minhaloja.com`, dashboard e reports), **Client ID** e **Chave secreta**.
+4. O sistema obtém um access token via `POST /admin/oauth/access_token` (`grant_type=client_credentials`), valida com uma query de teste e começa a sincronizar.
+5. O token expira ~24h: a app **pede um token novo automaticamente** em cada sincronização (as credenciais ficam guardadas encriptadas; o token não é persistido).
+
+**Scopes (permissões) necessários — só leitura**
+
+* `read_orders` — vendas, reembolsos, descontos (revenue, refunds, AOV, CVR)
+* `read_products`, `read_inventory` — produtos e **custo por artigo (cost per item)** para o COGS
+* `read_shopify_payments_accounts`, `read_shopify_payments_disputes` — saldo/payouts e chargebacks (a query `shopifyPaymentsAccount` exige `read_shopify_payments_accounts`)
+* `read_reports` / `read_analytics` — sessões e métricas de funil (ATC, checkout, CVR), quando disponíveis
+* `read_customers` — clientes e LTV
+
+**Acesso à API**
+
+* **Admin API GraphQL** para a maioria das queries (orders, products, `inventoryItem.unitCost`, payouts).
+* Header de autenticação: `X-Shopify-Access-Token: <token>`.
+* Respeitar **rate limits** (custo de query GraphQL) com filas e backoff.
+* O **Client Secret** é usado para validar a **assinatura HMAC** dos webhooks.
+
+**Segurança**
+
+* **Client ID e Chave secreta** guardados **encriptados** (AES-256-GCM), nunca em texto simples nem em logs. O access token (curta duração) não é persistido — é pedido de novo quando necessário.
+* Ligação validada na ligação e revalidada periodicamente; alerta se as credenciais ficarem inválidas ou perderem permissões.
+
+### Assistente "Adicionar Loja" (o que a app mostra ao utilizador)
+
+> No ecrã de adicionar loja há um guia passo-a-passo (com texto e ajuda) para a pessoa saber exatamente o que fazer.
+
+**Texto guia apresentado na app:**
+
+> **Como ligar a tua loja Shopify**
+> 1. Entra no Shopify Dev Dashboard em `dev.shopify.com/dashboard` e cria uma app.
+> 2. Em **Configuration / API access**, ativa os scopes indicados abaixo.
+> 3. **Instala a app na tua loja** e, em **Settings → Credenciais**, copia o **ID de cliente** e a **Chave secreta**.
+> 4. Cola aqui os 2 valores + o domínio Shopify (`aminhaloja.myshopify.com`) + o URL público (`minhaloja.com`) e clica em **Ligar**.
+> 5. Vamos validar o acesso e importar o teu histórico automaticamente.
+
+**Scopes a ativar (a app mostra a lista com botão "copiar"):**
+
+* `read_orders` — vendas, reembolsos e descontos
+* `read_products` — produtos
+* `read_inventory` — custo por artigo (COGS)
+* `read_shopify_payments_accounts` — saldo e payouts (quanto/quando recebes)
+* `read_shopify_payments_disputes` — chargebacks
+* `read_customers` — clientes e LTV
+* `read_reports` / `read_analytics` — sessões e funil (ATC, checkout, CVR)
+
+**Na app:**
+
+* Campos: **Domínio**, **Client ID (ID de cliente)**, **Chave secreta (Client secret)**.
+* Botão **"Testar ligação"** antes de guardar (feedback verde/vermelho com o motivo do erro).
+* Após ligar: barra de progresso do **import histórico** e estado de cada permissão (verde = ok, vermelho = scope em falta com instrução de como corrigir).
+
+---
+
+# Dashboard Consolidado (Multi-loja)
+
+> O coração da app: ver **todas as lojas ao mesmo tempo**.
+
+## Vista global
+
+* Seletor de lojas (todas / grupo / seleção manual)
+* Seletor de período com comparação automática
+* Conversão de todas as moedas para a **moeda base**
+* Cartões de KPI agregados de todas as lojas selecionadas
+
+## Métricas principais (agregadas)
+
+* Revenue (vendas líquidas — subtotal após descontos, sem envio/IVA, menos reembolsos)
+* **Net Profit (lucro real)*** **Margem de lucro (%)**
+* Orders
+* AOV (Average Order Value)
+* Conversion Rate
+* Refunds / Refund Rate
+* **Ad Spend total**
+* **ROAS / POAS** (Profit on Ad Spend — mais honesto que ROAS para dropshipping)
+* **MER** (Marketing Efficiency Ratio = revenue / ad spend total)
+* CAC (Customer Acquisition Cost)
+* Novos clientes vs recorrentes
+
+## Tabela comparativa loja a loja
+
+Uma tabela onde cada linha é uma loja e as colunas são as métricas-chave (revenue, lucro, margem, ad spend, ROAS), com:
+
+* Ordenação por qualquer coluna (ex.: "qual loja dá mais lucro?")
+* Mini-gráfico de tendência (sparkline) por loja
+* Destaque das melhores e piores lojas
+* Totais no rodapé
+* **Modo apresentação** (ícone olho na topbar) — desfoca valores monetários, nomes de lojas/produtos, gráficos e identificadores sensíveis para mostrar o dashboard a terceiros; preferência guardada em `localStorage`.
+
+---
+
+# Lucro Real (Net Profit)
+> Esta é a funcionalidade que diferencia a app. Calcular o lucro **verdadeiro**, não só o revenue.
+
+## Fórmula
+
+```
+Net Profit =
+    Revenue (vendas líquidas)
+  − COGS (custo dos produtos)
+  − Custos de envio (o que pagas ao fornecedor)
+  − Ad Spend (Meta + TikTok + Google)
+  − Taxas de pagamento (Stripe/PayPal/Shopify Payments)
+  − Chargebacks
+  − Descontos / cupões (já refletidos na revenue líquida)
+  − Taxas de apps e subscrições (rateadas)
+  − Impostos (IVA/sales tax, se aplicável)
+  − Custos fixos (rateados: domínio, ferramentas, salários)
+```
+
+## Fontes de cada custo
+
+| Custo | Origem |
+|---|---|
+| Revenue | Webhooks de orders da plataforma |
+| COGS | Custo definido por produto/variante (manual, CSV ou API do fornecedor) |
+| Envio | Custo real do fornecedor por order/produto |
+| Ad Spend | Meta / TikTok / Google Ads API |
+| Taxas de pagamento | Stripe / PayPal API (ou % estimada por gateway) |
+| Refunds | Webhook `refund/created` |
+| Apps/Subscrições | Custo mensal definido manualmente, rateado por order ou por loja |
+| Custos fixos | Definidos manualmente por mês |
+
+## Configuração de custos (COGS)
+
+* **Buscar o COGS automaticamente da Shopify** — a Shopify guarda o campo **"Cost per item" (custo por artigo, em €)** em cada variante (`InventoryItem.unitCost` via Admin GraphQL API). A app puxa esse valor automaticamente em cada sync e usa-o no cálculo do lucro, sem teres de inserir nada à mão.
+* Definir/editar **COGS por produto e por variante** manualmente (substitui o valor da Shopify quando quiseres)
+* Importar COGS via **CSV** ou **API do fornecedor** (AliExpress / CJ / Zendrop) como alternativa
+* **COGS histórico** — coleção `cogsHistory` com versões por variante (`effectiveFrom` / `effectiveTo`). O lucro de encomendas antigas usa o custo da altura; alterações futuras (Shopify ou manual) não reescrevem linhas já registadas.
+* **Página COGS** — lista apenas **produtos vendidos sem custo** (linhas de encomenda com `unitCost` em falta), não o catálogo inteiro.
+* **Assimilação automática** — em cada sync (antes e depois das encomendas), percorre vendas sem COGS e preenche com o custo válido na data da venda. Se o preço do fornecedor mudou, o histórico (`cogsHistory`) garante o valor certo por dia; vendas já com custo confirmado não são reescritas.
+* COGS por defeito / margem-alvo para produtos sem custo definido (com alerta visual de "custo em falta")
+* **Aviso de COGS em falta** — só conta variantes vendidas **no período selecionado** sem custo na linha da encomenda. O Net Profit mostra sempre o valor calculado; se faltar COGS, banner âmbar avisa que o lucro pode estar superestimado nessas linhas. Encomendas com custo registado usam o valor da altura da venda — **não substitui** a actualização quando o fornecedor muda o preço (Shopify / manual / COGS); custo desatualizado distorce o lucro sem o superestimar necessariamente.
+* Prioridade de fonte do custo configurável: **manual > CSV > Shopify cost per item > fornecedor**
+
+## Visualizações de lucro
+
+* Net Profit ao longo do tempo (gráfico diário na dashboard consolidada)
+* **Waterfall do lucro**: Revenue → menos cada custo → Net Profit (mostra para onde vai o dinheiro)
+* **P&L em `/financas`** — demonstração de resultados com COGS, envio, taxas, ad spend e reembolsos; avisos de COGS/ad spend em falta.
+* Lucro por loja, por produto, por país, por canal de aquisição
+* **Profit por order** (margem média por encomenda)
+* Breakeven ROAS por produto (a partir de que ROAS o produto deixa de dar prejuízo)
+
+## Pedidos e reembolsos (por loja)
+
+* **`/pedidos`** — lista de encomendas no período selecionado: pedido #, data, estado financeiro, receita, lucro por order (antes de ads) e reembolso. KPIs: volume, receita, AOV e total reembolsado. Tabela desktop + cartões no telemóvel.
+* **`/reembolsos`** — encomendas com `refunded > 0`, refund rate (reembolsos / receita do período) e impacto no lucro por order.
+
+---
+
+# Conexão de Contas de Ads (Ad Spend)
+
+> Sincronizar automaticamente o dinheiro gasto em ads para entrar no cálculo do lucro real.
+
+## Como funciona
+
+* Ligar uma **Ad Account**: **Meta (Facebook/Instagram)**, **Google Ads** e **TikTok Ads**.
+* A app vai buscar automaticamente o **valor gasto (spend)** por dia, por campanha e por conta.
+* Sincronização diária automática + opção de **refresh manual** a qualquer momento.
+* **Regra de sync**: em cada sync periódico, o gasto de **hoje** é **substituído** pelo valor fresco das APIs; **ontem e dias anteriores ficam fechados** (já não é possível gastar mais nesses dias). O manual preenche dias em falta, sobretudo ontem.
+* **Ad spend manual** (`/anuncios`) — se não houver contas ligadas ou o sync falhar, preenches o **total gasto por dia e por loja** (USD, EUR ou GBP). Dias em falta contam **desde a `importStartDate` da loja** (escolhida no setup) até ontem. Converte automaticamente para a **moeda base** do workspace com a taxa do dia.
+
+## Ligação Meta Ads (Facebook/Instagram)
+
+> Usa a **Meta Marketing API** para ler o spend.
+
+1. Criar uma app no **Meta for Developers** (`developers.facebook.com`), tipo **Business**.
+2. Pedir a permissão **`ads_read`** (e `business_management` se gerires várias contas via Business Manager).
+3. Obter um **token de longa duração** ou, melhor para servidor, um **System User token** do Business Manager (não expira / renovável).
+4. Na app, o utilizador liga a conta (botão "Ligar Meta") e **escolhe a(s) ad account(s)** (`act_<ID>`) a associar à loja.
+5. O spend vem do endpoint **`/act_<AD_ACCOUNT_ID>/insights`** com `fields=spend,impressions,clicks,cpc,ctr,cpm,actions` e `level=campaign`, por dia.
+
+## Ligação Google Ads
+
+> Usa a **Google Ads API** ([docs](https://developers.google.com/google-ads/api/rest/auth)). Precisa de 3 coisas: credenciais OAuth, **developer token** e o **customer ID**.
+
+1. Criar um projeto no **Google Cloud Console** e gerar **Client ID + Client Secret** (OAuth 2.0), scope `https://www.googleapis.com/auth/adwords`.
+2. Obter um **developer token** no API Center da conta **Google Ads manager (MCC)** (`ads.google.com/aw/apicenter`).
+3. O utilizador autoriza (OAuth) e a app guarda o **refresh token**; o access token é renovado automaticamente (válido ~1h).
+4. Indicar o **customer ID** (10 dígitos) da conta; se for via manager, enviar também o header **`login-customer-id`**.
+5. O spend vem de uma query **GAQL** ao `GoogleAdsService.search`:
+
+```
+SELECT campaign.name, metrics.cost_micros, metrics.impressions,
+       metrics.clicks, metrics.ctr, metrics.average_cpc
+FROM campaign
+WHERE segments.date DURING LAST_7_DAYS
+```
+
+> Nota: `metrics.cost_micros` vem em **micros** (1.000.000 micros = 1 unidade de moeda) — a app divide por 1.000.000 para obter o valor real.
+
+## Ligação TikTok Ads
+
+* App no **TikTok for Business / Marketing API**, permissão de leitura de relatórios.
+* OAuth para obter access token; spend via endpoint de **reporting** por dia/campanha.
+
+## Assistente "Ligar conta de ads" (o que a app mostra)
+
+* Botões **"Ligar Meta"**, **"Ligar Google Ads"**, **"Ligar TikTok"** com guia passo-a-passo.
+* Após autorizar, **lista as ad accounts disponíveis** para a pessoa escolher quais associar (e a que loja).
+* **Testar ligação** + estado (token válido, último sync, erros) e **reautenticação com 1 clique** quando expira.
+
+## Várias contas por loja
+* Uma loja pode ter **mais do que uma conta de ads ligada ao mesmo tempo** (ex.: uma conta Meta **e** uma conta Google).
+* Podes ligar **múltiplas contas da mesma plataforma** (ex.: 2 ad accounts Meta para a mesma loja).
+* Cada conta de ads é **associada a uma loja** (ou repartida entre lojas, com % de alocação, caso uma conta sirva várias lojas).
+* Vista do ad spend **por plataforma** (quanto foi Meta vs Google vs TikTok) e **somado** no total da loja.
+
+## Dados recolhidos por conta
+
+* Spend (gasto)
+* Impressões, cliques, CPM, CPC, CTR
+* Conversões / compras reportadas pela plataforma (para comparar com as orders reais)
+* Moeda da conta (convertida para a moeda base)
+
+## Estado da ligação
+
+* Última sincronização, erros de token expirado, reautenticação com 1 clique.
+* Alerta se uma conta deixar de sincronizar (para não ficares sem dados de spend e o lucro ficar errado).
+
+---
+
+# BER — Break-Even ROAS (por loja e por produto)
+> O número mais importante para decidir se podes escalar: a partir de que ROAS deixas de ter prejuízo.
+
+## O que é
+
+O **BER (Break-Even ROAS)** é o ROAS mínimo a que precisas de vender para **não perder dinheiro** depois de pagar produto, envio e taxas. Acima do BER tens lucro; abaixo, prejuízo.
+
+## Fórmula
+
+```
+Margem de contribuição (%) =
+   (Preço de venda − COGS − Envio − Taxas de pagamento) / Preço de venda
+
+BER (Break-Even ROAS) = 1 / Margem de contribuição
+
+Exemplo:
+   Produto vendido a 40€, com 15€ de custos (COGS+envio+taxas)
+   Margem = (40 − 15) / 40 = 0,625 (62,5%)
+   BER = 1 / 0,625 = 1,6
+   → Precisas de ROAS ≥ 1,6 para teres lucro.
+```
+
+## Onde aparece
+
+* **BER da loja** (médio ponderado por vendas) vs **ROAS real** atual — semáforo verde/vermelho.
+* **BER por produto** — saber que produtos aguentam escalar e quais não.
+* Alerta automático quando o **ROAS real cai abaixo do BER** (estás a perder dinheiro agora).
+* Usado nas decisões de "**dei scale / não dei scale**" registadas nas notas diárias.
+
+---
+
+# Dashboard por Loja
+
+Cada loja deve ter:
+
+* Revenue, Orders, Customers
+* **Net Profit e margem da loja**
+* AOV, Conversion Rate, Refund Rate
+* Ad spend e ROAS/POAS da loja
+* **Top sellers / produtos mais vendidos** (por revenue **e** por lucro) — com seletor de período (ver secção dedicada)
+* Produtos sem vendas (candidatos a remover)
+* **Produtos que vendem mas dão prejuízo** (margem negativa)
+* Mapa/lista de vendas por país
+* Novos clientes vs recorrentes, LTV médio
+* **A receber (payout)**: saldo pendente e data do próximo pagamento da Shopify
+
+---
+
+# Top Sellers e Análise de Produtos (por período)
+
+> Ver os produtos que mais vendem/lucram em **qualquer intervalo de tempo**, em qualquer loja, e comparar.
+
+## Períodos disponíveis
+
+* **Hoje** e **ontem**
+* **Esta semana** / últimos 7 dias
+* **Este mês** / últimos 30 dias
+* **Últimos 3 meses** (trimestre)
+* **Este ano** / últimos 12 meses
+* **Período personalizado** (escolher datas)
+* Cada período mostra a **comparação com o anterior** (subiu/desceu).
+
+## O que mostra
+
+* Ranking de produtos por **unidades**, por **revenue** e por **lucro** (alternável).
+* Tendência de cada produto (sparkline) e variação vs período anterior.
+* **Novos best-sellers** (entraram no top) e **quedas** (saíram do top).
+* Filtrar por loja, por coleção e por país.
+* **Top sellers consolidado multi-loja** (os melhores produtos somando todas as lojas).
+
+## Disponível por loja ativa **e arquivada**
+
+* Como os dados são guardados permanentemente, os top sellers continuam acessíveis **mesmo depois de arquivar a loja** — podes ver os melhores produtos de uma loja morta de há meses.
+
+---
+
+# Stock e Reposição
+
+> Não deixar um best-seller ir a zero (perda de vendas) nem ficar com capital preso.
+
+* **Valor de stock** atual (a custo de COGS) por loja e total — quanto tens "preso" em inventário.
+* **Alertas de stock baixo / esgotado** com base no ritmo de vendas dos últimos dias.
+* **Lead time do fornecedor** por produto — quando deves reencomendar para não romper stock.
+* **Dias de stock restantes** ("a este ritmo, acaba em ~5 dias").
+* Cruzamento com os **top sellers**: priorizar reposição dos produtos que mais lucro dão.
+
+---
+
+# Notas Diárias (Diário de Operação)
+> Registar o que fizeste a cada dia, para depois cruzares com os resultados ("o que mudei no dia em que as vendas dispararam?").
+
+## Cada nota pode ter
+
+* **Data** e **loja** (ou nota global do workspace)
+* **Dei scale / Não dei scale** (toggle) — e quanto subiste o budget
+* **Mudanças feitas**: novo criativo, mudança de preço, novo produto, mudei público, pausei campanha, mudei oferta, etc. (tags rápidas + texto livre)
+* **Texto livre** para observações
+* **Humor/estado** do dia (opcional: bom / mau / neutro)
+* **Anexos** (print de criativo, screenshot do gestor de anúncios)
+
+## Como aparece
+
+* **Marcadores nos gráficos** — cada nota aparece como um pin na timeline do revenue/lucro, para veres o impacto de cada decisão.
+* **Timeline / diário** filtrável por loja e por tipo de mudança (ex.: ver só os dias em que "dei scale").
+* Cruzamento automático: "Nos dias em que deste scale, o lucro médio foi X vs Y nos outros dias."
+* Lembrete diário opcional para escreveres a nota do dia.
+
+## Consultar mais tarde (histórico de notas)
+
+> Tudo o que escreveste fica guardado para sempre e é fácil de reencontrar.
+
+* **Arquivo permanente** de todas as notas (nunca se apagam; guardadas no histórico permanente).
+* **Pesquisa por texto** (procurar uma palavra em todas as notas).
+* **Filtros**: por loja, por data/período, por tag de mudança, só "dei scale", etc.
+* **Vista de calendário** — ver de relance em que dias houve notas.
+* **Clicar num ponto do gráfico** abre a(s) nota(s) desse dia.
+* Notas continuam acessíveis **mesmo depois de arquivar a loja**.
+* Exportáveis (CSV) junto com as métricas.
+
+---
+
+# Relatório Diário (Daily Report) Automático
+
+> Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
+
+**Estado (implementado):** em `/notas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, PROFIT (aviso COGS), funil ATC/checkout/CVR. CPC/CTR/CPM e campos de testes de coleções ficam `—` até API de ads e campos extra na nota.
+
+## Exemplo do template gerado
+
+```
+DIA: 13/06/2026
+LOJA: https://marie-bruxelles.com/
+REV: 275,65
+REFUNDS: 0€
+ADSPEND: 12,35
+PROFIT: 198,40   (com aviso se COGS em falta no dia)
+ATC %: 10,16%
+REACHED CHECKOUT %: 6,77%
+CVR %: 5,08%
+CPC: $0.24
+CTR: 5.46%
+CPM: US$ 13,01
+Produtos testados: 0
+Coleções testadas: 1
+Quais coleções já testadas: 1
+Qual a próxima coleção a testar: sandale
+Coleção best-seller: 0
+OBS: 6º dia de loja
+Principais dificuldades: 0
+```
+
+## De onde vem cada campo
+
+| Campo | Origem (automático) |
+|---|---|
+| DIA | Dia selecionado |
+| LOJA | URL público da loja (`displayUrl`, ex. `minhaloja.com`) |
+| REV | Vendas líquidas do dia (subtotal após descontos − reembolsos, alinhado com Shopify Net sales) |
+| COGS | Custo dos produtos vendidos no dia (cost per item × unidades) |
+| REFUNDS | Reembolsos do dia (informativo — já reflectidos na REV) |
+| ADSPEND | Soma do ad spend (Meta + Google + TikTok) |
+| PROFIT | Net Profit = REV − COGS − envio − taxas − ad spend; aviso se faltar COGS em produtos vendidos nesse dia |
+| SESSÕES | ShopifyQL (`read_reports`), filtradas pelo **país configurado na loja** (`analyticsSessionCountry` em Definições; vazio = todos os países); lidas da BD (`session_metrics_months`) |
+| ATC % | `sessões com add to cart / sessões` — mesma origem e **mesmo filtro de país** que SESSÕES |
+| REACHED CHECKOUT % | `sessões que chegaram ao checkout / sessões` — mesma origem e **mesmo filtro de país** |
+| CVR % | `sessões que concluíram checkout / sessões` — mesma origem e **mesmo filtro de país** |
+| CPC, CTR, CPM | Métricas das contas de ads ligadas |
+| Produtos/Coleções testadas, próxima coleção, best-seller, OBS, dificuldades | **Campos da nota diária** (preenchidos por ti) |
+
+> **Funil (sessões, ATC %, checkout %, CVR %):** vêm da Shopify (ShopifyQL via Admin GraphQL **2025-10+**, scope `read_reports`), **filtradas pelo país escolhido uma vez por loja** em Definições → «País das sessões» (ex. Bélgica = `BE`; vazio = mundo inteiro). Query: `FROM sessions … WHERE session_country_code = 'BE' SINCE … UNTIL … TIMESERIES day` (ordem ShopifyQL obrigatória). Os dados ficam **guardados na BD** em blobs mensais gzip (`session_metrics_months`, chave `countryKey`) — o relatório e a dashboard **só leem da BD**; dias históricos não voltam a ser pedidos à Shopify (sync automático cron 4 h preenche dias em falta). Se o sync falhou antes, dias com zeros são re-pedidos na próxima sync. REV, REFUNDS, PROFIT e ADSPEND **não** usam este filtro — vêm das orders/ad spend da loja. CPC/CTR/CPM vêm das contas de ads.
+
+## Separação por plataforma (Google vs Facebook)
+
+> Se tiveres Meta **e** Google ligados, as métricas de ads aparecem separadas por plataforma.
+
+```
+ADSPEND total: 12,35  (Meta 8,10 | Google 4,25)
+
+— META —
+CPC: $0.24   CTR: 5.46%   CPM: US$ 13,01
+
+— GOOGLE —
+CPC: $0.31   CTR: 3.10%   CPM: US$ 9,80
+```
+
+* Cada plataforma tem o seu bloco de CPC/CTR/CPM/spend.
+* Há também uma linha **combinada** (todas as plataformas juntas) para visão geral.
+
+## Várias campanhas: Média vs Total (full)
+
+> Com várias campanhas ativas, podes escolher como ver as métricas.
+
+* **Total (full)** — recomendado: agrega tudo de forma correta (ponderada).
+  * `CPC = spend total / cliques totais`
+  * `CPM = spend total / impressões totais × 1000`
+  * `CTR = cliques totais / impressões totais`
+* **Média por campanha** — média simples dos valores de cada campanha (útil para ver o "comportamento médio" de uma campanha).
+* **Toggle** no relatório para alternar entre os dois modos, e opção de **detalhar campanha a campanha** (lista com o valor de cada uma).
+
+## Exportar (este género de texto, por cada loja)
+
+> Gera exatamente um bloco de texto como o exemplo acima, **um por loja**.
+
+* **Um relatório por loja**: ao exportar várias lojas de uma vez, sai **um bloco de texto separado para cada loja** (cada um começa com `DIA:` e `LOJA:`).
+* Opções de saída:
+  * **Copiar para a área de transferência** (texto pronto a colar).
+  * **TXT** — um ficheiro por loja, ou um ficheiro único com todas as lojas separadas.
+  * **PDF** ou **imagem** (para enviar/guardar).
+* **Template editável** — escolher que campos aparecem, a ordem e os rótulos (ex.: manter "REV", "ADSPEND", "ATC %" tal como usas).
+* **Geração automática** ao fim do dia, com **envio** opcional por email / Telegram / Discord (um por loja).
+* Selecionar **uma loja, várias ou todas**, e **qualquer dia passado** (usa o histórico permanente).
+* Campos automáticos (REV, REFUNDS, ADSPEND, PROFIT, ATC%, CVR, CPC/CTR/CPM...) + campos manuais da nota (produtos/coleções testadas, OBS, dificuldades).
+
+### Exemplo de saída para 2 lojas
+
+```
+DIA: 13/06/2026
+LOJA: https://marie-bruxelles.com/
+REV: 275,65
+...
+Principais dificuldades: 0
+
+DIA: 13/06/2026
+LOJA: https://outra-loja.com/
+REV: 540,20
+...
+Principais dificuldades: 0
+```
+
+## Relatório visual (cartão em popup, para print)
+
+> Além do texto, um botão **"Report"** em cada loja abre um **popup/modal** com o relatório em formato visual — pronto para tirar print ou fazer **Download** (imagem/PDF). Referência de estilo: `assets/ref-daily-report-card.png`.
+
+**Como funciona:**
+
+* Clicar em **"Report"** (na linha da loja ou no dashboard da loja) abre o popup desse dia.
+* O cartão segue o **design system** (clean, flat, sem gradientes): cabeçalho com **logótipo + utilizador + nome da loja + data**, e um botão **Download** no canto.
+* **Cartões de KPI** no topo com os teus dados: pode mostrar tanto os de marketing (Spend, Revenue, ROAS, Impressões, Cliques, CTR) como os do teu template (REV, REFUNDS, ADSPEND, PROFIT, ATC%, Reached Checkout%, CVR%, CPC, CTR, CPM).
+* **Gráfico "Performance por hora"** (spend/revenue ao longo do dia) — útil para ver os picos.
+* **Secção de notas** com os campos manuais (produtos/coleções testadas, próxima coleção, best-seller, OBS, dificuldades).
+* **Marca de geração** ("Gerado a 14 Jun, 01:00") no rodapé.
+
+**Exportar o cartão:**
+
+* **Download como imagem (PNG)** ou **PDF** — ideal para print/partilha.
+* **Copiar imagem** para colar diretamente.
+* **Um cartão por loja** (gerar em lote para todas as lojas do dia).
+* Selecionar **qualquer dia** (histórico permanente).
+
+**Dois modos de exportação do relatório diário (à escolha):**
+
+1. **Texto** (o template `DIA / LOJA / REV / ...`) — copiar/TXT.
+2. **Cartão visual** (popup) — print / PNG / PDF.
+
+---
+
+# Multi-utilizador, Equipas e Acessos
+
+> Cada utilizador tem os seus próprios dados isolados, e pode partilhar lojas específicas com outras pessoas (só leitura ou para gerir em conjunto).
+
+## Vários workspaces por utilizador (e troca de workspace)
+
+> Uma pessoa pode ter **vários workspaces** e **escolher qual está a ver** a qualquer momento. Um workspace é um "espaço" que agrupa lojas — pode ser para as **tuas próprias** lojas, ou para **acompanhar as lojas de outra pessoa**.
+
+* **Ao criar conta**, é criado automaticamente o **primeiro workspace** (ex.: "As minhas lojas") — para as tuas lojas.
+* Podes **criar mais workspaces** com o nome que quiseres (ex.: "Cliente X", "Agência", "Projeto da Maria"), para separar contextos.
+* **Seletor de workspace** (workspace switcher) no topo da app: trocas de workspace e **tudo muda** para esse contexto — lojas, dashboard, payouts, tesouraria, notas. Os dados de cada workspace **nunca se misturam**.
+* Cada workspace tem o **seu seletor de lojas** (consolidado vs uma loja), independente dos outros.
+* A **faturação/plano** é por workspace (cada workspace tem o seu plano), o que encaixa no modelo SaaS — um workspace de agência pode ter um plano superior.
+
+### Convites e a que workspace ficam associados
+
+> Quando alguém te convida para ver/editar **X lojas** do workspace dele, **tu escolhes a que workspace teu queres associar esse acesso** — ou usas um workspace dedicado só para isso.
+
+* Um **convite** liga a **tua conta (user)** a um **workspace de outra pessoa** com um papel e um conjunto de lojas (ver `memberships`).
+* No teu seletor de workspace passam a aparecer **dois tipos**:
+  * **Workspaces teus** (és Owner) — as tuas lojas.
+  * **Workspaces partilhados contigo** (foste convidado) — as lojas de alguém, com o papel/lojas que te deram.
+* Ou seja: podes ter um workspace **só para acompanhar as lojas de um cliente/amigo** e outro **para as tuas**, e alternar entre eles com um clique.
+* Ao aceitar um convite, escolhes como o queres ver: como **workspace partilhado próprio** (aparece com o nome que o dono definiu) — o acesso é sempre limitado às lojas e ao papel que te atribuíram.
+* O contrário também vale: quando **tu** convidas alguém para o **teu** workspace, essa pessoa associa o acesso ao espaço dela; tu continuas dono das lojas e podes alterar papel/lojas ou revogar a qualquer momento.
+
+> Modelo de dados: **users ⇄ memberships ⇄ workspaces** (N:N). Um user tem N memberships; cada membership = (userId, workspaceId, papel, lojas permitidas). O workspace ativo guarda-se na sessão/preferências do user.
+
+## Isolamento de dados por utilizador (multi-tenant)
+
+* Cada conta tem o seu **workspace** próprio; os dados **nunca se misturam** entre utilizadores.
+* Todos os documentos (orders, products, ads, payouts, notas...) têm `workspaceId` e **todas as queries são obrigatoriamente filtradas por workspace** (isolamento lógico forçado no backend).
+* **Estratégia de isolamento** (a escolher na implementação):
+  * **Base de dados / schema por utilizador** — cada cliente tem a sua própria BD ("a sua própria bd sem misturar"), isolamento físico máximo. Ideal para clientes que exigem separação total.
+  * **Isolamento lógico** com `workspaceId` em todos os documentos + verificação em cada pedido — mais simples de escalar.
+  * Modelo recomendado: **híbrido** — isolamento lógico por defeito, com opção de **BD dedicada** para planos superiores/agências.
+* Encriptação e backups separados por tenant; um utilizador nunca consegue, por nenhuma via, ver dados de outro.
+
+## Papéis (roles)
+
+| Papel | Pode fazer |
+|---|---|
+| **Owner** | Tudo: faturação, **gerir membros** (só o owner altera/remove acessos), ligar/remover lojas e contas de ads |
+| **Admin / Gestor** | Gerir lojas, custos, notas e configurações (sem faturação nem gerir membros) |
+| **Editor** | Editar dados operacionais (COGS, notas) das lojas a que tem acesso |
+| **Viewer (só leitura)** | Apenas **visualizar** os dashboards das lojas autorizadas |
+
+## Acessos só de leitura (com lojas à escolha)
+
+> Criar credenciais de acesso só para alguém **ver** os dados, e escolheres exatamente que lojas essa pessoa vê.
+
+* Criar um utilizador **Viewer** e **selecionar quais as lojas** que ele pode ver (acesso por loja, não tudo).
+* O Viewer **não pode editar nada** nem ver lojas fora da sua lista.
+* Pode-se limitar ainda mais o que vê (ex.: esconder lucro/custos e mostrar só revenue) — **permissões por tipo de dado**, opcional.
+* **Acesso temporário** com data de expiração e **revogação a qualquer momento**.
+* Alternativa rápida: **link de partilha só-leitura** de um dashboard específico (com password/expiração).
+
+## Convidar pessoas para gerir em conjunto
+
+> Convidar amigos/sócios para verem ou gerirem as lojas contigo. Em cada convite escolhes **duas coisas**: o **nível de acesso** e **que lojas**.
+
+### Passo 1 — Nível de acesso (papel)
+
+* **Viewer (só ver)** — apenas consulta os dashboards. Não altera nada.
+* **Editor** — vê e **edita dados operacionais** (COGS, notas, custos) das lojas a que tem acesso.
+* **Admin** — gere lojas, configurações e custos (não mexe na faturação nem remove o dono).
+* (**Owner** — só tu; controlo total, incluindo faturação e gerir membros.)
+
+### Passo 2 — Que lojas
+
+* **Todas as lojas** (acesso global), ou
+* **Apenas algumas** — escolhes da lista exatamente quais (ex.: dás acesso só à "Loja A" e "Loja C").
+* O membro **não vê nem sabe** que existem as outras lojas.
+
+### Exemplos
+
+| Pessoa | Papel | Lojas | Resultado |
+|---|---|---|---|
+| Contabilista | Viewer | Todas | Vê tudo, não edita nada |
+| Sócio | Admin | Todas | Gere tudo contigo |
+| Gestor de tráfego | Editor | Loja A | Edita só a Loja A |
+| Amigo | Viewer | Loja B | Só vê a Loja B |
+
+### Como funciona
+
+* **Convite por email ou link** já com o papel e as lojas definidos.
+* O convidado **cria a própria conta/login** (com 2FA) e entra no workspace partilhado.
+* Gestão de membros **só pelo proprietário**: alterar o papel, mudar as lojas ou remover o acesso. O proprietário não pode ser removido nem alterado por outros; só se gerem membros com cargo **inferior** (admin, editor, viewer).
+* **Acesso temporário** opcional (com data de expiração).
+* (Opcional) limitar o que um Viewer vê — ex.: esconder lucro/custos e mostrar só revenue.
+* **Log de auditoria** por membro (quem viu/alterou o quê e quando).
+* **Feed de atividade da equipa**: timeline do que cada membro fez (ligou loja, editou COGS, escreveu nota, exportou), para acompanhares o trabalho conjunto.
+* Nada de passwords partilhadas: cada pessoa tem as suas próprias credenciais.
+
+---
+
+# Histórico Permanente
+
+> Os dados são teus. Nunca dependes da retenção da plataforma.
+
+* Dados permanecem guardados mesmo após **remover/arquivar uma loja**
+* **Loja arquivada = acesso total na mesma**: dashboards, top sellers (qualquer período), métricas e exportações continuam todos disponíveis
+* Métricas continuam acessíveis e comparáveis (ex.: comparar uma loja morta com uma atual)
+* Exportação continua disponível
+* **Snapshots diários imutáveis** das métricas — mesmo que a plataforma reescreva uma order, o histórico do que viste continua intacto
+* **Import histórico completo** ao ligar uma loja nova (puxa o passado disponível via API)
+* **Backups automáticos** da base de dados com retenção longa
+* **Soft delete** em vez de delete real (nada se apaga fisicamente sem confirmação dupla)
+
+---
+
+# Sistema de Alertas
+
+**Estado (implementado — `/alertas`):** lista activa com falhas de sync, sessões/funil, payouts, dias de ad spend em falta, COGS incompletos (30 dias) e lucro negativo de ontem. Links para a página relevante. Notificações push/email — por fazer.
+
+Detetar automaticamente e notificar (email / Telegram / Discord / push):
+
+* Queda de vendas
+* Aumento de refunds / chargebacks
+* Queda de conversão
+* **Margem de lucro abaixo do limite definido**
+* **Produto a vender com prejuízo (ROAS abaixo do breakeven)**
+* **Ad spend a subir sem revenue a acompanhar (MER a cair)**
+* **Risco de conta**: chargeback rate a aproximar-se do limite perigoso da Shopify/gateway (risco de suspensão)
+* Produtos sem stock
+* Falhas de sincronização
+* **COGS em falta** num produto que está a vender
+* Pico anormal (positivo) — também serve para escalar a tempo
+
+Configuração: limites (thresholds) e canais personalizáveis por utilizador e por loja.
+
+---
+
+# Sistema de Insights IA
+
+Resumos automáticos em linguagem natural, com base nos dados reais:
+
+* "Revenue caiu 23% comparado com ontem."
+* "Produto X aumentou 45% nas vendas mas a margem caiu para 8%."
+* "Conversão caiu após aumento do CPM no Meta."
+* "A loja A teve mais revenue, mas a loja B deu mais lucro real."
+* "3 produtos estão a vender abaixo do breakeven ROAS — considera ajustar o preço ou pausar."
+
+Funcionalidades:
+
+* **Resumo diário** automático ("Daily digest")
+* **Pergunta livre** ("Quanto lucrei esta semana com a loja B?") via chat sobre os teus dados
+* **Deteção de anomalias** (não só regras fixas, mas variações estatísticas fora do normal)
+
+---
+
+# Refunds, Chargebacks e Custos de Apps
+
+> Dinheiro que sai e estraga o lucro se não for contabilizado.
+
+## Refunds
+
+* **Total devolvido (€)** e **Refund Rate (%)** por loja, produto e período
+* Origem via webhook `refund/created` da plataforma
+* Distinguir reembolso parcial vs total
+* Impacto direto no Net Profit (subtrai ao revenue)
+
+## Chargebacks (disputas)
+
+* **Total em chargebacks (€)** e **Chargeback Rate (%)**
+* **Taxa de chargeback** cobrada pelo gateway (ex.: 15€ por disputa) também contabilizada como custo
+* Alerta quando a taxa de chargeback se aproxima do limite perigoso do gateway (risco de suspensão da conta)
+
+## Custos de Apps, Subscrições e Gastos Adicionais
+
+> Tudo o que gastas além de produto/ads/taxas — e que tem de entrar no lucro real.
+
+* Registar **qualquer gasto**: apps Shopify (reviews, upsell, tema), **subscrições de IA** (ex.: ChatGPT, Midjourney, ferramentas de criativos), ferramentas de espionagem, email marketing, domínios, freelancers, etc.
+* Cada gasto tem: **nome, categoria, valor, frequência (mensal / anual / pontual)** e se é **da conta (workspace)** ou **de uma loja específica**.
+* **Gastos recorrentes**: defines uma vez (ex.: "ChatGPT 20€/mês") e a app **aplica automaticamente todos os meses** sem teres de voltar a inserir.
+* **Rateio automático** no lucro (o custo mensal é repartido pelos dias / orders) para o lucro real e a margem refletirem sempre estes custos fixos.
+* Marcar **início e fim** de uma subscrição (para parar de contar quando cancelas).
+* Vista **"para onde vai o meu dinheiro"** por mês: gráfico de todos os gastos por categoria (ads, COGS, taxas, apps, IA, fixos).
+
+---
+
+# Taxas e Custos de Transação
+
+> Saber exatamente quanto estás a perder em taxas, de onde vêm, e o lucro que sobra depois delas.
+
+## Que taxas a app contabiliza
+
+| Taxa | O que é | Fonte |
+|---|---|---|
+| **Taxa de processamento Shopify Payments** | % + valor fixo por venda (ex.: 1,9% + 0,25€) | Shopify Payments / Balance transactions API |
+| **Transaction fee da Shopify** | Taxa extra se usares gateway externo (ex.: 0,5–2%) | Definição do plano da loja |
+| **Taxas de gateway externo** | Stripe / PayPal (% + fixo por transação) | Stripe / PayPal API |
+| **Conversão de moeda** | Taxa quando a venda é noutra moeda | Balance transactions |
+| **Taxa de payout / saque** | Custo de transferência para o banco (se aplicável) | Payouts API |
+| **Taxa de chargeback** | Custo fixo por disputa | Gateway |
+| **Reembolso de taxas** | Taxas que (não) são devolvidas num refund | Gateway |
+
+## O que mostra
+
+* **Total perdido em taxas (€)** no período, por loja e consolidado.
+* **Taxa efetiva (%)** sobre o revenue ("de cada 100€ vendidos, X€ vão em taxas").
+* **Repartição das taxas** por tipo (processamento vs transaction fee vs conversão vs chargeback) — gráfico para veres onde dói mais.
+* **Custo de taxa por order** (médio).
+* **Comparação entre lojas**: que loja tem a estrutura de taxas mais cara.
+* Linha clara no **waterfall do lucro**: Revenue → … → **− Taxas** → Net Profit.
+
+## Lucro real depois das taxas
+
+```
+Lucro após taxas =
+   Revenue
+ − COGS − Envio
+ − TODAS as taxas de transação (processamento + transaction fee + conversão + payout + chargeback)
+ − Ad Spend
+ − Refunds
+ − Apps / custos fixos
+ = Net Profit
+```
+
+* Os valores de taxa são **reais** (vindos das *balance transactions* da Shopify/Stripe), não estimados — para o lucro ser exato.
+* Para gateways sem API de taxas, permitir **definir uma % estimada** por loja como fallback (claramente marcado como "estimado").
+
+## Organização e usabilidade
+
+> Tudo organizado, fluido e fácil de trabalhar.
+
+* Cada métrica é **clicável** para fazer drill-down (ex.: clicar em "Taxas" abre a repartição; clicar numa order vê as taxas dessa order).
+* Mudar de **período** ou de **loja** recalcula tudo instantaneamente (dados pré-agregados).
+* Layout consistente: KPIs em cima, gráficos no meio, tabela detalhada em baixo.
+* Tudo exportável (a tabela de taxas vai para o CSV/Excel do P&L).
+
+---
+
+# Payouts — Quanto e Quando Vou Receber (por loja)
+
+> Saber o dinheiro que a Shopify (Shopify Payments) ainda te deve e a data em que cai na conta, loja a loja.
+
+## O que mostra
+
+* **Saldo a receber por loja** — total ainda não pago (pending).
+* **Próximo payout**: valor e **data prevista** de pagamento.
+* **Payouts futuros agendados** (calendário de quando cada montante chega).
+* **A caminho (in transit)** — já enviado pela Shopify, ainda não na conta.
+* **Histórico de payouts** já recebidos (data, valor, estado).
+* **Vista consolidada**: somatório de tudo o que vais receber de **todas as lojas**, com timeline ("esta semana vais receber X, na próxima Y").
+* **Multi-moeda**: lojas em moedas diferentes são convertidas para a moeda base, mantendo também o valor na moeda original do payout.
+
+## Detalhe de cada payout
+
+* Valor bruto, **taxas da Shopify Payments deduzidas**, valor líquido.
+* Repartição: vendas, reembolsos, chargebacks e ajustes incluídos nesse payout.
+* Moeda do payout (convertida para a moeda base).
+
+## Fonte dos dados
+
+* **Shopify Payments — Payouts API / Balance API** (`shopify_payments/balance`, `shopify_payments/payouts`).
+* Sincronização diária + refresh manual.
+* Funciona para lojas com **Shopify Payments**; para outros gateways (PayPal/Stripe), mostrar saldo via a respetiva API quando ligada.
+
+## Onde aparece
+
+* Widget **"A receber"** no dashboard de cada loja e no consolidado.
+* Coluna opcional na tabela comparativa multi-loja.
+* Alerta opcional quando um payout é pago ("recebeste X da Loja A hoje").
+
+> Nota: payout ≠ lucro. O payout é o **dinheiro que entra na conta** (cashflow); o lucro real é depois de todos os custos. A app mostra os dois separadamente para não confundires caixa com lucro.
+
+---
+
+# Saúde Financeira do Negócio (Dashboard)
+
+> Um ecrã que responde a "o meu negócio está saudável?" e "o que está a prejudicar-me?".
+
+## Score de saúde
+
+* **Indicador de saúde** (verde / amarelo / vermelho) baseado em: margem líquida, refund rate, chargeback rate, POAS e tesouraria.
+* Comparado com **benchmarks-alvo configuráveis** (ex.: margem líquida 15–25%, refund < 5%, chargeback < 1%, POAS > 1).
+* Tendência: a saúde está a melhorar ou a piorar vs período anterior.
+
+## O que está a prejudicar (diagnóstico automático)
+
+> A app diz-te onde está o problema, não só os números.
+
+* **Repartição dos custos** (waterfall / gráfico): quanto do revenue vai em **COGS, taxas, ads, refunds, chargebacks, apps/subscrições, fixos** — e qual pesa mais.
+* **Maior dreno do lucro**: "O que mais corta o teu lucro este mês é o COGS (42%)" ou "as taxas de transação subiram para X%".
+* **Por loja**: que loja está a puxar o resultado para baixo (margem negativa, refunds altos, ads ineficientes).
+* **Por produto**: produtos a vender com prejuízo.
+* **Alertas de tendência**: "refund rate subiu 3% esta semana", "COGS médio aumentou (custo do fornecedor mudou?)".
+
+## Comparação rápida e clara
+
+* **Lucro por loja** lado a lado, ordenado.
+* **Saudável vs problemático**: lojas/produtos marcados a verde/vermelho segundo os alvos.
+
+---
+
+# Tesouraria — "Tenho dinheiro ou não?"
+
+> Saber, com exatidão, o dinheiro disponível vs o que está preso e o que tens a pagar. (Requisito: tem de estar 100% certo.)
+
+> **A tesouraria é por loja, não global.** Cada loja tem o seu próprio caixa (payouts da Shopify, saldo inicial, fornecedores e gastos dessa loja). A pergunta "tenho € ou não?" responde-se **por loja**. Existe também uma vista consolidada opcional (soma das lojas), mas a unidade de decisão é a loja.
+
+## Vista de caixa
+
+* **Disponível agora** (já recebido) vs **a caminho** (payouts in transit) vs **agendado** (futuros payouts).
+* **A pagar**: ad spend planeado dos próximos dias + subscrições/apps que vão debitar + custos previstos.
+* **Saldo projetado**: "depois de pagar os ads e as subscrições desta semana, ficas com X".
+* **Gap de tesouraria**: aviso se o dinheiro disponível não chega para o spend planeado (o erro nº1 ao escalar).
+
+## Lucro provisório vs consolidado
+
+* **Provisório**: lucro do dia/semana com os dados atuais.
+* **Consolidado**: depois da **janela de refunds/chargebacks** (ex.: 14–30 dias), o lucro real "fechado".
+* Evita a falsa sensação de lucro que desaparece com reembolsos atrasados.
+
+> Distinção sempre visível: **caixa (dinheiro que tens) ≠ lucro (depois de todos os custos)**.
+
+## Como funciona sem o banco ligado
+
+> A app **não lê a tua conta bancária**. Calcula a tesouraria com os dados que tem (que são fiáveis) + alguns valores que defines à mão. É uma **projeção do fluxo de caixa**, não o saldo do banco.
+
+**O que a app já sabe (automático):**
+
+* **A entrar (real, da Shopify)**: payouts recebidos, a caminho e agendados.
+* **A sair (que conhece)**: ad spend (das APIs de ads) + subscrições/apps + custos registados.
+
+**O que defines à mão para ficar exato:**
+
+* **Saldo inicial (cash on hand) por loja** — defines, **em cada loja**, quanto tens nessa data; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria (saldo + data).
+* **Contas a pagar a fornecedores** — quanto e quando pagas o produto (AliExpress/CJ/etc.), para a saída de caixa ser real. (Em dropshipping é o que mais mexe no caixa.)
+* **Reserva para impostos/IVA** — defines uma % a separar; a app guarda esse valor à parte e mostra o caixa "limpo".
+* Ajustes pontuais (entradas/saídas manuais).
+
+**Resultado:**
+
+* **Cash runway**: "com este ritmo de gastos, tens ~X semanas de pista."
+* **Saldo projetado** dia a dia (com o que entra de payouts e o que sai de ads, fornecedores e subscrições).
+* Aviso de **gap de tesouraria** antes de te faltar dinheiro a meio de um scale.
+
+> Nota: por agora a fonte de dinheiro é a **Shopify**. Ligar conta bancária (open banking) ou Stripe/PayPal fica como possível evolução futura, não está no âmbito atual.
+
+---
+
+# Apoio à Decisão
+
+> A app sugere o que fazer, com base nos dados.
+
+## Resumo "O que fazer hoje"
+
+* No topo do dashboard, **3 ações prioritárias** geradas automaticamente, ex.:
+  * "Produto X passou o BER com margem saudável — considera escalar."
+  * "Loja B com refund rate a subir — verifica o produto Y."
+  * "Tesouraria apertada — evita aumentar budget esta semana."
+
+## Semáforo Kill / Scale / Manter
+
+* Por **produto** e por **criativo/campanha**, com regras configuráveis:
+  * **Kill**: gastaste ~2–3x o preço do produto sem vendas, ou ROAS < BER de forma consistente.
+  * **Scale**: ROAS acima do BER + margem saudável + tendência positiva.
+  * **Manter**: dentro do intervalo aceitável.
+* Usa **média móvel de 3–7 dias** (não reage a ruído de 1 dia só).
+
+## Recomendação de budget
+
+* Sugerir subir/baixar o budget por campanha com base em **POAS e BER**.
+* Cruzar com a **tesouraria** (não recomendar escalar se não há dinheiro).
+
+## Fechar o ciclo de decisão
+
+* Ligas o scale na **nota diária** → a app mostra o **impacto 3 dias depois** (vendeu mais? deu lucro?).
+* Histórico de decisões e resultados para aprenderes o que funciona.
+
+---
+
+# Glossário de Métricas (todas as métricas)
+
+> Todas as métricas importantes que a app calcula e mostra.
+
+## Financeiras
+
+| Métrica | Definição |
+|---|---|
+| **Revenue (bruto)** | Total vendido antes de custos |
+| **Net Revenue** | Revenue − refunds − descontos |
+| **COGS** | Custo dos produtos vendidos |
+| **Gross Profit** | Revenue − COGS − envio |
+| **Net Profit (lucro real)** | Depois de TODOS os custos (COGS, envio, ads, taxas, refunds, chargebacks, apps, impostos) |
+| **Margem bruta (%)** | Gross Profit / Revenue |
+| **Margem líquida (%)** | Net Profit / Revenue |
+| **Margem de contribuição** | (Preço − custos variáveis) / Preço |
+
+## Marketing / Ads
+
+| Métrica | Definição |
+|---|---|
+| **Ad Spend** | Total gasto em ads (Meta + Google + TikTok) |
+| **ROAS** | Revenue / Ad Spend |
+| **POAS** | Net Profit / Ad Spend (mais honesto para dropshipping) |
+| **MER** | Revenue total / Ad Spend total (eficiência global) |
+| **BER (Break-Even ROAS)** | ROAS mínimo para não dar prejuízo |
+| **CAC** | Custo de aquisição por cliente |
+| **CPM / CPC / CTR** | Custo por mil impressões / por clique / taxa de clique |
+| **CPP** | Custo por compra |
+
+## Vendas / Clientes
+
+| Métrica | Definição |
+|---|---|
+| **Orders** | Nº de encomendas |
+| **AOV** | Valor médio por encomenda |
+| **Conversion Rate** | Vendas / visitas |
+| **Refund Rate** | Reembolsos / vendas |
+| **Chargeback Rate** | Disputas / vendas |
+| **LTV** | Valor total que um cliente gera ao longo do tempo |
+| **LTV:CAC** | Relação entre valor do cliente e custo de o adquirir |
+| **Repeat Rate** | % de clientes recorrentes |
+| **Novos vs recorrentes** | Repartição da receita |
+
+## Operacionais
+
+| Métrica | Definição |
+|---|---|
+| **Produtos sem vendas** | Candidatos a remover |
+| **Produtos com prejuízo** | Margem negativa |
+| **Stock baixo / esgotado** | Risco de quebra de vendas |
+| **Estado de sincronização** | Saúde das ligações (lojas + ads) |
+
+---
+
+# Exportações
+
+> Sim — podes exportar **os dados que quiseres, como quiseres**: escolher o que exportar, que colunas, que período e que lojas. Funciona para lojas ativas **e arquivadas**.
+
+## Como funciona (exportação flexível)
+
+* **Escolher o que exportar**: Orders, Products/Top sellers, Customers, Ad spend, Payouts, Taxas, Métricas diárias, P&L.
+* **Escolher o período**: dia, semana, mês, trimestre, ano, **intervalo personalizado** ou **a partir de um dia X até hoje** (ex.: "exporta tudo desde 01/03/2026").
+* **Escolher as lojas**: uma, várias ou todas (consolidado).
+* **Escolher as colunas** que aparecem e a ordem.
+* **Granularidade**: linha a linha (cada order) ou agregado (por dia / por mês / por ano).
+
+## Excel (.xlsx)
+
+* Exportar **qualquer dataset** acima com os filtros escolhidos.
+* **Relatório completo multi-loja** num só ficheiro (uma folha por loja + folha de resumo).
+* **P&L (demonstração de resultados)** por loja e consolidado, por mês ou por ano.
+* Números já formatados (moeda base) e prontos a trabalhar.
+
+## CSV
+
+* Orders, Products (com COGS e margem), Customers, Ad spend, Métricas / P&L — com os mesmos filtros de período/lojas/colunas.
+
+## PDF
+
+* Relatórios executivos (resumo do período com gráficos).
+
+## Outros
+
+* **Relatórios agendados** (envio automático por email todas as semanas/meses).
+* **Exportações guardadas** (gravar um modelo de exportação para repetir com 1 clique).
+* Acesso via **API própria** para integrar com outras ferramentas.
+
+---
+
+# Estrutura MongoDB
+
+> Notas gerais: usar `index` em `storeId`, `createdAt` e campos de filtro. Guardar sempre `currency` e o valor convertido na moeda base. Usar **soft delete** (`deletedAt`).
+
+## workspaces
+
+> Espaço isolado de um cliente. Todos os dados pertencem a um workspace e nunca se misturam.
+
+* `_id`
+* `name`
+* `baseCurrency`
+* `ownerId`
+* `isolationMode` (logical / dedicated_db)
+* `dbName` (quando `dedicated_db` — base de dados própria do tenant)
+* `plan` (free / starter / pro / agency)
+* `targets` (alvos/benchmarks de saúde: `netMarginMin`, `refundRateMax`, `chargebackRateMax`, `poasMin`)
+* `refundWindowDays` (janela para o lucro consolidado, ex.: 30)
+* `taxReservePercent` (% a separar para impostos/IVA — política global aplicada à tesouraria de cada loja)
+* `createdAt`
+
+> Nota: o **saldo inicial de caixa é por loja** (`stores.startingBalance` / `startingBalanceDate`), não no workspace.
+
+## users
+
+> Conta global (uma pessoa). Pode pertencer a vários workspaces através de `memberships`.
+
+* `_id`
+* `email`
+* `passwordHash` (Argon2)
+* `name`
+* `twoFactorEnabled`
+* `twoFactorSecret` (encriptado)
+* `createdAt`
+
+## memberships
+
+> Liga um utilizador a um workspace, com papel e lojas a que tem acesso.
+
+* `_id`
+* `userId`
+* `workspaceId`
+* `role` (owner / admin / editor / viewer)
+* `storeAccess` ("all" ou array de `storeId` permitidos)
+* `dataScope` (opcional: campos visíveis, ex.: esconder custos/lucro)
+* `expiresAt` (opcional — acesso temporário)
+* `status` (active / revoked)
+* `createdAt`
+
+## invitations
+
+> Convites para juntar pessoas ao workspace.
+
+* `_id`
+* `workspaceId`
+* `email`
+* `role`
+* `storeAccess` ("all" ou array de `storeId`)
+* `token` (único, para o link de convite)
+* `status` (pending / accepted / expired / revoked)
+* `invitedBy` (userId)
+* `expiresAt`
+* `createdAt`
+
+## stores
+
+* `_id`
+* `workspaceId`
+* `name`
+* `platform`
+* `status` (active / paused / archived)
+* `currency`
+* `groupTags` (array)
+* `shopDomain` (`xxx.myshopify.com` — ligação API Shopify, nunca mostrado na dashboard)
+* `displayUrl` (domínio público `.com` — título da dashboard, listagens e campo LOJA dos reports)
+* `credentials` (encriptado AES-256-GCM — Shopify: `clientId`, `clientSecret`. Token obtido on-demand via client credentials, não persistido. **Nunca em texto simples**)
+* `scopes` (array de permissões concedidas)
+* `feeConfig` (taxas estimadas de fallback: `processingPercent`, `processingFixed`, `transactionFeePercent`)
+* `startingBalance` (saldo inicial de caixa **desta loja**, definido manualmente — tesouraria por loja)
+* `startingBalanceDate` (data a que se refere o saldo inicial)
+* `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
+* `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
+* `paymentsBalance` / `paymentsBalanceUpdatedAt` (saldo Shopify Payments ainda por pagar)
+* `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — intervalo automático **global** 4 h (`GLOBAL_SYNC_INTERVAL_MINUTES`, `vercel.json` cron); `syncIntervalMinutes` legado na BD
+* `lastSyncAt`
+* `createdAt`
+* `deletedAt`
+
+## session_metrics_months
+
+Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e comprimidas** — um documento por loja/mês/país.
+
+* `_id`
+* `storeId`
+* `monthKey` (YYYY-MM)
+* `countryKey` (ISO 2 letras, ex. `BE`, ou `""` = todos os países)
+* `blob` (gzip de tuplas `[dia, sessões, cart, checkout, concluídas]`)
+* `updatedAt`
+
+> A dashboard **nunca** pede sessões à Shopify em tempo real. Só o sync (manual ou cron 4 h) preenche dias em falta; dias históricos já guardados não são re-pedidos. COGS, orders e ad spend continuam a calcular-se em tempo real a partir da BD.
+
+## orders
+
+* `_id`
+* `storeId`
+* `orderId`
+* `customerId`
+* `products` (array: productId, variant, qty, price, **cogsAtSale**, shippingCostAtSale)
+* `subtotal`
+* `discounts`
+* `shipping`
+* `taxes`
+* `total`
+* `currency`
+* `totalBaseCurrency`
+* `fees` (objeto: `processing`, `transactionFee`, `currencyConversion`, `total`)
+* `feesSource` (real / estimated)
+* `refundedAmount`
+* `financialStatus`
+* `country`
+* `createdAt`
+
+## products
+
+* `_id`
+* `storeId`
+* `productId`
+* `title`
+* `variants` (array)
+* `price`
+* `cogs` (custo atual)
+* `cogsSource` (shopify / manual / csv / supplier)
+* `shippingCost`
+* `stock`
+* `status`
+* `supplier`
+
+## cogsHistory
+
+> Histórico de custos para calcular o lucro correto de orders antigas.
+
+* `_id`
+* `productId`
+* `variantId`
+* `cogs`
+* `shippingCost`
+* `effectiveFrom`
+* `effectiveTo`
+
+## customers
+
+* `_id`
+* `storeId`
+* `customerId`
+* `email`
+* `totalSpent`
+* `orderCount`
+* `firstOrderAt`
+* `ltv`
+
+## adAccounts
+
+> Contas de ads ligadas. Uma loja pode ter várias (Meta + Google + TikTok, ou várias da mesma plataforma).
+
+* `_id`
+* `storeId` (ou array de storeIds com % de alocação se a conta servir várias lojas)
+* `platform` (meta / google / tiktok)
+* `externalAccountId` (Meta: `act_<id>` / Google: customer ID 10 dígitos / TikTok: advertiser id)
+* `accountName`
+* `credentials` (encriptado AES-256-GCM — Meta: `accessToken` (system user); Google: `clientId`, `clientSecret`, `refreshToken`, `developerToken`, `loginCustomerId`; TikTok: `accessToken`)
+* `allocation` (% do spend atribuído a esta loja, default 100%)
+* `status` (active / error / disconnected)
+* `lastSyncAt`
+* `createdAt`
+
+## adSpend
+
+> Gasto em ads por dia e por conta/plataforma, para o cálculo do lucro real.
+
+* `_id`
+* `storeId`
+* `adAccountId`
+* `platform` (meta / tiktok / google)
+* `campaignId`
+* `campaignName`
+* `date`
+* `spend`
+* `impressions`
+* `clicks`
+* `conversions`
+* `currency`
+* `spendBaseCurrency`
+
+> Guardado ao nível de **campanha + dia**. Os totais por plataforma e por loja são agregados a partir daqui, o que permite tanto a **média por campanha** como o **total (full)** no relatório diário.
+
+## manualAdSpend
+
+> Total diário introduzido à mão por loja (quando não há API ou como fallback).
+
+* `_id`
+* `workspaceId`
+* `storeId`
+* `dateKey` (YYYY-MM-DD)
+* `amount` (na moeda base do workspace — entra no lucro)
+* `currency` (moeda base, ex. EUR)
+* `inputAmount` / `inputCurrency` (valor original, ex. USD da conta Meta)
+* `extraFee` / `inputExtraFee` (fee extra opcional, mesma moeda do input — converte e soma ao total do dia no lucro)
+* `source` (`manual` / `api`)
+* `note` (opcional)
+
+> Na entrada manual, o utilizador escolhe USD/EUR/GBP; a app converte para a moeda base com taxa histórica (Frankfurter/ECB) do dia do gasto. Sync API: só reescreve **hoje**; `dateKey < hoje` nunca é tocado pelo sync automático.
+
+## expenses
+
+> Custos fixos / apps / subscrições / taxas de chargeback.
+
+* `_id`
+* `workspaceId` (gasto da conta) ou `storeId` (gasto de uma loja)
+* `name`
+* `category` (app / ferramenta / ia / dominio / salario / freelancer / chargeback-fee / outro)
+* `amount`
+* `frequency` (one-time / monthly / yearly)
+* `recurring` (boolean — aplicado automaticamente todos os períodos)
+* `startDate`
+* `endDate` (opcional — quando cancelas a subscrição)
+* `currency`
+
+## cashEntries
+
+> Movimentos de caixa definidos manualmente, para a tesouraria ser exata sem ligar o banco.
+
+* `_id`
+* `workspaceId`
+* `type` (supplier_payable / manual_in / manual_out / adjustment)
+* `storeId` (opcional)
+* `description`
+* `amount`
+* `currency`
+* `dueDate` (quando o dinheiro sai/entra — ex.: data de pagamento ao fornecedor)
+* `paid` (boolean)
+* `createdAt`
+
+## dailyNotes
+
+> Notas diárias / diário de operação (scale, mudanças, observações).
+
+* `_id`
+* `workspaceId`
+* `storeId` (opcional — null = nota global)
+* `date`
+* `didScale` (boolean)
+* `budgetChange` (valor da alteração de budget, opcional)
+* `changeTags` (array: novo-criativo, mudança-preço, novo-produto, novo-publico, pausei-campanha, nova-oferta, ...)
+* `text`
+* `mood` (good / bad / neutral, opcional)
+* `attachments` (array de URLs)
+* `reportFields` (campos manuais do relatório diário: `productsTested`, `collectionsTested`, `collectionsTestedList`, `nextCollection`, `bestSellerCollection`, `dayNumber`, `difficulties`, `obs`)
+* `createdAt`
+
+## dailyMetrics
+
+> Snapshot imutável por loja e por dia (histórico permanente).
+
+* `_id`
+* `storeId`
+* `date`
+* `revenue`
+* `orders`
+* `customers`
+* `cogs`
+* `shippingCost`
+* `adSpend`
+* `adSpendByPlatform` (meta / google / tiktok)
+* `fees` (objeto: processing / transactionFee / currencyConversion / payout / chargeback)
+* `feesTotal`
+* `effectiveFeeRate` (% sobre o revenue)
+* `refunds`
+* `chargebacks`
+* `appCosts`
+* `netProfit`
+* `margin`
+* `roas`
+* `poas`
+* `mer`
+* `ber`
+
+## payouts
+
+> Pagamentos da Shopify Payments (ou outro gateway) por loja — quanto e quando recebes.
+
+* `_id`
+* `storeId`
+* `provider` (shopify_payments / stripe / paypal)
+* `payoutId`
+* `status` (scheduled / in_transit / paid / failed)
+* `amountGross`
+* `fees`
+* `amountNet`
+* `currency`
+* `amountNetBaseCurrency`
+* `expectedAt` (data prevista de pagamento)
+* `paidAt`
+* `breakdown` (vendas / refunds / chargebacks / ajustes)
+* `createdAt`
+
+## syncLogs
+
+* `_id`
+* `storeId`
+* `type` (initial / incremental / webhook)
+* `status`
+* `recordsProcessed`
+* `error`
+* `startedAt`
+* `finishedAt`
+
+---
+
+# Segurança (prioridade máxima)
+
+> A app guarda tokens de lojas e contas de ads e dados financeiros. A segurança é tratada como requisito de primeira classe, não como extra.
+
+## Autenticação e acesso
+
+* Autenticação forte com **sessões seguras** (cookies `httpOnly`, `Secure`, `SameSite`).
+* **2FA obrigatório** (TOTP) para contas com acesso a dados financeiros.
+* Política de **passwords fortes** + hashing com **Argon2** (ou bcrypt).
+* **RBAC** (owner / admin / viewer) e isolamento total de dados entre workspaces/tenants.
+* Bloqueio após tentativas falhadas e **rate limiting** no login.
+* Expiração e rotação de sessões; logout remoto de dispositivos.
+
+## Proteção de credenciais e segredos
+
+* **Encriptação em repouso** de todos os tokens OAuth (Shopify, Meta, Google) com **AES-256-GCM**; chaves geridas fora da DB (secret manager / variáveis de ambiente).
+* **Nunca** guardar API keys em texto simples nem em logs.
+* Segredos fora do código (`.env`, secret manager); nada commitado no repositório.
+* **Rotação de chaves** e reautenticação de contas quando os tokens expiram.
+
+## Comunicação e infraestrutura
+
+* **HTTPS/TLS** obrigatório em tudo; HSTS.
+* **Validação HMAC** das assinaturas de todos os webhooks (Shopify e outros).
+* **Rate limiting** e proteção contra abuso em todas as API Routes.
+* **WAF + Cloudflare** (proteção DDoS, bot mitigation).
+* Headers de segurança: **CSP**, X-Frame-Options, X-Content-Type-Options, Referrer-Policy.
+* Princípio do **menor privilégio** nos scopes pedidos a Shopify/Meta/Google (só o necessário, preferencialmente leitura).
+
+## Aplicação e dados
+
+* **Validação de input** com Zod em toda a entrada (evita injeção e dados malformados).
+* Proteção contra **CSRF, XSS e injeção** (queries parametrizadas, escape de output).
+* **Idempotência** no processamento de webhooks (evita duplicação/manipulação).
+* **Soft delete** + confirmação dupla; nada se apaga fisicamente por acidente.
+* **Backups encriptados** e testados (restore verificado), retenção longa.
+* **Logs de auditoria** imutáveis (quem fez o quê, quando, de que IP).
+
+## Processo e conformidade
+
+* Dependências verificadas (auditoria de vulnerabilidades, ex.: `npm audit`, Dependabot).
+* Secrets scanning no CI para impedir fugas.
+* **Princípios RGPD/GDPR**: minimização de dados, direito a exportar/apagar dados de clientes.
+* Ambiente de produção isolado do de desenvolvimento; acesso restrito à base de dados.
+
+---
+
+# Fluxo de Onboarding (ecrã a ecrã)
+
+> Nome: **ProfitPilot**. Onboarding curto, claro e mobile-first; passos opcionais podem ser saltados e feitos depois. Estética clean (sem emojis, sem gradientes).
+
+## 1. Criar conta / Entrar
+
+* Email + password (regras de password forte). Opção de login social mais tarde.
+* **Ativar 2FA** (TOTP) — passo recomendado logo no registo para contas com dados financeiros.
+* Ecrã simples, centrado, logótipo no topo.
+
+## 2. Criar workspace
+
+* Nome do workspace (ex.: "As minhas lojas").
+* **Moeda base** (tudo será consolidado nesta moeda).
+* Fuso horário (para os cortes diários das métricas).
+
+## 3. Adicionar a primeira loja (Shopify)
+
+* Reaproveita o **Assistente "Adicionar Loja"** (guia passo-a-passo + lista de scopes com botão copiar).
+* Campos: Domínio, Client ID, Client Secret, Access token.
+* **Testar ligação** → feedback verde/vermelho.
+* Estado das permissões (verde = ok / vermelho = scope em falta).
+
+## 4. Importar histórico
+
+* Barra de progresso do import (orders, produtos, payouts).
+* Corre em segundo plano (BullMQ) — o utilizador pode continuar enquanto importa.
+* Resumo no fim: "Importadas X orders, Y produtos."
+
+## 5. Ligar contas de ads (opcional, saltável)
+
+* Botões "Ligar Meta", "Ligar Google Ads", "Ligar TikTok".
+* Escolher as ad accounts e associá-las à loja.
+* Aviso claro: "Sem isto, o lucro não inclui o gasto em ads."
+
+## 6. Configurar COGS
+
+* Mostra apenas produtos **vendidos sem custo** (não o catálogo completo).
+* Destaca o COGS em falta para preencher manualmente — com data «desde» para não alterar vendas passadas.
+* Pode saltar e fazer depois (banner de aviso enquanto faltar COGS nas vendas do período).
+
+## 7. Custos fixos e subscrições (opcional)
+
+* Adicionar gastos recorrentes (apps, IA, ferramentas) que entram no lucro.
+
+## 8. Convidar equipa
+
+* **Botão «Convidar membro»** em Definições → Equipa (só proprietário).
+* Escolher **email**, **papel** (admin / editor / viewer) e **lojas**:
+  * **Todas as lojas** — inclui lojas futuras automaticamente (`storeAccess: "all"`).
+  * **Lojas específicas** — só as seleccionadas; o membro não vê as outras.
+* O convidado vê um **alerta em Definições** (convites pendentes) para aceitar ou recusar.
+* Convites expiram ao fim de 14 dias; o proprietário pode revogar convites pendentes.
+* Ao aceitar, o workspace aparece no seletor de workspaces.
+* **Editar lojas** de membro já activo (botão «Editar» na coluna Lojas).
+
+* Reaproveita o fluxo de convite (papel + lojas). Saltável.
+
+## 9. Concluído → Dashboard
+
+* Mensagem curta de boas-vindas e entrada no **Dashboard Consolidado**.
+* Checklist de progresso visível (ex.: "Liga uma conta de ads para o lucro ficar completo").
+
+---
+
+# Estrutura da UI e Navegação
+
+> Layout consistente, denso mas legível, mobile-first. Tudo responsivo (telemóvel, tablet, desktop).
+
+## Navegação
+
+* **Desktop**: barra lateral fixa à esquerda com as secções; topo com seletor de loja/período e perfil.
+* **Telemóvel**: barra inferior com os itens principais (Dashboard, Lojas, Decisão, Mais) + menu para o resto.
+* **Seletor global** sempre acessível: lojas (todas / grupo / seleção) + período (com comparação).
+
+## Secções principais (menu)
+
+1. **Dashboard** — visão consolidada (KPIs, lucro, comparação loja a loja).
+2. **Lojas** — lista de lojas e dashboard individual de cada uma.
+3. **Lucro & Finanças** — lucro real, taxas, P&L, saúde financeira, tesouraria.
+4. **Payouts** — quanto e quando recebes.
+5. **Decisão** — "o que fazer hoje", kill/scale, recomendações.
+6. **Notas & Relatórios** — diário, relatório diário automático, exportações.
+7. **Anúncios** — ad spend por plataforma/campanha.
+8. **Definições** — lojas, contas de ads, custos, equipa/permissões, conta, faturação.
+
+## Padrões de ecrã
+
+* **Topo**: título + seletores + ação principal.
+* **Meio**: cartões de KPI (grelha que reflui no telemóvel) → gráficos → tabela detalhada.
+* **Tabelas**: ordenáveis, com scroll horizontal no telemóvel (ou viram cartões).
+* **Estados**: skeletons no loading, estado vazio com ação ("Adiciona a tua primeira loja"), e estado de erro claro.
+* **Cores**: neutras; verde/vermelho só para lucro/prejuízo e saúde.
+
+---
+
+# Mockups e Wireframes Detalhados
+
+> Referência visual da direção de design (clean, sem gradientes, verde/vermelho só para lucro/prejuízo). Ficheiros em `assets/`.
+
+## Dashboard Consolidado (desktop)
+
+![Dashboard consolidado](assets/mockup-dashboard-consolidado.png)
+
+* **Sidebar** (esquerda, fixa): Dashboard, Lojas, Lucro & Finanças, Payouts, Decisão, Notas, Anúncios, Definições.
+* **Top bar**: seletor de loja ("Todas as lojas"), seletor de período ("Últimos 30 dias"), avatar/perfil.
+* **Linha de KPIs**: Revenue, Net Profit, Margem %, Ad Spend, ROAS, MER — valor + variação (verde/vermelho) + sparkline.
+* **Gráfico** "Lucro líquido" ao longo do tempo.
+* **Tabela comparativa** loja a loja: Revenue, Lucro, Margem, Ad Spend, ROAS + sparkline; ordenável.
+* **Responsivo**: KPIs reflowem para 2 colunas/empilhados; tabela ganha scroll horizontal ou vira cartões.
+
+## Dashboard por Loja (desktop, dark mode)
+
+![Dashboard por loja](assets/mockup-dashboard-loja.png)
+
+* **Header**: URL público da loja + período (seletor na topbar).
+* **KPIs**: Net Profit, Margem %, ROAS, BER (com comparação ao período anterior).
+* **Waterfall "Para onde vai o dinheiro"**: Revenue → −COGS → −Envio → −Taxas → −Ad Spend → −Refunds → = Net Profit (barra final verde).
+* **Card "A receber (payout)"**: valor + data do próximo pagamento.
+* **Tabela "Produtos por lucro"**: vendas, margem (vermelho se negativa), lucro.
+
+## Métricas por loja (`/metricas`)
+
+* Só disponível com **loja selecionada** — sidebar: **Métricas**.
+* Reage ao **período** da topbar (presets, intervalo custom, dias específicos).
+* **KPIs financeiros** + **funil Shopify** (sessões, ATC %, checkout %, CVR %) filtrado pelo país configurado na loja.
+* **Gráfico** lucro por dia (área Recharts) — dias do período da topbar.
+* **Tabela dia a dia**: um dia por linha/cartão (mobile), alinhado ao período; ícone de olho quando há nota diária; REV, refunds, ad spend, profit, sessões e funil.
+
+## Apoio à Decisão (desktop)
+
+![Decisão](assets/mockup-decisao.png)
+
+* **"O que fazer hoje"**: 3 ações prioritárias com semáforo (verde/amarelo/vermelho).
+* **Tabela Kill / Scale / Manter**: por produto/campanha, com tag de status, ROAS, BER, Margem, Gasto.
+* **Card Tesouraria**: Disponível, A caminho, A pagar, Saldo projetado.
+
+## Mobile (PWA instalada)
+
+![Mobile PWA](assets/mockup-mobile-pwa.png)
+
+* App em ecrã inteiro (sem barra do browser), instalada no telemóvel.
+* KPIs empilhados, gráfico compacto, lista de lojas como cartões.
+* **Navegação inferior**: Dashboard, Lojas, Decisão, Mais.
+* Áreas de toque grandes, números tabulares legíveis.
+
+> Estes mockups são a base; podem ser refinados, mas a linguagem visual (sobriedade, flat, sem emojis/gradientes) é obrigatória.
+
+---
+
+# Roadmap
+
+## Fase 1 — Fundação
+
+* Sistema de autenticação + workspaces
+* Gestão de lojas
+* Integração Shopify (app API-only: Client ID + token + webhooks + import histórico)
+* Dashboard básico (revenue, orders)
+* Estrutura de base de dados com soft delete
+* **Base PWA + responsividade mobile-first** desde o primeiro ecrã
+
+## Fase 2 — Lucro Real
+* COGS automático da Shopify (cost per item) + manual + CSV + cogsHistory — **feito** (CSV por implementar)
+* Ad spend manual (`/anuncios`) + integração em métricas — **feito**; ligação Meta/Google/TikTok API — **por implementar**
+* Refunds no cálculo e páginas `/pedidos` + `/reembolsos` — **feito**; chargebacks — **por implementar**
+* Cálculo de Net Profit, margem, ROAS/MER e **BER** — **feito**; POAS nos KPIs — **por implementar**
+* Aviso COGS em falta por período + lucro sempre visível + gráfico lucro consolidado + sparklines — **feito**
+* Dashboard consolidado multi-loja + tabela comparativa loja a loja — **feito** (parcial: sem ordenação por coluna)
+* Testes automatizados do cálculo de lucro — **por implementar**
+
+## Fase 3 — Operação e Histórico
+
+* **Notas diárias** (scale / mudanças) com marcadores nos gráficos
+* **Relatório diário automático** (template auto-preenchido, por plataforma, média vs total, export)
+* Google Ads e TikTok Ads (várias contas por loja)
+* Registo de custos de apps / ferramentas
+* **Payouts da Shopify** (quanto e quando recebes, por loja e consolidado)
+* Histórico permanente + snapshots diários + backups
+* Exportações CSV / Excel / PDF + P&L
+* WooCommerce
+
+## Fase 4 — Inteligência
+
+* Dashboard de **saúde financeira** (score + diagnóstico do que prejudica) e **tesouraria** (tenho € ou não)
+* **Apoio à decisão**: resumo "o que fazer hoje", semáforo kill/scale, recomendação de budget
+* Lucro provisório vs consolidado (janela de refunds)
+* IA para insights + resumo diário + chat sobre dados
+* Alertas automáticos (margem, BER, MER, chargebacks)
+* Deteção de anomalias
+* Comparações avançadas + metas mensais
+
+## Fase 5 — Escala / SaaS
+
+* Multi-tenant com isolamento de dados (lógico + opção de BD dedicada)
+* Multi-utilizador + permissões (RBAC): convites, acessos por loja, aceitar em Definições — **feito** (email por implementar)
+* Billing (Stripe), planos e limites
+* White Label para agências
+* Aplicação mobile / PWA
+* Relatórios agendados + API pública
+
+---
+
+# Sugestões de Melhoria (extra)
+
+Ideias para tornar a app realmente forte e diferenciada:
+
+## Análise financeira
+
+1. **POAS em vez de só ROAS** — para dropshipping o ROAS engana (margens baixas). POAS (lucro / ad spend) mostra a verdade.
+2. **Breakeven ROAS por produto** — saber a partir de que ROAS cada produto começa a dar lucro.
+3. **P&L consolidado** estilo contabilístico (demonstração de resultados mensal).
+4. **Cohort analysis de clientes** — LTV por mês de aquisição.
+5. **Cashflow / previsão** — não confundir lucro com dinheiro disponível (há atrasos de payout).
+
+## Produtos e marketing
+
+6. **Ranking de produtos por lucro**, não só por vendas (best-sellers que dão prejuízo são uma armadilha clássica).
+7. **Atribuição por canal/UTM** — saber que campanha trouxe que order.
+8. **Deteção de produtos "winner"** — crescimento acelerado de vendas com margem saudável.
+9. **Alertas de stock baixo** ligados ao fornecedor.
+
+## Operação multi-loja
+
+10. **Benchmark entre lojas** — comparar margens e conversão entre as tuas próprias lojas.
+11. **Consolidação multi-moeda** com taxas de câmbio históricas (guardar a taxa do dia da order).
+12. **Tags e grupos de lojas** (por nicho, país, marca) para filtrar rapidamente.
+13. **Vista "todas as lojas" como ecrã principal** com possibilidade de favoritar lojas.
+
+## Experiência e produto
+
+14. **Dashboard personalizável** (arrastar/reordenar widgets).
+15. **Modo TV / Live** — ecrã de vendas em tempo real para motivação da equipa.
+16. **Dark mode** e design mobile-first.
+17. **Resumo diário no Telegram/Discord** logo de manhã.
+18. **Onboarding guiado** ao ligar a primeira loja.
+
+## Técnico
+
+19. **Filas (BullMQ)** para imports históricos pesados sem bloquear a app.
+20. **Camada de cache (Redis)** para dashboards rápidos.
+21. **Agregações pré-calculadas** (dailyMetrics) em vez de calcular tudo em runtime.
+22. **Idempotência nos webhooks** (evitar contar a mesma order duas vezes).
+23. **Testes** nos cálculos de lucro (é o cálculo mais crítico — um erro aqui destrói a confiança na app).
+
+## Mais sugestões novas
+
+24. **Comparar criativos/campanhas com vendas reais** — ligar o que aconteceu nos ads ao lucro real, não só ao ROAS reportado pela plataforma.
+25. **"Time machine"** — ver o dashboard exatamente como estava num dia passado.
+26. **Metas mensais** (revenue/lucro alvo) com barra de progresso e ritmo necessário para atingir.
+27. **Calculadora de preço/margem** — definir preço com base no COGS e BER alvo.
+28. **Deteção de duplicação de orders/refunds** para não inflacionar métricas.
+29. **Multi-moeda com câmbio histórico** (guardar a taxa do dia de cada order).
+30. **Comparar período personalizado vs período anterior** (não só presets).
+31. **Widget de saldo de payout** (quanto a Shopify/Stripe ainda te deve).
+32. **Modo offline / PWA** para consultar no telemóvel rapidamente.
+33. **Estado de saúde das ligações** num só painel — ver de relance se alguma loja ou ad account parou de sincronizar (tokens expirados estragam o lucro em silêncio).
+34. **Reautenticação com 1 clique** e avisos antes de o token expirar.
+35. **Tração por hora do dia / dia da semana** — saber quando vendes mais (útil para agendar budget de ads).
+36. **Lucro líquido por hora** durante o dia (acompanhar o dia em tempo quase real).
+37. **Comparar o spend reportado pela plataforma vs vendas reais da Shopify** (deteção de discrepância de atribuição).
+38. **Custo de envio por país/zona** (tabela de portes) para o lucro por país ser exato.
+39. **Simulador "e se"** — mexer no preço/COGS/ROAS e ver o impacto no lucro antes de decidir.
+40. **Detetar pixel/atribuição em falta** (orders sem UTM/origem).
+41. **Cálculo de IVA/impostos por país** para lojas que vendem para a UE.
+42. **Histórico de alterações de COGS e preço** com quem alterou (auditoria).
+43. **Importar spend por CSV** como fallback quando uma API de ads não estiver ligada.
+44. **Favoritos e vista por defeito** configurável (abrir sempre na loja/relatório que mais usas).
+
+---
+
+# Caminho de Monetização (SaaS)
+
+> Transformar a app numa ferramenta vendável a outros dropshippers/agências.
+
+## Arquitetura
+
+* **Multi-tenant** desde a base (workspaces já isolam os dados por cliente).
+* Cada cliente liga as suas próprias lojas e contas de ads.
+* Isolamento e segurança dos dados entre tenants (crítico — dados financeiros).
+
+## Planos (exemplo)
+
+| Plano | Para quem | Limites | Preço (exemplo) |
+|---|---|---|---|
+| **Free** | Testar | 1 loja, 1 conta de ads, histórico 30 dias | 0€ |
+| **Starter** | Iniciantes | 3 lojas, ads ilimitados, histórico completo | ~19€/mês |
+| **Pro** | Escala | 10 lojas, alertas, IA, relatórios agendados | ~49€/mês |
+| **Agency / White Label** | Agências | Lojas ilimitadas, marca própria, sub-contas de clientes | ~149€/mês+ |
+
+## Modelos de preço possíveis
+
+* Por **número de lojas** ligadas.
+* Por **volume de orders / revenue processado** (escala com o cliente).
+* Add-ons: IA, White Label, retenção de histórico estendida.
+
+## Funcionalidades de SaaS a construir
+
+* **Billing** (Stripe Billing) com subscrições, trials e upgrades/downgrades.
+* **Onboarding** e self-service (ligar loja sozinho).
+* **Limites por plano** (feature gating) aplicados no backend.
+* **Painel de admin** (ver tenants, uso, MRR).
+* **Convites de equipa** e papéis (RBAC) dentro de cada workspace.
+* **White Label**: logo, domínio próprio e cores por agência.
+* Métricas de negócio do próprio SaaS: **MRR, churn, LTV de cliente**.
+
+---
+
+# Objetivo Final
+
+Criar uma alternativa própria ao **Triple Whale** e **Polar Analytics** focada em dropshipping, com:
+
+* **Controlo total dos dados** e histórico permanente.
+* **Lucro real** calculado de forma honesta (depois de todos os custos).
+* **Visão consolidada de várias lojas** num só lugar, com drill-down detalhado.

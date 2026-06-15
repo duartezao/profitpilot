@@ -1,26 +1,80 @@
 @import "tailwindcss";
 
+/* Dark mode por classe (next-themes) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  Design tokens — ProfitPilot (ver design-system.md).
+  Sem gradientes, sem neon. Borda em vez de sombra.
+*/
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --surface: #ffffff;
+  --muted: #f9fafb;
+  --border: #e5e7eb;
+  --foreground: #111827;
+  --muted-foreground: #6b7280;
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
+  --positive: #16a34a;
+  --negative: #dc2626;
+  --warning: #d97706;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: #0f172a;
+  --surface: #1e293b;
+  --muted: #172033;
+  --border: #334155;
+  --foreground: #f1f5f9;
+  --muted-foreground: #94a3b8;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-warning: var(--warning);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-lg: var(--radius);
+  --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), "Inter", system-ui, sans-serif;
+}
+
+/* Números tabulares para valores financeiros (obrigatório no design system) */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Modo apresentação — oculta valores e nomes sensíveis */
+html[data-privacy="true"] [data-sensitive] {
+  filter: blur(7px);
+  user-select: none;
+  pointer-events: none;
+}
+
+html[data-privacy="true"] [data-sensitive-chart] {
+  filter: blur(10px);
+  user-select: none;
+  pointer-events: none;
+}
+
+html[data-privacy="true"] input[data-sensitive],
+html[data-privacy="true"] select[data-sensitive],
+html[data-privacy="true"] textarea[data-sensitive] {
+  filter: blur(7px);
+  user-select: none;
 }
