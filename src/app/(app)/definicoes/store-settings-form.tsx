@@ -49,10 +49,13 @@ function currencySymbol(currency: string) {
 
 export function StoreSettingsForm({
   store,
+  baseCurrency,
   canEdit,
   globalSyncLabel,
 }: {
   store: StoreValues;
+  /** Moeda base do workspace — saldo inicial é sempre nesta moeda (ex. EUR). */
+  baseCurrency: string;
   canEdit: boolean;
   globalSyncLabel: string;
 }) {
@@ -60,7 +63,10 @@ export function StoreSettingsForm({
     updateStoreSettingsAction,
     {},
   );
-  const symbol = currencySymbol(store.currency);
+  const bankrollSymbol = currencySymbol(baseCurrency);
+  const storeCurrency = store.currency.toUpperCase();
+  const baseCur = baseCurrency.toUpperCase();
+  const bankrollDiffersFromStore = storeCurrency !== baseCur;
   const countryOptions = listSessionCountryOptions();
 
   return (
@@ -163,7 +169,8 @@ export function StoreSettingsForm({
         </p>
         <p className="mb-2 text-xs text-muted-foreground">
           Saldo conhecido numa data — ponto de partida para o “tenho € ou não?”
-          desta loja. Para reforços de caixa depois, usa{" "}
+          desta loja, na moeda base do workspace ({baseCur}). Para reforços de
+          caixa depois, usa{" "}
           <a href="#capital-negocio" className="font-medium text-accent hover:underline">
             Capital no negócio
           </a>
@@ -171,7 +178,7 @@ export function StoreSettingsForm({
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className={labelCls}>Saldo inicial ({symbol})</label>
+            <label className={labelCls}>Saldo inicial ({bankrollSymbol})</label>
             <DecimalInput
               name="startingBalance"
               defaultValue={store.startingBalance}
@@ -179,6 +186,12 @@ export function StoreSettingsForm({
               className={inputCls}
               data-sensitive
             />
+            {bankrollDiffersFromStore && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Em {baseCur}, não na moeda da loja ({storeCurrency}). Ex.: o que
+                tinhas na conta de payout em euros.
+              </p>
+            )}
           </div>
           <div>
             <label className={labelCls}>Data do saldo</label>

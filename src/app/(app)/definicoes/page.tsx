@@ -334,6 +334,7 @@ export default async function DefinicoesPage() {
                   <StoreSettingsForm
                     canEdit={canEditStores}
                     globalSyncLabel={globalSyncLabel}
+                    baseCurrency={baseCurrency}
                     store={{
                       id: String(s._id),
                       name: s.name,

@@ -1,5 +1,5 @@
 import "server-only";
-import type { AnyBulkWriteOperation, HydratedDocument } from "mongoose";
+import type { AnyBulkWriteOperation } from "mongoose";
 import { Types } from "mongoose";
 import { orderNetRevenue } from "@/lib/order-revenue";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
@@ -734,12 +734,12 @@ export type SyncResult = {
 
 /** Token Shopify fresco + domínio normalizado para uma loja. */
 export async function prepareShopifySyncContext(storeId: string): Promise<{
-  store: HydratedDocument<StoreDoc>;
+  store: StoreDoc;
   domain: string;
   accessToken: string;
 }> {
   await connectToDatabase();
-  const store = await Store.findById(storeId);
+  const store = await Store.findById(storeId).lean();
   if (!store) throw new Error("Loja não encontrada.");
   if (store.platform !== "shopify") {
     throw new Error("Só lojas Shopify são suportadas de momento.");
@@ -757,14 +757,12 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  store.scopes = scopes;
 
-  let ianaTimezone: string | undefined;
+  let ianaTimezone = store.ianaTimezone ?? undefined;
   try {
     const shop = await testShopifyConnection(domain, accessToken);
     if (shop.ianaTimezone) {
       ianaTimezone = shop.ianaTimezone;
-      store.ianaTimezone = shop.ianaTimezone;
     }
   } catch {
     /* sync continua se o ping da shop falhar */
@@ -775,7 +773,11 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
     ...(ianaTimezone ? { ianaTimezone } : {}),
   });
 
-  return { store, domain, accessToken };
+  return {
+    store: { ...store, scopes, ...(ianaTimezone ? { ianaTimezone } : {}) },
+    domain,
+    accessToken,
+  };
 }
 
 /** Sincroniza uma loja: custos de produtos + orders. */

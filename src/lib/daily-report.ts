@@ -25,9 +25,21 @@ function fmtReportMoney(n: number, currency: string): string {
   return `${fmtReportNumber(n)} ${currency}`;
 }
 
-function fmtReportField(value: string | undefined | null): string {
+function pushLine(lines: string[], line: string): void {
+  lines.push(line);
+}
+
+function pushIf(lines: string[], condition: boolean, line: string): void {
+  if (condition) lines.push(line);
+}
+
+function pushManualField(
+  lines: string[],
+  label: string,
+  value: string | undefined | null,
+): void {
   const t = (value ?? "").trim();
-  return t || "—";
+  if (t) lines.push(`${label}: ${t}`);
 }
 
 export type DailyReportResult = {
@@ -81,38 +93,69 @@ export async function buildDailyReportText(opts: {
       ? `${fmtReportNumber(financials.profit)}   (COGS em falta neste dia)`
       : fmtReportNumber(financials.profit);
 
-function resolveObs(note: Awaited<ReturnType<typeof fetchStoreDailyNoteForDay>>): string {
-  if (!note) return "—";
-  const rfObs = note.reportFields.obs?.trim();
-  if (rfObs) return rfObs;
-  return fmtReportField(note.text);
-}
-  const scaleNote = storeNote?.didScale ? "Sim" : "0";
+  function resolveObs(
+    note: Awaited<ReturnType<typeof fetchStoreDailyNoteForDay>>,
+  ): string | null {
+    if (!note) return null;
+    const rfObs = note.reportFields.obs?.trim();
+    if (rfObs) return rfObs;
+    const legacy = note.text?.trim();
+    return legacy || null;
+  }
+
   const rf = storeNote?.reportFields;
   const obs = resolveObs(storeNote);
 
-  const lines = [
-    `DIA: ${dayLabel}`,
-    `LOJA: ${displayUrl}`,
-    `REV: ${fmtReportNumber(financials.revenue)}`,
+  const lines: string[] = [];
+  pushLine(lines, `DIA: ${dayLabel}`);
+  pushLine(lines, `LOJA: ${displayUrl}`);
+
+  pushIf(lines, financials.revenue > 0, `REV: ${fmtReportNumber(financials.revenue)}`);
+  pushIf(
+    lines,
+    financials.refunds > 0,
     `REFUNDS: ${fmtReportMoney(financials.refunds, currency)}`,
-    `ADSPEND: ${financials.adSpend != null ? fmtReportNumber(financials.adSpend) : "—"}`,
+  );
+  pushIf(
+    lines,
+    financials.adSpend != null,
+    financials.adSpend != null
+      ? `ADSPEND: ${fmtReportNumber(financials.adSpend)}`
+      : "",
+  );
+  pushIf(
+    lines,
+    financials.revenue > 0 ||
+      financials.adSpend != null ||
+      financials.profit !== 0 ||
+      financials.missingCogs > 0,
     `PROFIT: ${profitLine}`,
+  );
+
+  pushIf(
+    lines,
+    financials.atcPct != null,
     `ATC %: ${fmtReportPct(financials.atcPct)}`,
+  );
+  pushIf(
+    lines,
+    financials.checkoutPct != null,
     `REACHED CHECKOUT %: ${fmtReportPct(financials.checkoutPct)}`,
+  );
+  pushIf(
+    lines,
+    financials.cvrPct != null,
     `CVR %: ${fmtReportPct(financials.cvrPct)}`,
-    `CPC: —`,
-    `CTR: —`,
-    `CPM: —`,
-    `Produtos testados: ${fmtReportField(rf?.productsTested)}`,
-    `Coleções testadas: ${fmtReportField(rf?.collectionsTested)}`,
-    `Quais coleções já testadas: ${fmtReportField(rf?.collectionsTestedList)}`,
-    `Qual a próxima coleção a testar: ${fmtReportField(rf?.nextCollection)}`,
-    `Coleção best-seller: ${fmtReportField(rf?.bestSellerCollection)}`,
-    `OBS: ${obs}`,
-    `Scale hoje: ${scaleNote}`,
-    `Principais dificuldades: ${fmtReportField(rf?.difficulties)}`,
-  ];
+  );
+
+  pushManualField(lines, "Produtos testados", rf?.productsTested);
+  pushManualField(lines, "Coleções testadas", rf?.collectionsTested);
+  pushManualField(lines, "Quais coleções já testadas", rf?.collectionsTestedList);
+  pushManualField(lines, "Qual a próxima coleção a testar", rf?.nextCollection);
+  pushManualField(lines, "Coleção best-seller", rf?.bestSellerCollection);
+  pushIf(lines, obs != null, `OBS: ${obs}`);
+  pushIf(lines, storeNote?.didScale === true, "Scale hoje: Sim");
+  pushManualField(lines, "Principais dificuldades", rf?.difficulties);
 
   return {
     text: lines.join("\n"),

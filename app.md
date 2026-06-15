@@ -552,7 +552,7 @@ Cada loja deve ter:
 
 > Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
 
-**Estado (implementado):** em `/notas` e `/metricas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, PROFIT (aviso COGS), funil ATC/checkout/CVR. Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). CPC/CTR/CPM ficam `—` até API de ads.
+**Estado (implementado):** em `/notas` e `/metricas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, PROFIT (aviso COGS), funil ATC/checkout/CVR. Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). CPC/CTR/CPM omitidos até API de ads.
 
 ## Exemplo do template gerado
 
@@ -1015,7 +1015,7 @@ Lucro após taxas =
 
 **O que defines à mão para ficar exato:**
 
-* **Saldo inicial (banca) por loja** — defines, **em cada loja**, quanto tens nessa data; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria. **Retirar banca**: botão com confirmação zera o saldo inicial — tesouraria e finanças deixam de contar esse valor (histórico de vendas mantém-se).
+* **Saldo inicial (banca) por loja** — defines, **em cada loja**, quanto tens nessa data na **moeda base do workspace** (ex. EUR na conta de payout), não na moeda da loja Shopify; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria. **Retirar banca**: botão com confirmação zera o saldo inicial — tesouraria e finanças deixam de contar esse valor (histórico de vendas mantém-se).
 * **Injeções de capital** — em Definições → **Capital no negócio**: regista quando depositas ou levantas dinheiro da conta do negócio (com data, valor e confirmação), sem alterar o saldo inicial por engano.
 * **Contas a pagar a fornecedores** — quanto e quando pagas o produto (AliExpress/CJ/etc.), para a saída de caixa ser real. (Em dropshipping é o que mais mexe no caixa.)
 * **Reserva para impostos/IVA** — defines uma % a separar; a app guarda esse valor à parte e mostra o caixa "limpo".
@@ -1230,7 +1230,7 @@ Lucro após taxas =
 * `scopes` (array de permissões concedidas)
 * `feeConfig` (taxa actual — espelho da última entrada do calendário)
 * `feeSchedule[]` — histórico: `effectiveFromKey`, `processingPercent`, `processingFixed`, `transactionFeePercent` (taxa só aplica a encomendas desde esse dia; dias anteriores mantêm fees gravados). Se `store.currency` ≠ moeda base do workspace (payout), soma-se automaticamente **+2%** de conversão de moeda Shopify em cada encomenda (`shopifyCurrencyConversionPercent`).
-* `startingBalance` (saldo inicial de caixa **desta loja**, definido manualmente — tesouraria por loja)
+* `startingBalance` (saldo inicial de caixa **desta loja**, na moeda base do workspace — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
 * `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
