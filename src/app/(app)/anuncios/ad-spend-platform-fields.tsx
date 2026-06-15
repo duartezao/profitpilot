@@ -6,6 +6,7 @@ import {
   type AdPlatform,
 } from "@/lib/ad-spend-platforms";
 import { AdSpendCurrencySelect } from "./ad-spend-currency-select";
+import { DecimalInput } from "@/components/decimal-input";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -52,11 +53,8 @@ export function AdSpendPlatformFields({
             <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className={labelCls}>Gasto em ads</label>
-                <input
+                <DecimalInput
                   name={`${platform}_spend`}
-                  type="number"
-                  step="0.01"
-                  min="0"
                   defaultValue={d?.spend ?? ""}
                   disabled={disabled}
                   placeholder="0,00"
@@ -66,11 +64,8 @@ export function AdSpendPlatformFields({
               </div>
               <div>
                 <label className={labelCls}>Fee fixa (agência)</label>
-                <input
+                <DecimalInput
                   name={`${platform}_extraFee`}
-                  type="number"
-                  step="0.01"
-                  min="0"
                   defaultValue={d?.extraFee ?? ""}
                   disabled={disabled}
                   placeholder="0,00"
@@ -81,12 +76,8 @@ export function AdSpendPlatformFields({
               <div>
                 <label className={labelCls}>Fee % sobre o gasto</label>
                 <div className="relative">
-                  <input
+                  <DecimalInput
                     name={`${platform}_agencyPercent`}
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
                     defaultValue={d?.agencyPercent ?? ""}
                     disabled={disabled}
                     placeholder="0"

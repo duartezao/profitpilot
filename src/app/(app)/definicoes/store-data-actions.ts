@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { Store } from "@/models/Store";
 import { findStoreForUser } from "@/lib/store-scope";
 import { parseDateInput } from "@/lib/period";
+import { zLocaleNumber } from "@/lib/parse-number";
 import {
   ensureFeeSchedule,
   normalizeFeeConfig,
@@ -33,9 +34,9 @@ const ROLES_EDIT = ["owner", "admin", "editor"];
 const reconfigureSchema = z.object({
   storeId: z.string().trim().min(1),
   importStartDate: z.string().trim().min(1),
-  processingPercent: z.coerce.number().min(0).max(100),
-  processingFixed: z.coerce.number().min(0),
-  transactionFeePercent: z.coerce.number().min(0).max(100),
+  processingPercent: zLocaleNumber(z.number().min(0).max(100)),
+  processingFixed: zLocaleNumber(z.number().min(0)),
+  transactionFeePercent: zLocaleNumber(z.number().min(0).max(100)),
   recalculateFees: z.boolean(),
   trimOrdersBeforeDate: z.boolean(),
 });

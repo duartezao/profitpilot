@@ -82,6 +82,13 @@ export function PayoutsClient() {
           <p className="text-sm font-medium text-warning">
             Não foi possível obter os payouts de algumas lojas.
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Confirma na app Shopify (Dev Dashboard → Configuration) os scopes{" "}
+            <code className="text-foreground">read_shopify_payments_payouts</code>{" "}
+            e{" "}
+            <code className="text-foreground">read_shopify_payments_accounts</code>,
+            reinstala a app na loja e sincroniza outra vez.
+          </p>
           <ul className="mt-2 space-y-1">
             {data.payoutErrors.map((s) => (
               <li key={s.storeId} className="text-xs text-muted-foreground">

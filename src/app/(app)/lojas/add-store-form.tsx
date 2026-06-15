@@ -8,25 +8,17 @@ import {
   COGS_MODE_LABELS,
   COGS_INPUT_CURRENCIES,
 } from "@/lib/cogs-modes";
+import { DecimalInput } from "@/components/decimal-input";
+import { SHOPIFY_REQUIRED_SCOPES } from "@/lib/shopify-scopes";
 
 const DEFAULT_PROCESSING_PERCENT = 1.5;
-const DEFAULT_TRANSACTION_FEE_PERCENT = 2;
+const DEFAULT_TRANSACTION_FEE_PERCENT = 0;
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 const labelCls = "mb-1 block text-sm font-medium";
 
-const REQUIRED_SCOPES = [
-  "read_orders",
-  "read_all_orders",
-  "read_products",
-  "read_inventory",
-  "read_fulfillments",
-  "read_returns",
-  "read_shopify_payments_accounts",
-  "read_shopify_payments_disputes",
-  "read_reports",
-];
+const REQUIRED_SCOPES = [...SHOPIFY_REQUIRED_SCOPES];
 
 function ScopesBox() {
   const [copied, setCopied] = useState(false);
@@ -64,6 +56,13 @@ function ScopesBox() {
           </code>
         ))}
       </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Payouts e tesouraria exigem{" "}
+        <code className="text-foreground">read_shopify_payments_payouts</code>{" "}
+        além de{" "}
+        <code className="text-foreground">read_shopify_payments_accounts</code>.
+        Depois de alterar scopes, reinstala a app na loja.
+      </p>
     </div>
   );
 }
@@ -199,12 +198,8 @@ export function AddStoreForm({
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label className={labelCls}>Processamento (%)</label>
-              <input
+              <DecimalInput
                 name="processingPercent"
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
                 defaultValue={DEFAULT_PROCESSING_PERCENT}
                 className={inputCls}
                 required
@@ -215,11 +210,8 @@ export function AddStoreForm({
             </div>
             <div>
               <label className={labelCls}>Fixo por encomenda</label>
-              <input
+              <DecimalInput
                 name="processingFixed"
-                type="number"
-                step="0.01"
-                min="0"
                 defaultValue={0}
                 className={inputCls}
                 required
@@ -230,12 +222,8 @@ export function AddStoreForm({
             </div>
             <div>
               <label className={labelCls}>Taxa de transação (%)</label>
-              <input
+              <DecimalInput
                 name="transactionFeePercent"
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
                 defaultValue={DEFAULT_TRANSACTION_FEE_PERCENT}
                 className={inputCls}
                 required
@@ -298,8 +286,9 @@ export function AddStoreForm({
           </p>
           <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-sm text-muted-foreground">
             <li>No Shopify Dev Dashboard, cria uma app.</li>
-            <li>Em Configuration, ativa o Admin API e seleciona os scopes ao lado.</li>
+            <li>Em Configuration, ativa o Admin API e seleciona todos os scopes ao lado (inclui payouts).</li>
             <li>Instala a app na tua loja (mesma organização que a app).</li>
+            <li>Se mais tarde adicionares scopes, reinstala a app na loja.</li>
             <li>Em Settings → Credenciais, copia o ID de cliente e a Chave secreta.</li>
           </ol>
           <p className="mt-3 text-xs text-muted-foreground">

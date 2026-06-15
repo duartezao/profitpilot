@@ -24,6 +24,7 @@ import { convertCogsInputToStoreCurrency } from "@/lib/order-money";
 import { formatDateInput, parseDateInput } from "@/lib/period";
 import { resolveAdSpendRange } from "@/lib/ad-spend";
 import { findStoreForUser } from "@/lib/store-scope";
+import { parseLocaleNumber } from "@/lib/parse-number";
 
 export type CostState = { ok?: boolean; error?: string };
 
@@ -59,7 +60,7 @@ export async function setManualCostAction(
   const parsed = schema.safeParse({
     storeId: formData.get("storeId"),
     variantId: formData.get("variantId"),
-    manualCost: Number(formData.get("manualCost")),
+    manualCost: parseLocaleNumber(formData.get("manualCost")),
     effectiveFrom: formData.get("effectiveFrom") ?? "",
   });
   if (!parsed.success) {
@@ -277,7 +278,7 @@ export async function saveManualCogsDayAction(
   const parsed = dayCogsSchema.safeParse({
     storeId: formData.get("storeId"),
     date: formData.get("date"),
-    amount: Number(formData.get("amount")),
+    amount: parseLocaleNumber(formData.get("amount")),
     inputCurrency,
     note: String(formData.get("note") ?? "").trim() || undefined,
   });
@@ -338,7 +339,7 @@ export async function saveManualOrderCogsAction(
   const parsed = orderCogsSchema.safeParse({
     storeId: formData.get("storeId"),
     orderId: formData.get("orderId"),
-    amount: Number(formData.get("amount")),
+    amount: parseLocaleNumber(formData.get("amount")),
     inputCurrency,
   });
   if (!parsed.success) {

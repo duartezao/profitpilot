@@ -9,6 +9,7 @@ import {
   type CashActionState,
 } from "./cash-actions";
 import { Sensitive } from "@/components/privacy-mode";
+import { DecimalInput } from "@/components/decimal-input";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -113,11 +114,8 @@ export function CashInjectionPanel({
             </div>
             <div>
               <label className={labelCls}>Valor</label>
-              <input
+              <DecimalInput
                 name="amount"
-                type="number"
-                step="0.01"
-                min="0.01"
                 placeholder="0,00"
                 className={`${inputCls} tabular-nums`}
                 required

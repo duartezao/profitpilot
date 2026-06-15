@@ -6,9 +6,12 @@ import {
   resolvePeriodForStore,
   orderDateMatchInTimezone,
   normalizeStoreTimezone,
-  dateKeyInTimezone,
 } from "@/lib/store-timezone";
-import { orderNetRevenue } from "@/lib/order-revenue";
+import {
+  orderNetRevenueBase,
+  orderProfitBase,
+  orderRefundedBase,
+} from "@/lib/order-money";
 import { Order } from "@/models/Order";
 import type { CurrentUser } from "@/lib/auth";
 import { findStoreForUser } from "@/lib/store-scope";
@@ -56,17 +59,7 @@ function statusLabel(s?: string | null) {
   return STATUS_LABELS[key] ?? (s || "—");
 }
 
-function orderProfit(o: {
-  subtotal?: number | null;
-  totalPrice?: number | null;
-  refunded?: number | null;
-  cogs?: number | null;
-  shipping?: number | null;
-  fees?: number | null;
-}) {
-  const revenue = orderNetRevenue(o);
-  return revenue - (o.cogs ?? 0) - (o.shipping ?? 0) - (o.fees ?? 0);
-}
+type OrderMoneyRow = Parameters<typeof orderProfitBase>[0];
 
 type ListResult = {
   rows: OrderListRow[];
@@ -103,18 +96,14 @@ async function resolveStoreContext(
 }
 
 function buildStats(
-  orders: Array<{
-    subtotal?: number | null;
-    totalPrice?: number | null;
-    refunded?: number | null;
-  }>,
+  orders: OrderMoneyRow[],
   currency: string,
   fmt: (v: number) => string,
   fmtPct: (v: number) => string,
 ): OrderListStats {
   const count = orders.length;
-  const revenue = orders.reduce((s, o) => s + orderNetRevenue(o), 0);
-  const refunded = orders.reduce((s, o) => s + (o.refunded ?? 0), 0);
+  const revenue = orders.reduce((s, o) => s + orderNetRevenueBase(o), 0);
+  const refunded = orders.reduce((s, o) => s + orderRefundedBase(o), 0);
   const aov = count > 0 ? revenue / count : 0;
   const refundRate = revenue > 0 ? (refunded / revenue) * 100 : 0;
 
@@ -167,13 +156,13 @@ export async function listStoreOrders(
     .sort({ orderDate: -1 })
     .limit(limit)
     .select(
-      "name orderDate financialStatus totalPrice subtotal cogs shipping fees refunded",
+      "name orderDate financialStatus totalPrice subtotal netRevenue cogs shipping fees refunded manualCogs amountsBase",
     )
     .lean();
 
   const rows: OrderListRow[] = orders.map((o) => {
-    const profit = orderProfit(o);
-    const refunded = o.refunded ?? 0;
+    const profit = orderProfitBase(o);
+    const refunded = orderRefundedBase(o);
     return {
       id: String(o._id),
       name: o.name ?? "—",
@@ -187,7 +176,7 @@ export async function listStoreOrders(
           })
         : "—",
       financialStatusLabel: statusLabel(o.financialStatus),
-      revenueFmt: fmt(orderNetRevenue(o)),
+      revenueFmt: fmt(orderNetRevenueBase(o)),
       profitFmt: fmt(profit),
       refundedFmt: fmt(refunded),
       positive: profit >= 0,
@@ -238,7 +227,9 @@ export async function listStoreRefunds(
       ? orderDateMatchInTimezone(period, storeTz)
       : orderDateMatch(period)),
     })
-      .select("totalPrice refunded")
+      .select(
+        "totalPrice subtotal netRevenue refunded amountsBase",
+      )
       .lean(),
     Order.find({
       workspaceId: wsId,
@@ -251,14 +242,14 @@ export async function listStoreRefunds(
       .sort({ orderDate: -1 })
       .limit(limit)
       .select(
-        "name orderDate financialStatus totalPrice subtotal cogs shipping fees refunded",
+        "name orderDate financialStatus totalPrice subtotal netRevenue cogs shipping fees refunded manualCogs amountsBase",
       )
       .lean(),
   ]);
 
   const rows: OrderListRow[] = refundedOrders.map((o) => {
-    const profit = orderProfit(o);
-    const refunded = o.refunded ?? 0;
+    const profit = orderProfitBase(o);
+    const refunded = orderRefundedBase(o);
     return {
       id: String(o._id),
       name: o.name ?? "—",
@@ -270,7 +261,7 @@ export async function listStoreRefunds(
           })
         : "—",
       financialStatusLabel: statusLabel(o.financialStatus),
-      revenueFmt: fmt(orderNetRevenue(o)),
+      revenueFmt: fmt(orderNetRevenueBase(o)),
       profitFmt: fmt(profit),
       refundedFmt: fmt(refunded),
       positive: profit >= 0,

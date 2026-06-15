@@ -35,6 +35,7 @@ import {
   formatFeeConfigLabel,
   normalizeFeeConfig,
   resolveFeeConfigForDateKey,
+  shopifyCurrencyConversionPercent,
   type FeeScheduleEntry,
 } from "@/lib/fee-schedule";
 import {
@@ -298,6 +299,11 @@ export default async function DefinicoesPage() {
                 floorKey,
               );
               const currency = s.currency ?? workspace?.baseCurrency ?? "EUR";
+              const baseCurrency = workspace?.baseCurrency ?? "EUR";
+              const conversionPercent = shopifyCurrencyConversionPercent(
+                currency,
+                baseCurrency,
+              );
               const todayKey = dateKeyInTimezone(new Date(), tz);
               const currentFee = resolveFeeConfigForDateKey(
                 schedule,
@@ -350,8 +356,17 @@ export default async function DefinicoesPage() {
                     storeId={String(s._id)}
                     canEdit={canEditStores}
                     importStartDateKey={floorKey}
-                    entries={buildFeeScheduleViews(schedule, currency)}
-                    currentLabel={formatFeeConfigLabel(currentFee, currency)}
+                    entries={buildFeeScheduleViews(
+                      schedule,
+                      currency,
+                      conversionPercent,
+                    )}
+                    currentLabel={formatFeeConfigLabel(
+                      currentFee,
+                      currency,
+                      conversionPercent,
+                    )}
+                    currencyConversionPercent={conversionPercent}
                     defaultProcessingPercent={latest.processingPercent}
                     defaultProcessingFixed={latest.processingFixed}
                     defaultTransactionFeePercent={latest.transactionFeePercent}

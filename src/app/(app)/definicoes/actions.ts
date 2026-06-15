@@ -20,16 +20,14 @@ import {
   isCogsInputCurrency,
   isCogsMode,
 } from "@/lib/cogs-modes";
+import { parseLocaleNumberOrZero } from "@/lib/parse-number";
 
 export type SettingsState = { ok?: boolean; error?: string };
 
 const ROLES_ADMIN = ["owner", "admin"];
 const ROLES_EDIT = ["owner", "admin", "editor"];
 
-const numOpt = (v: FormDataEntryValue | null) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
+const numOpt = (v: FormDataEntryValue | null) => parseLocaleNumberOrZero(v);
 
 const workspaceSchema = z.object({
   name: z.string().trim().min(1, "Dá um nome ao workspace."),

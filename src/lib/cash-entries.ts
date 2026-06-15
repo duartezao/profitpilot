@@ -4,6 +4,7 @@ import { connectToDatabase } from "@/lib/db";
 import { CashEntry, type CashEntryType } from "@/models/CashEntry";
 import { formatCurrency } from "@/lib/utils";
 import { parseDateInput } from "@/lib/period";
+import { moneyToBase } from "@/lib/fx";
 
 export type CashEntryRow = {
   id: string;
@@ -33,17 +34,20 @@ export function cashEntryTypeLabel(type: "manual_in" | "manual_out"): string {
   return TYPE_LABEL[type];
 }
 
-/** Soma injeções e levantamentos por loja desde a data `since` (inclusive). */
+/** Soma injeções e levantamentos por loja desde a data `since` (inclusive), em moeda base. */
 export async function sumManualCashByStores(
   workspaceId: string,
   storeIds: mongoose.Types.ObjectId[],
   sinceByStore: Map<string, Date>,
+  baseCurrency: string,
+  storeCurrencyByStore: Map<string, string>,
 ): Promise<Map<string, ManualCashTotals>> {
   if (storeIds.length === 0) return new Map();
 
   await connectToDatabase();
   const wsId = new mongoose.Types.ObjectId(workspaceId);
   const todayKey = new Date().toISOString().slice(0, 10);
+  const base = baseCurrency.toUpperCase();
 
   const entries = await CashEntry.find({
     workspaceId: wsId,
@@ -52,7 +56,7 @@ export async function sumManualCashByStores(
     deletedAt: null,
     dueDateKey: { $lte: todayKey },
   })
-    .select("storeId type amount dueDateKey")
+    .select("storeId type amount currency dueDateKey")
     .lean();
 
   const totals = new Map<string, ManualCashTotals>();
@@ -67,9 +71,13 @@ export async function sumManualCashByStores(
     const sinceKey = since.toISOString().slice(0, 10);
     if (e.dueDateKey < sinceKey) continue;
 
+    const storeCur = storeCurrencyByStore.get(sid) ?? base;
+    const cur = (e.currency ?? storeCur).toUpperCase();
+    const amount = await moneyToBase(e.amount ?? 0, cur, base, e.dueDateKey);
+
     const row = totals.get(sid)!;
-    if (e.type === "manual_in") row.manualIn += e.amount ?? 0;
-    else if (e.type === "manual_out") row.manualOut += e.amount ?? 0;
+    if (e.type === "manual_in") row.manualIn += amount;
+    else if (e.type === "manual_out") row.manualOut += amount;
   }
 
   return totals;

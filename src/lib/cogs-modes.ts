@@ -27,6 +27,21 @@ export function ranksProductsByUnits(mode: CogsMode | null | undefined): boolean
   return mode === "order" || mode === "day";
 }
 
+/** Só o modo `shopify` importa custos de variante da Shopify no sync. */
+export function syncsShopifyProductCosts(
+  mode: CogsMode | null | undefined,
+): boolean {
+  return (mode ?? defaultCogsMode()) === "shopify";
+}
+
+/** Assimilação automática de COGS nas encomendas após sync. */
+export function assimilatesCogsOnSync(
+  mode: CogsMode | null | undefined,
+): boolean {
+  const m = mode ?? defaultCogsMode();
+  return m === "shopify" || m === "variant";
+}
+
 export const COGS_MODE_LABELS: Record<CogsMode, string> = {
   shopify: "Automático (Shopify)",
   variant: "Por variante (manual)",

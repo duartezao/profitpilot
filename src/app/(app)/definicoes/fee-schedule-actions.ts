@@ -19,6 +19,7 @@ import {
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
 import { findStoreForUser } from "@/lib/store-scope";
+import { parseLocaleNumber, zLocaleNumber } from "@/lib/parse-number";
 
 export type FeeScheduleState = { ok?: boolean; error?: string };
 
@@ -45,9 +46,11 @@ export async function addFeeScheduleEntryAction(
   const parsed = entrySchema.safeParse({
     storeId: formData.get("storeId"),
     effectiveFromKey: String(formData.get("effectiveFromKey") ?? ""),
-    processingPercent: Number(formData.get("processingPercent")),
-    processingFixed: Number(formData.get("processingFixed")),
-    transactionFeePercent: Number(formData.get("transactionFeePercent")),
+    processingPercent: parseLocaleNumber(formData.get("processingPercent")),
+    processingFixed: parseLocaleNumber(formData.get("processingFixed")),
+    transactionFeePercent: parseLocaleNumber(
+      formData.get("transactionFeePercent"),
+    ),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };

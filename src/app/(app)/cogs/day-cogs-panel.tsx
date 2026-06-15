@@ -6,6 +6,7 @@ import type { CogsDayRow } from "@/lib/manual-cogs";
 import { saveManualCogsDayAction, type ManualCogsState } from "./actions";
 import { CogsCurrencySelect } from "./cogs-currency-select";
 import { Sensitive } from "@/components/privacy-mode";
+import { DecimalInput } from "@/components/decimal-input";
 
 const inputCls =
   "w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm tabular-nums outline-none focus:border-accent";
@@ -84,11 +85,8 @@ function DayCogsRowForm({
         <form action={doSave} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="storeId" value={storeId} />
           <input type="hidden" name="date" value={row.dateKey} />
-          <input
+          <DecimalInput
             name="amount"
-            type="number"
-            step="0.01"
-            min="0"
             placeholder="COGS"
             defaultValue={defaults.amount}
             className={inputCls}

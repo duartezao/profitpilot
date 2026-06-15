@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { updateWorkspaceAction, type SettingsState } from "./actions";
+import { DecimalInput } from "@/components/decimal-input";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -58,10 +59,8 @@ export function WorkspaceForm({
         </div>
         <div>
           <label className={labelCls}>Reserva para impostos (%)</label>
-          <input
+          <DecimalInput
             name="taxReservePercent"
-            type="number"
-            step="0.1"
             defaultValue={values.taxReservePercent}
             disabled={!canEdit}
             className={inputCls}
@@ -78,10 +77,8 @@ export function WorkspaceForm({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <label className={labelCls}>Margem mín. (%)</label>
-            <input
+            <DecimalInput
               name="netMarginMin"
-              type="number"
-              step="0.1"
               defaultValue={values.netMarginMin}
               disabled={!canEdit}
               className={inputCls}
@@ -89,10 +86,8 @@ export function WorkspaceForm({
           </div>
           <div>
             <label className={labelCls}>Refund rate máx. (%)</label>
-            <input
+            <DecimalInput
               name="refundRateMax"
-              type="number"
-              step="0.1"
               defaultValue={values.refundRateMax}
               disabled={!canEdit}
               className={inputCls}
@@ -100,10 +95,8 @@ export function WorkspaceForm({
           </div>
           <div>
             <label className={labelCls}>Chargeback máx. (%)</label>
-            <input
+            <DecimalInput
               name="chargebackRateMax"
-              type="number"
-              step="0.1"
               defaultValue={values.chargebackRateMax}
               disabled={!canEdit}
               className={inputCls}

@@ -8,6 +8,7 @@ import {
   computeOrderFees,
   ensureFeeSchedule,
   resolveFeeConfigForDateKey,
+  shopifyCurrencyConversionPercent,
   type FeeScheduleEntry,
 } from "@/lib/fee-schedule";
 import { buildOrderAmountsBase } from "@/lib/order-money";
@@ -49,7 +50,10 @@ export async function recalculateStoreOrderFees(
     floorKey,
   );
 
-  const orders = await Order.find({ storeId: storeOid })
+  const orders = await Order.find({
+    storeId: storeOid,
+    $or: [{ feesSource: { $ne: "real" } }, { feesSource: null }],
+  })
     .select(
       "orderDate totalPrice subtotal refunded shipping cogs manualCogs",
     )
@@ -68,7 +72,11 @@ export async function recalculateStoreOrderFees(
       floorKey,
     );
     const totalPrice = num(order.totalPrice);
-    const fees = computeOrderFees(totalPrice, feeConfig);
+    const conversionPercent = shopifyCurrencyConversionPercent(
+      storeCurrency,
+      baseCurrency,
+    );
+    const fees = computeOrderFees(totalPrice, feeConfig, conversionPercent);
     const manualCogs = order.manualCogs ?? null;
     const cogsForBase = manualCogs != null ? manualCogs : num(order.cogs);
     const subtotal = num(order.subtotal);
@@ -100,7 +108,7 @@ export async function recalculateStoreOrderFees(
     bulk.push({
       updateOne: {
         filter: { _id: order._id },
-        update: { $set: { fees, amountsBase } },
+        update: { $set: { fees, feesSource: "estimated", amountsBase } },
       },
     });
     updated++;

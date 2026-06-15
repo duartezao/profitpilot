@@ -54,9 +54,7 @@ export default async function FinancasPage({
     totals.adSpend,
     money,
     pnl.cogsIncomplete
-      ? {
-          note: `COGS em falta em ${pnl.missingCogsCount} ${pnl.missingCogsCount === 1 ? "produto" : "produtos"}`,
-        }
+      ? { note: pnl.missingCogsMessage.replace(/\.$/, "") }
       : undefined,
   );
 
@@ -125,6 +123,7 @@ export default async function FinancasPage({
       <DataWarnings
         cogsIncomplete={pnl.cogsIncomplete}
         missingCogsCount={pnl.missingCogsCount}
+        missingCogsMessage={pnl.missingCogsMessage}
         missingAdSpendDays={pnl.missingAdSpendDays}
         cogsHref={cogsHref}
         adsHref={adsHref}

@@ -195,7 +195,9 @@ Futuro:
 
 * `read_orders` — vendas, reembolsos, descontos (revenue, refunds, AOV, CVR)
 * `read_products`, `read_inventory` — produtos e **custo por artigo (cost per item)** para o COGS
-* `read_shopify_payments_accounts`, `read_shopify_payments_disputes` — saldo/payouts e chargebacks (a query `shopifyPaymentsAccount` exige `read_shopify_payments_accounts`)
+* `read_shopify_payments_accounts` — saldo Shopify Payments (`shopifyPaymentsAccount`)
+* `read_shopify_payments_payouts` — **obrigatório** para payouts e balance transactions (sem este scope: «Access denied for payouts field»)
+* `read_shopify_payments_disputes` — chargebacks
 * `read_reports` / `read_analytics` — sessões e métricas de funil (ATC, checkout, CVR), quando disponíveis
 * `read_customers` — clientes e LTV
 
@@ -219,17 +221,19 @@ Futuro:
 
 > **Como ligar a tua loja Shopify**
 > 1. Entra no Shopify Dev Dashboard em `dev.shopify.com/dashboard` e cria uma app.
-> 2. Em **Configuration / API access**, ativa os scopes indicados abaixo.
+> 2. Em **Configuration / API access**, ativa os scopes indicados abaixo (inclui `read_shopify_payments_payouts`).
 > 3. **Instala a app na tua loja** e, em **Settings → Credenciais**, copia o **ID de cliente** e a **Chave secreta**.
-> 4. Cola aqui os 2 valores + o domínio Shopify (`aminhaloja.myshopify.com`) + o URL público (`minhaloja.com`) e clica em **Ligar**.
-> 5. Vamos validar o acesso e importar o teu histórico automaticamente.
+> 4. Se alterares scopes mais tarde, **reinstala a app** na loja para aplicar as novas permissões.
+> 5. Cola aqui os 2 valores + o domínio Shopify (`aminhaloja.myshopify.com`) + o URL público (`minhaloja.com`) e clica em **Ligar**.
+> 6. Vamos validar o acesso e importar o teu histórico automaticamente.
 
 **Scopes a ativar (a app mostra a lista com botão "copiar"):**
 
 * `read_orders` — vendas, reembolsos e descontos
 * `read_products` — produtos
 * `read_inventory` — custo por artigo (COGS)
-* `read_shopify_payments_accounts` — saldo e payouts (quanto/quando recebes)
+* `read_shopify_payments_accounts` — saldo na Shopify (por pagar)
+* `read_shopify_payments_payouts` — histórico de payouts e transações pendentes
 * `read_shopify_payments_disputes` — chargebacks
 * `read_customers` — clientes e LTV
 * `read_reports` / `read_analytics` — sessões e funil (ATC, checkout, CVR)
@@ -322,7 +326,7 @@ Net Profit =
 | `order` | COGS total por encomenda em `/cogs` | **Por unidades vendidas** |
 | `day` | COGS total por dia civil (fuso da loja) em `/cogs` | **Por unidades vendidas** |
 
-* **Moeda de entrada** — EUR ou USD no setup (`cogsInputCurrency`). Valores em USD convertem com taxa Frankfurter do dia (fallback fixo se API falhar).
+* **Moeda de entrada** — EUR ou USD no setup (`cogsInputCurrency`). Valores em USD convertem com taxa do dia (Frankfurter/ECB; moedas fora da ECB, ex. RSD, via API secundária; fallback fixo se tudo falhar).
 * **Dashboard sempre em EUR** (moeda base do workspace) — encomendas de lojas Shopify em USD/GBP/etc. guardam `amountsBase` no sync; revenue, COGS, envio e taxas entram convertidos no lucro.
 * **Buscar o COGS automaticamente da Shopify** — modo `shopify`: `InventoryItem.unitCost` via Admin GraphQL API.
 * Definir/editar **COGS por produto e por variante** manualmente (modo `variant`)
@@ -332,6 +336,7 @@ Net Profit =
 * **COGS histórico** — coleção `cogsHistory` com versões por variante (`effectiveFrom` / `effectiveTo`). O lucro de encomendas antigas usa o custo da altura; alterações futuras não reescrevem linhas já registadas.
 * **Página COGS** — painel conforme o modo: variantes em falta, tabela de encomendas, ou dias desde importação.
 * **Assimilação automática** — só nos modos `shopify` e `variant`; em `order`/`day` o utilizador preenche manualmente.
+* **Sync manual/cron** — só o modo `shopify` importa `InventoryItem.unitCost` da Shopify; em `day`/`order`/`variant` o sync salta essa fase (mais rápido).
 * **Aviso de COGS em falta** — variantes sem custo (modos shopify/variant), encomendas sem `manualCogs` (modo order), ou dias com vendas sem registo (modo day).
 
 ## Visualizações de lucro
@@ -872,7 +877,7 @@ Funcionalidades:
 | **Taxa de processamento Shopify Payments** | % + valor fixo por venda (ex.: 1,9% + 0,25€) | Shopify Payments / Balance transactions API |
 | **Transaction fee da Shopify** | Taxa extra se usares gateway externo (ex.: 0,5–2%) | Definição do plano da loja |
 | **Taxas de gateway externo** | Stripe / PayPal (% + fixo por transação) | Stripe / PayPal API |
-| **Conversão de moeda** | Taxa quando a venda é noutra moeda | Balance transactions |
+| **Conversão de moeda** | +2% quando a moeda da venda ≠ moeda de payout (EUR) | Automático no cálculo de fees por encomenda |
 | **Taxa de payout / saque** | Custo de transferência para o banco (se aplicável) | Payouts API |
 | **Taxa de chargeback** | Custo fixo por disputa | Gateway |
 | **Reembolso de taxas** | Taxas que (não) são devolvidas num refund | Gateway |
@@ -899,8 +904,10 @@ Lucro após taxas =
  = Net Profit
 ```
 
-* Os valores de taxa são **reais** (vindos das *balance transactions* da Shopify/Stripe), não estimados — para o lucro ser exato.
-* Para gateways sem API de taxas, permitir **definir uma % estimada** por loja como fallback (claramente marcado como "estimado").
+* Os valores de taxa são **reais** (vindos das *balance transactions* da Shopify), com `feesSource: real | estimated`.
+* No sync: encomendas → balance transactions (`associatedOrder`) → `order.fees` real; sem BT ligada → fallback `computeOrderFees()` (calendário em Definições).
+* Taxas reais já incluem conversão de moeda e comissões Shopify Payments — não se soma +2% manual em cima.
+* Para gateways sem API de taxas, o calendário manual em Definições serve de **fallback estimado** (`feesSource: estimated`).
 
 ## Organização e usabilidade
 
@@ -1222,7 +1229,7 @@ Lucro após taxas =
 * `credentials` (encriptado AES-256-GCM — Shopify: `clientId`, `clientSecret`. Token obtido on-demand via client credentials, não persistido. **Nunca em texto simples**)
 * `scopes` (array de permissões concedidas)
 * `feeConfig` (taxa actual — espelho da última entrada do calendário)
-* `feeSchedule[]` — histórico: `effectiveFromKey`, `processingPercent`, `processingFixed`, `transactionFeePercent` (taxa só aplica a encomendas desde esse dia; dias anteriores mantêm fees gravados)
+* `feeSchedule[]` — histórico: `effectiveFromKey`, `processingPercent`, `processingFixed`, `transactionFeePercent` (taxa só aplica a encomendas desde esse dia; dias anteriores mantêm fees gravados). Se `store.currency` ≠ moeda base do workspace (payout), soma-se automaticamente **+2%** de conversão de moeda Shopify em cada encomenda (`shopifyCurrencyConversionPercent`).
 * `startingBalance` (saldo inicial de caixa **desta loja**, definido manualmente — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
 * `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
@@ -1360,7 +1367,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `source` (`manual` / `api`)
 * `note` (opcional)
 
-> Na entrada manual, escolhes USD/EUR/GBP para todos os valores do dia; a app converte para a moeda base com taxa histórica (Frankfurter/ECB) do dia do gasto. Preenche só as plataformas usadas nesse dia. Fee fixa e % aplicam-se **por plataforma** sobre o respetivo gasto. Sync API: só reescreve **hoje**; `dateKey < hoje` nunca é tocado pelo sync automático.
+> Na entrada manual, escolhes USD/EUR/GBP para todos os valores do dia; a app converte para a moeda base com taxa histórica do dia do gasto (Frankfurter + fallback para moedas como RSD). Preenche só as plataformas usadas nesse dia. Fee fixa e % aplicam-se **por plataforma** sobre o respetivo gasto. Sync API: só reescreve **hoje**; `dateKey < hoje` nunca é tocado pelo sync automático.
 >
 > **Lucro:** o ad spend **só** é subtraído quando existe registo em `manualAdSpend` para esse `dateKey`. Dias sem valor (incluindo **hoje** antes de preencheres) mostram `—` na coluna Ad Spend e o lucro é calculado sem ads (provisório). Quando introduzes `0 €`, conta como zero gasto nesse dia.
 

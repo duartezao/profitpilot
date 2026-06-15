@@ -16,6 +16,11 @@ import {
   normalizeShopDomain,
   getClientCredentialsToken,
 } from "@/lib/shopify";
+import {
+  formatMissingScopesMessage,
+  missingShopifyScopes,
+  parseShopifyScopeList,
+} from "@/lib/shopify-scopes";
 import { syncStore } from "@/lib/shopify-sync";
 import { Store } from "@/models/Store";
 import { findStoreForUser } from "@/lib/store-scope";
@@ -29,6 +34,7 @@ import {
 import { normalizeFeeConfig, type FeeScheduleEntry } from "@/lib/fee-schedule";
 import { dateKeyInTimezone, normalizeStoreTimezone } from "@/lib/store-timezone";
 import { parseDateInput } from "@/lib/period";
+import { zLocaleNumber } from "@/lib/parse-number";
 
 export type AddStoreState = { error?: string };
 export type SyncState = { ok?: boolean; message?: string; error?: string };
@@ -56,9 +62,9 @@ const schema = z.object({
     .string()
     .trim()
     .min(1, "Indica desde que dia queres importar dados."),
-  processingPercent: z.coerce.number().min(0).max(100),
-  processingFixed: z.coerce.number().min(0),
-  transactionFeePercent: z.coerce.number().min(0).max(100),
+  processingPercent: zLocaleNumber(z.number().min(0).max(100)),
+  processingFixed: zLocaleNumber(z.number().min(0)),
+  transactionFeePercent: zLocaleNumber(z.number().min(0).max(100)),
   workspaceId: z.string().trim().optional(),
   cogsMode: z.enum(COGS_MODES).optional(),
   cogsInputCurrency: z.enum(["EUR", "USD"]).optional(),
@@ -125,12 +131,18 @@ export async function addStoreAction(
 
   // Obtém um token (client credentials) e testa a ligação antes de guardar.
   let shop;
+  let grantedScopes: string[] = [];
   try {
     const token = await getClientCredentialsToken(
       shopDomain,
       clientId,
       clientSecret,
     );
+    const missing = missingShopifyScopes(token.scope);
+    if (missing.length > 0) {
+      return { error: formatMissingScopesMessage(missing) };
+    }
+    grantedScopes = [...parseShopifyScopeList(token.scope)];
     shop = await testShopifyConnection(shopDomain, token.accessToken);
   } catch (e) {
     return {
@@ -185,6 +197,7 @@ export async function addStoreAction(
     cogsMode,
     cogsInputCurrency,
     credentials,
+    scopes: grantedScopes,
     importStartDate: importDay,
     ianaTimezone: shop.ianaTimezone || undefined,
     feeConfig,
