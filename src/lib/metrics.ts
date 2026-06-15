@@ -163,6 +163,8 @@ export type DashboardSummary = {
   profitChart: ProfitChartPoint[];
   /** Métricas dia a dia (vista por loja). */
   dailyMetrics: StoreDailyMetricRow[];
+  /** Métricas extra (custos, funil, encomendas…) — painel «Ver mais». */
+  extendedKpis: SummaryKpi[];
   /** ISO timestamp de quando os dados foram calculados. */
   generatedAt: string;
 };
@@ -186,6 +188,217 @@ function calcProfit(
 function deltaPct(current: number, prev: number) {
   if (prev === 0) return current > 0 ? 100 : 0;
   return ((current - prev) / Math.abs(prev)) * 100;
+}
+
+function fmtRoasRatio(v: number | null): string {
+  return v != null ? v.toFixed(2).replace(".", ",") : "—";
+}
+
+function buildExtendedStoreKpis(
+  cur: StoreAgg,
+  prev: StoreAgg,
+  curAdSpend: number,
+  prevAdSpend: number,
+  funnelCur: SessionFunnelMetrics,
+  funnelPrev: SessionFunnelMetrics | null,
+  deltaSuffix: string,
+  money: (v: number) => string,
+  fmtMoney: (v: number) => string,
+): SummaryKpi[] {
+  const curCm = contributionMarginPct(cur);
+  const prevCm = contributionMarginPct(prev);
+  const curAov = cur.orders > 0 ? cur.revenue / cur.orders : null;
+  const prevAov = prev.orders > 0 ? prev.revenue / prev.orders : null;
+  const curMer = curAdSpend > 0 ? cur.revenue / curAdSpend : null;
+  const prevMer = prevAdSpend > 0 ? prev.revenue / prevAdSpend : null;
+
+  const costKpis: SummaryKpi[] = [
+    {
+      label: "Margem contrib. %",
+      value: formatPercent(curCm),
+      title:
+        "Margem antes do ad spend (REV − COGS − envio − taxas) / REV",
+      delta: curCm - prevCm,
+      deltaLabel: deltaSuffix,
+      deltaIsPoints: true,
+      icon: "percent",
+    },
+    {
+      label: "COGS",
+      value: money(cur.cogs),
+      title: fmtMoney(cur.cogs),
+      delta: deltaPct(cur.cogs, prev.cogs),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Envio",
+      value: money(cur.shipping),
+      title: fmtMoney(cur.shipping),
+      delta: deltaPct(cur.shipping, prev.shipping),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Taxas",
+      value: money(cur.fees),
+      title: fmtMoney(cur.fees),
+      delta: deltaPct(cur.fees, prev.fees),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Ad Spend",
+      value: money(curAdSpend),
+      title: fmtMoney(curAdSpend),
+      delta: deltaPct(curAdSpend, prevAdSpend),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Refunds",
+      value: fmtMoney(cur.refunds),
+      title: "Informativo — já reflectidos na REV líquida",
+      delta: deltaPct(cur.refunds, prev.refunds),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Encomendas",
+      value: cur.orders.toLocaleString("pt-PT"),
+      delta: deltaPct(cur.orders, prev.orders),
+      deltaLabel: deltaSuffix,
+      icon: "trending",
+    },
+    {
+      label: "AOV",
+      value: curAov != null ? money(curAov) : "—",
+      title:
+        curAov != null
+          ? `Valor médio por encomenda · ${fmtMoney(curAov)}`
+          : undefined,
+      delta:
+        curAov != null && prevAov != null
+          ? deltaPct(curAov, prevAov)
+          : undefined,
+      deltaLabel: curAov != null ? deltaSuffix : undefined,
+      icon: "euro",
+    },
+    {
+      label: "MER",
+      value: fmtRoasRatio(curMer),
+      title: "Marketing Efficiency Ratio = REV / ad spend",
+      delta:
+        curMer != null && prevMer != null
+          ? deltaPct(curMer, prevMer)
+          : undefined,
+      deltaLabel: curMer != null ? deltaSuffix : undefined,
+      icon: "target",
+    },
+  ];
+
+  return [...costKpis, ...buildFunnelKpis(funnelCur, funnelPrev, deltaSuffix)];
+}
+
+function buildExtendedWorkspaceKpis(
+  cur: StoreAgg,
+  prev: StoreAgg,
+  curAdSpend: number,
+  prevAdSpend: number,
+  deltaSuffix: string,
+  money: (v: number) => string,
+  fmtMoney: (v: number) => string,
+): SummaryKpi[] {
+  const curCm = contributionMarginPct(cur);
+  const prevCm = contributionMarginPct(prev);
+  const curBer = berRoas(cur);
+  const prevBer = berRoas(prev);
+  const curAov = cur.orders > 0 ? cur.revenue / cur.orders : null;
+  const prevAov = prev.orders > 0 ? prev.revenue / prev.orders : null;
+
+  return [
+    {
+      label: "Margem contrib. %",
+      value: formatPercent(curCm),
+      title: "Margem antes do ad spend",
+      delta: curCm - prevCm,
+      deltaLabel: deltaSuffix,
+      deltaIsPoints: true,
+      icon: "percent",
+    },
+    {
+      label: "BER",
+      value: fmtRoasRatio(curBer),
+      title:
+        curBer != null
+          ? "Break-even ROAS — ROAS mínimo para não perder dinheiro"
+          : "Sem margem de contribuição positiva",
+      delta:
+        curBer != null && prevBer != null
+          ? deltaPct(curBer, prevBer)
+          : undefined,
+      deltaLabel: curBer != null ? deltaSuffix : undefined,
+      icon: "target",
+    },
+    {
+      label: "COGS",
+      value: money(cur.cogs),
+      title: fmtMoney(cur.cogs),
+      delta: deltaPct(cur.cogs, prev.cogs),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Envio",
+      value: money(cur.shipping),
+      title: fmtMoney(cur.shipping),
+      delta: deltaPct(cur.shipping, prev.shipping),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Taxas",
+      value: money(cur.fees),
+      title: fmtMoney(cur.fees),
+      delta: deltaPct(cur.fees, prev.fees),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Refunds",
+      value: fmtMoney(cur.refunds),
+      title: "Informativo — já na REV líquida",
+      delta: deltaPct(cur.refunds, prev.refunds),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    {
+      label: "Encomendas",
+      value: cur.orders.toLocaleString("pt-PT"),
+      delta: deltaPct(cur.orders, prev.orders),
+      deltaLabel: deltaSuffix,
+      icon: "trending",
+    },
+    {
+      label: "AOV",
+      value: curAov != null ? money(curAov) : "—",
+      title: curAov != null ? fmtMoney(curAov) : undefined,
+      delta:
+        curAov != null && prevAov != null
+          ? deltaPct(curAov, prevAov)
+          : undefined,
+      deltaLabel: curAov != null ? deltaSuffix : undefined,
+      icon: "euro",
+    },
+    {
+      label: "Ad Spend",
+      value: money(curAdSpend),
+      title: fmtMoney(curAdSpend),
+      delta: deltaPct(curAdSpend, prevAdSpend),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+  ];
 }
 
 function buildFunnelKpis(
@@ -999,9 +1212,10 @@ export async function buildWorkspaceSummary(
       acc.shipping += a.shipping;
       acc.fees += a.fees;
       acc.refunds += a.refunds;
+      acc.orders += a.orders;
       return acc;
     },
-    { revenue: 0, cogs: 0, shipping: 0, fees: 0, refunds: 0 },
+    { revenue: 0, cogs: 0, shipping: 0, fees: 0, refunds: 0, orders: 0 },
   );
 
   const netProfit = calcProfit(totals, adSpend);
@@ -1012,6 +1226,7 @@ export async function buildWorkspaceSummary(
   const deltaSuffix = `vs ${prevPeriodLabel}`;
 
   let kpis: SummaryKpi[];
+  let extendedKpis: SummaryKpi[] = [];
 
   if (scoped) {
     const cur = await aggregateOrders(currentSlice, scoped._id);
@@ -1024,6 +1239,7 @@ export async function buildWorkspaceSummary(
     const prevMargin =
       prev.revenue > 0 ? (prevProfit / prev.revenue) * 100 : 0;
     const curBer = berRoas(cur);
+    const prevBer = berRoas(prev);
     const curCm = contributionMarginPct(cur);
     const prevCm = contributionMarginPct(prev);
     const curRoas = curAdSpend > 0 ? cur.revenue / curAdSpend : null;
@@ -1068,15 +1284,17 @@ export async function buildWorkspaceSummary(
       },
       {
         label: "BER",
-        value: formatPercent(curCm),
+        value: fmtRoasRatio(curBer),
         title:
           curBer != null
-            ? `Margem contrib. · break-even ROAS ${curBer.toFixed(2).replace(".", ",")}`
-            : "Margem de contribuição (preço − COGS − envio − taxas)",
-        delta: curCm - prevCm,
-        deltaLabel: deltaSuffix,
-        deltaIsPoints: true,
-        icon: "trending",
+            ? `Break-even ROAS — abaixo disto há prejuízo (margem contrib. ${formatPercent(curCm)})`
+            : "Sem margem de contribuição positiva",
+        delta:
+          curBer != null && prevBer != null
+            ? deltaPct(curBer, prevBer)
+            : undefined,
+        deltaLabel: curBer != null ? deltaSuffix : undefined,
+        icon: "target",
       },
     ];
   } else {
