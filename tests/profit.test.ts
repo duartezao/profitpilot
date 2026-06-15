@@ -6,6 +6,7 @@ import {
   berRoas,
   calcPoas,
   fmtPoas,
+  fmtBerRoas,
   formatProfitBreakdown,
 } from "../src/lib/profit.ts";
 
@@ -32,6 +33,15 @@ describe("calcNetProfit", () => {
       50,
     );
     assert.equal(profit, -70);
+  });
+
+  it("subtrai despesas operacionais (apps/fixos)", () => {
+    const profit = calcNetProfit(
+      { revenue: 500, cogs: 200, shipping: 0, fees: 0 },
+      100,
+      50,
+    );
+    assert.equal(profit, 150);
   });
 });
 
@@ -108,6 +118,16 @@ describe("formatProfitBreakdown", () => {
     assert.match(text, /ad spend por preencher/);
     assert.doesNotMatch(text, /ads −/);
     assert.match(text, /60\.00€/);
+  });
+});
+
+describe("fmtBerRoas", () => {
+  it("formata com vírgula decimal", () => {
+    assert.equal(fmtBerRoas(2.5), "2,50");
+  });
+
+  it("devolve traço quando null", () => {
+    assert.equal(fmtBerRoas(null), "—");
   });
 });
 

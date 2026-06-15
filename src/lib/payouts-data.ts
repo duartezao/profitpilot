@@ -137,3 +137,55 @@ export async function buildPayoutsView(
     payouts: rows,
   };
 }
+
+export type PayoutExportRow = {
+  storeName: string;
+  issuedAtIso: string;
+  status: string;
+  fee: number;
+  net: number;
+  gross: number;
+  currency: string;
+};
+
+/** Payouts para exportação CSV (até 2000). */
+export async function listPayoutsForExport(
+  user: CurrentUser,
+  storeId?: string,
+  limit = 2000,
+): Promise<{ rows: PayoutExportRow[]; scopeName: string | null }> {
+  await connectToDatabase();
+
+  const storeQuery = activeStoreQueryForUser(user);
+  if (storeId && canAccessStore(user.storeAccess, storeId)) {
+    storeQuery._id = storeId;
+  }
+
+  const stores = await Store.find(storeQuery).select("name").lean();
+  const scopeName = storeId
+    ? (stores.find((s) => String(s._id) === storeId)?.name ?? null)
+    : null;
+  const storeName = new Map(stores.map((s) => [String(s._id), s.name]));
+
+  const payoutQuery: Record<string, unknown> = {
+    workspaceId: new mongoose.Types.ObjectId(user.workspaceId),
+  };
+  if (storeId) payoutQuery.storeId = new mongoose.Types.ObjectId(storeId);
+
+  const payouts = await Payout.find(payoutQuery)
+    .sort({ issuedAt: -1 })
+    .limit(limit)
+    .lean();
+
+  const rows: PayoutExportRow[] = payouts.map((p) => ({
+    storeName: storeName.get(String(p.storeId)) ?? "—",
+    issuedAtIso: p.issuedAt ? new Date(p.issuedAt).toISOString() : "",
+    status: norm(p.status),
+    fee: p.fee ?? 0,
+    net: p.net ?? 0,
+    gross: p.gross ?? 0,
+    currency: p.currency ?? "EUR",
+  }));
+
+  return { rows, scopeName };
+}

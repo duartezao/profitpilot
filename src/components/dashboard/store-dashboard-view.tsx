@@ -5,6 +5,7 @@ import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-sectio
 import { WaterfallChart } from "@/components/dashboard/waterfall-chart";
 import { PayoutPreviewCard } from "@/components/dashboard/payout-preview-card";
 import { ProductsProfitTable } from "@/components/dashboard/products-profit-table";
+import { CollapsibleSection } from "@/components/collapsible-section";
 
 export function StoreDashboardView({ data }: { data: DashboardSummary }) {
   const dashboard = data.storeDashboard;
@@ -14,19 +15,41 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
       <DashboardKpiSection kpis={data.kpis} variant="store" />
 
       {dashboard && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="rounded-lg border border-border bg-surface p-5 lg:col-span-2">
-            <h2 className="text-lg font-semibold">Para onde vai o dinheiro</h2>
-            <WaterfallChart steps={dashboard.waterfall} />
+        <CollapsibleSection
+          title="Para onde vai o dinheiro"
+          description="Waterfall do período e próximo payout."
+        >
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <WaterfallChart steps={dashboard.waterfall} />
+            </div>
+            <PayoutPreviewCard payout={dashboard.payout} />
           </div>
-          <PayoutPreviewCard payout={dashboard.payout} />
-        </div>
+        </CollapsibleSection>
       )}
 
-      <ProductsProfitTable
-        products={data.topProducts}
-        mode={data.topProductsMode}
-      />
+      <CollapsibleSection
+        title="Produtos"
+        description={
+          data.topProductsMode === "units"
+            ? "Ranking por unidades vendidas."
+            : "Ranking por lucro real."
+        }
+        badge={
+          data.topProducts.length > 0 ? (
+            <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {data.topProducts.length}
+            </span>
+          ) : undefined
+        }
+        flush
+      >
+        <ProductsProfitTable
+          products={data.topProducts}
+          mode={data.topProductsMode}
+          embedded
+        />
+      </CollapsibleSection>
     </div>
   );
 }

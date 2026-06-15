@@ -3,9 +3,10 @@ import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { fetchStoreDayFinancials } from "@/lib/metrics";
 import { fetchStoreDailyNoteForDay } from "@/lib/daily-notes";
+import { fetchStoreAdInsightsForDay } from "@/lib/ad-insights";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { parseDateInput } from "@/lib/period";
-import { assertStoreAccess, NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
+import { assertStoreAccess, activeStoreQueryForUser, NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import type { StoreAccess } from "@/lib/store-access";
 
 function fmtReportNumber(n: number): string {
@@ -125,6 +126,11 @@ export async function buildDailyReportText(opts: {
   );
   pushIf(
     lines,
+    financials.operatingExpenses > 0,
+    `DESPESAS: ${fmtReportNumber(financials.operatingExpenses)}`,
+  );
+  pushIf(
+    lines,
     financials.revenue > 0 ||
       financials.adSpend != null ||
       financials.profit !== 0 ||
@@ -148,6 +154,19 @@ export async function buildDailyReportText(opts: {
     `CVR %: ${fmtReportPct(financials.cvrPct)}`,
   );
 
+  const adInsights = await fetchStoreAdInsightsForDay(opts.storeId, opts.dateKey);
+  if (adInsights) {
+    if (adInsights.cpc != null) {
+      pushLine(lines, `CPC: ${fmtReportMoney(adInsights.cpc, currency)}`);
+    }
+    if (adInsights.ctr != null) {
+      pushLine(lines, `CTR %: ${fmtReportPct(adInsights.ctr)}`);
+    }
+    if (adInsights.cpm != null) {
+      pushLine(lines, `CPM: ${fmtReportMoney(adInsights.cpm, currency)}`);
+    }
+  }
+
   pushManualField(lines, "Produtos testados", rf?.productsTested);
   pushManualField(lines, "Coleções testadas", rf?.collectionsTested);
   pushManualField(lines, "Quais coleções já testadas", rf?.collectionsTestedList);
@@ -161,5 +180,58 @@ export async function buildDailyReportText(opts: {
     text: lines.join("\n"),
     dateKey: opts.dateKey,
     storeName: store.name,
+  };
+}
+
+export type MultiDailyReportResult = {
+  text: string;
+  dateKey: string;
+  storeCount: number;
+  dateLabel: string;
+};
+
+/** Relatório diário em texto — um bloco por loja acessível, separados por linha em branco. */
+export async function buildMultiStoreDailyReportText(opts: {
+  workspaceId: string;
+  dateKey: string;
+  storeAccess: StoreAccess;
+}): Promise<MultiDailyReportResult | null> {
+  await connectToDatabase();
+
+  const stores = await Store.find(
+    activeStoreQueryForUser({
+      workspaceId: opts.workspaceId,
+      storeAccess: opts.storeAccess,
+    }),
+  )
+    .select("_id")
+    .sort({ name: 1 })
+    .lean();
+
+  if (!stores.length) return null;
+
+  const day = parseDateInput(opts.dateKey);
+  if (!day) return null;
+
+  const blocks: string[] = [];
+  for (const store of stores) {
+    const report = await buildDailyReportText({
+      workspaceId: opts.workspaceId,
+      storeId: String(store._id),
+      dateKey: opts.dateKey,
+      storeAccess: opts.storeAccess,
+    });
+    if (report?.text.trim()) {
+      blocks.push(report.text.trim());
+    }
+  }
+
+  if (!blocks.length) return null;
+
+  return {
+    text: blocks.join("\n\n"),
+    dateKey: opts.dateKey,
+    storeCount: blocks.length,
+    dateLabel: day.toLocaleDateString("pt-PT"),
   };
 }

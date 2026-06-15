@@ -14,6 +14,10 @@ import {
   type StoreAdSpendSummary,
 } from "@/lib/ad-spend";
 import { parseDateInput } from "@/lib/period";
+import {
+  listAdAccountsForStore,
+  type AdAccountRow,
+} from "@/lib/ad-accounts";
 
 export type AdSpendStoreView = {
   storeId: string;
@@ -26,6 +30,7 @@ export type AdSpendStoreView = {
   calendar: AdSpendDayRow[];
   missingCount: number;
   yesterdayMissing: boolean;
+  adAccounts: AdAccountRow[];
 };
 
 export type AdSpendOverviewView = {
@@ -68,6 +73,10 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
       scoped.createdAt,
     );
     const missingDays = calendar.filter((d) => d.amount === null);
+    const adAccounts = await listAdAccountsForStore(
+      user.workspaceId,
+      String(scoped._id),
+    );
 
     const yesterday = range.toKey;
 
@@ -84,6 +93,7 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
         calendar,
         missingCount: countMissingDays(calendar),
         yesterdayMissing: missingDays.some((d) => d.isYesterday),
+        adAccounts,
       },
     };
   }

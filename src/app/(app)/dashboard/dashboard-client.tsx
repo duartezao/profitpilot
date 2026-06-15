@@ -3,6 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ProfitChart } from "@/components/dashboard/profit-chart";
+import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
+import { CollapsibleSection } from "@/components/collapsible-section";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
 import {
@@ -147,13 +149,21 @@ export function DashboardClient() {
           variant="workspace"
         />
 
-        <div className="rounded-lg border border-border bg-surface p-5">
-          <h2 className="text-lg font-semibold">Lucro líquido</h2>
-          <p className="text-sm text-muted-foreground">
-            Total agregado em {periodLabel}.
-          </p>
+        <CollapsibleSection
+          title="Lucro líquido"
+          description={
+            <>
+              Total agregado em {periodLabel}.
+              {portfolioData?.profitWindowStatus !== "consolidated" && (
+                <span className="mt-1 block text-xs">
+                  {portfolioData?.profitWindowNote}
+                </span>
+              )}
+            </>
+          }
+        >
           <ProfitChart data={portfolioData?.profitChart ?? []} />
-        </div>
+        </CollapsibleSection>
 
         <WorkspacesComparisonTable
           workspaces={portfolioData?.workspaces ?? []}
@@ -183,6 +193,9 @@ export function DashboardClient() {
             missingCogsMessage={workspaceData.missingCogsMessage}
             missingAdSpendDays={workspaceData.missingAdSpendDays}
           />
+          {workspaceData.monthlyGoals && (
+            <MonthlyGoalsCard goals={workspaceData.monthlyGoals} />
+          )}
           <StoreDashboardView data={workspaceData} />
         </>
       ) : (
@@ -227,16 +240,28 @@ export function DashboardClient() {
             variant="workspace"
           />
 
-          <div className="rounded-lg border border-border bg-surface p-5">
-            <h2 className="text-lg font-semibold">Lucro líquido</h2>
-            <p className="text-sm text-muted-foreground">
-              Evolução em {periodLabel}.
-            </p>
+          {workspaceData?.monthlyGoals && (
+            <MonthlyGoalsCard goals={workspaceData.monthlyGoals} />
+          )}
+
+          <CollapsibleSection
+            title="Lucro líquido"
+            description={
+              <>
+                Evolução em {periodLabel}.
+                {workspaceData?.profitWindowStatus !== "consolidated" && (
+                  <span className="mt-1 block text-xs">
+                    {workspaceData?.profitWindowNote}
+                  </span>
+                )}
+              </>
+            }
+          >
             <ProfitChart
               data={workspaceData?.profitChart ?? []}
               series={workspaceData?.profitChartSeries}
             />
-          </div>
+          </CollapsibleSection>
 
           <StoresComparisonTable stores={workspaceData?.stores ?? []} />
         </>

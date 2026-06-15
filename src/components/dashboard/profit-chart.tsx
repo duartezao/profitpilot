@@ -102,6 +102,11 @@ function ProfitTooltip({
           {point.notePreview}
         </p>
       )}
+      {point.consolidated === false && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Lucro provisório (janela de refunds)
+        </p>
+      )}
     </div>
   );
 }
@@ -252,6 +257,11 @@ export function ProfitChart({
         </ResponsiveContainer>
       </div>
       {multiStore && series && <ChartLegend series={series} />}
+      {data.some((p) => p.consolidated === false) && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Dias recentes = lucro provisório (reembolsos ainda podem entrar).
+        </p>
+      )}
     </div>
   );
 }

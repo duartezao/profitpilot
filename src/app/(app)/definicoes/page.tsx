@@ -229,6 +229,10 @@ export default async function DefinicoesPage() {
             netMarginMin: workspace?.targets?.netMarginMin ?? 15,
             refundRateMax: workspace?.targets?.refundRateMax ?? 5,
             chargebackRateMax: workspace?.targets?.chargebackRateMax ?? 1,
+            poasMin: workspace?.targets?.poasMin ?? 1,
+            monthlyRevenueGoal: workspace?.targets?.monthlyRevenueGoal ?? 0,
+            monthlyProfitGoal: workspace?.targets?.monthlyProfitGoal ?? 0,
+            refundWindowDays: workspace?.refundWindowDays ?? 30,
           }}
         />
       </SettingsCollapsibleSection>

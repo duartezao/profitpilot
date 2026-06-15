@@ -1,7 +1,7 @@
 /* ProfitPilot — service worker (PWA).
    Navegação: network-first com fallback em cache.
    Estáticos: cache após rede. API e dev tooling: não interceptar. */
-const CACHE = "profitpilot-v2";
+const CACHE = "profitpilot-v3";
 
 self.addEventListener("install", () => {
   self.skipWaiting();

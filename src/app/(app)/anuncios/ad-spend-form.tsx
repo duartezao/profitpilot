@@ -22,6 +22,7 @@ export function AdSpendForm({
   minDate,
   canEdit,
   onSaved,
+  embedded = false,
 }: {
   storeId: string;
   storeName: string;
@@ -32,6 +33,8 @@ export function AdSpendForm({
   minDate?: string;
   canEdit: boolean;
   onSaved?: () => void;
+  /** Dentro de CollapsibleSection — sem cabeçalho duplicado. */
+  embedded?: boolean;
 }) {
   const [state, action, pending] = useActionState<AdSpendState, FormData>(
     saveManualAdSpendAction,
@@ -47,16 +50,22 @@ export function AdSpendForm({
   return (
     <form
       action={action}
-      className="space-y-4 rounded-lg border border-border bg-surface p-5"
+      className={
+        embedded
+          ? "space-y-4"
+          : "space-y-4 rounded-lg border border-border bg-surface p-5"
+      }
     >
-      <div>
-        <h2 className="text-lg font-semibold">Registar ad spend</h2>
-        <p className="text-sm text-muted-foreground">
-          Por plataforma em <Sensitive as="span">{storeName}</Sensitive> — gasto,
-          fee fixa de agência e % sobre o gasto. Converte para {baseCurrency}{" "}
-          com a taxa do dia.
-        </p>
-      </div>
+      {!embedded && (
+        <div>
+          <h2 className="text-lg font-semibold">Registar ad spend</h2>
+          <p className="text-sm text-muted-foreground">
+            Por plataforma em <Sensitive as="span">{storeName}</Sensitive> — gasto,
+            fee fixa de agência e % sobre o gasto. Converte para {baseCurrency}{" "}
+            com a taxa do dia.
+          </p>
+        </div>
+      )}
 
       {state.error && (
         <p

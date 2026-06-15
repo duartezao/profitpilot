@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Check, FileText } from "lucide-react";
+import { Copy, Check, FileText, Download } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 
 export function DailyReportCard({
@@ -9,13 +9,19 @@ export function DailyReportCard({
   storeName,
   dateLabel,
   compact = false,
+  downloadBaseHref,
+  /** @deprecated usar downloadBaseHref */
+  downloadHref,
 }: {
   reportText: string;
   storeName: string;
   dateLabel: string;
   /** Sem cabeçalho duplicado — usado dentro do painel colapsável */
   compact?: boolean;
+  downloadBaseHref?: string;
+  downloadHref?: string;
 }) {
+  const base = downloadBaseHref ?? downloadHref?.replace(/&format=txt$/, "");
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -58,23 +64,45 @@ export function DailyReportCard({
             </Sensitive>
           </p>
         )}
-        <button
-          type="button"
-          onClick={copy}
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
-        >
-          {copied ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+          >
+            {copied ? (
+              <>
+                <Check className="h-4 w-4 text-positive" />
+                Copiado
+              </>
+            ) : (
+              <>
+                <Copy className="h-4 w-4" />
+                Copiar
+              </>
+            )}
+          </button>
+          {base && (
             <>
-              <Check className="h-4 w-4 text-positive" />
-              Copiado
-            </>
-          ) : (
-            <>
-              <Copy className="h-4 w-4" />
-              Copiar
+              <a
+                href={`${base}&format=txt`}
+                download
+                className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+              >
+                <Download className="h-4 w-4" />
+                TXT
+              </a>
+              <a
+                href={`${base}&format=pdf`}
+                download
+                className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+              >
+                <Download className="h-4 w-4" />
+                PDF
+              </a>
             </>
           )}
-        </button>
+        </div>
       </div>
       <pre
         className="max-h-80 overflow-auto rounded-lg border border-border bg-background p-4 text-xs leading-relaxed whitespace-pre-wrap tabular-nums"

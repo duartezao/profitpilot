@@ -6,9 +6,20 @@ export type ProfitInputs = {
   fees: number;
 };
 
-/** Net Profit = REV − COGS − envio − taxas − ad spend. */
-export function calcNetProfit(input: ProfitInputs, adSpend = 0): number {
-  return input.revenue - input.cogs - input.shipping - input.fees - adSpend;
+/** Net Profit = REV − COGS − envio − taxas − ad spend − outros custos operacionais. */
+export function calcNetProfit(
+  input: ProfitInputs,
+  adSpend = 0,
+  operatingExpenses = 0,
+): number {
+  return (
+    input.revenue -
+    input.cogs -
+    input.shipping -
+    input.fees -
+    adSpend -
+    operatingExpenses
+  );
 }
 
 export function contributionMarginPct(input: ProfitInputs): number {
@@ -36,6 +47,11 @@ export function fmtPoas(v: number | null): string {
   return v.toFixed(2).replace(".", ",");
 }
 
+export function fmtBerRoas(v: number | null): string {
+  if (v == null) return "—";
+  return v.toFixed(2).replace(".", ",");
+}
+
 export type ProfitBreakdownInput = {
   revenue: number;
   cogs: number;
@@ -48,10 +64,11 @@ export function formatProfitBreakdown(
   input: ProfitBreakdownInput,
   adSpend: number,
   fmtMoney: (v: number) => string,
-  opts?: { note?: string; adSpendKnown?: boolean },
+  opts?: { note?: string; adSpendKnown?: boolean; operatingExpenses?: number },
 ): string {
   const adSpendKnown = opts?.adSpendKnown !== false;
   const adForProfit = adSpendKnown ? adSpend : 0;
+  const operatingExpenses = opts?.operatingExpenses ?? 0;
   const profit = calcNetProfit(
     {
       revenue: input.revenue,
@@ -60,6 +77,7 @@ export function formatProfitBreakdown(
       fees: input.fees ?? 0,
     },
     adForProfit,
+    operatingExpenses,
   );
   const parts = [`REV ${fmtMoney(input.revenue)}`, `COGS −${fmtMoney(input.cogs)}`];
   if ((input.fees ?? 0) > 0) parts.push(`taxas −${fmtMoney(input.fees ?? 0)}`);
@@ -67,6 +85,9 @@ export function formatProfitBreakdown(
     parts.push(`envio −${fmtMoney(input.shipping ?? 0)}`);
   }
   if (adSpendKnown && adSpend > 0) parts.push(`ads −${fmtMoney(adSpend)}`);
+  if (operatingExpenses > 0) {
+    parts.push(`despesas −${fmtMoney(operatingExpenses)}`);
+  }
   let note = opts?.note;
   if (!note && !adSpendKnown) {
     note = "ad spend por preencher — lucro sem ads";

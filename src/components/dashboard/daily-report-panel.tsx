@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { formatDateInput, addDays, startOfDay } from "@/lib/period";
 import { periodQueryFromSearchParams } from "@/lib/period";
 import { DailyReportCard } from "@/app/(app)/notas/daily-report-card";
+import { DailyReportVisualCard } from "@/components/dashboard/daily-report-visual-card";
 import { cn } from "@/lib/utils";
 
 type ReportPayload = {
@@ -13,23 +14,37 @@ type ReportPayload = {
   storeName: string;
   dateKey: string;
   dateLabel: string;
+  storeCount?: number;
+  multiStore?: boolean;
 };
 
-export function DailyReportPanel({ storeId }: { storeId: string }) {
+type DailyReportPanelProps = {
+  /** Omitir para relatório de todas as lojas acessíveis. */
+  storeId?: string;
+};
+
+export function DailyReportPanel({ storeId }: DailyReportPanelProps) {
   const searchParams = useSearchParams();
   const defaultDate = formatDateInput(addDays(startOfDay(new Date()), -1));
   const [open, setOpen] = useState(false);
   const [dateKey, setDateKey] = useState(defaultDate);
   const [report, setReport] = useState<ReportPayload | null>(null);
+  const [viewMode, setViewMode] = useState<"text" | "visual">("visual");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const multiStore = !storeId;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const q = new URLSearchParams(periodQueryFromSearchParams(searchParams));
-      q.set("store", storeId);
+      if (storeId) {
+        q.set("store", storeId);
+      } else {
+        q.set("all", "1");
+      }
       q.set("date", dateKey);
       const res = await fetch(`/api/reports/daily?${q.toString()}`, {
         cache: "no-store",
@@ -54,6 +69,10 @@ export function DailyReportPanel({ storeId }: { storeId: string }) {
     void load();
   }, [open, load]);
 
+  const downloadHref = storeId
+    ? `/api/reports/daily?store=${storeId}&date=${dateKey}`
+    : `/api/reports/daily?all=1&date=${dateKey}`;
+
   return (
     <div className="rounded-lg border border-border bg-surface">
       <button
@@ -66,9 +85,15 @@ export function DailyReportPanel({ storeId }: { storeId: string }) {
           <h2 className="flex items-center gap-2 text-lg font-semibold">
             <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
             Relatório diário
+            {multiStore && (
+              <span className="text-sm font-normal text-muted-foreground">
+                · todas as lojas
+              </span>
+            )}
           </h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Template automático — REV, funil, profit — pronto a copiar.
+            Template automático — REV, funil, ads (CPC/CTR/CPM), profit
+            {multiStore ? " (um bloco por loja)." : "."}
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm font-medium text-muted-foreground">
@@ -96,7 +121,9 @@ export function DailyReportPanel({ storeId }: { storeId: string }) {
           <div className="space-y-4 border-t border-border px-4 pb-4 pt-4 sm:px-5 sm:pb-5">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <p className="text-sm text-muted-foreground">
-                Escolhe o dia e copia o texto para partilhar.
+                {multiStore
+                  ? "Gera um bloco por loja — TXT, PDF ou imprimir."
+                  : "Escolhe o dia — TXT, PDF ou imprimir."}
               </p>
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -122,12 +149,50 @@ export function DailyReportPanel({ storeId }: { storeId: string }) {
             )}
 
             {!loading && report && (
-              <DailyReportCard
-                reportText={report.text}
-                storeName={report.storeName}
-                dateLabel={report.dateLabel}
-                compact
-              />
+              <div className="space-y-4">
+                <div className="flex gap-2 print:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("visual")}
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-sm font-medium",
+                      viewMode === "visual"
+                        ? "border-accent bg-accent/10 text-accent"
+                        : "border-border text-muted-foreground",
+                    )}
+                  >
+                    Cartão
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("text")}
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-sm font-medium",
+                      viewMode === "text"
+                        ? "border-accent bg-accent/10 text-accent"
+                        : "border-border text-muted-foreground",
+                    )}
+                  >
+                    Texto
+                  </button>
+                </div>
+                {viewMode === "visual" ? (
+                  <DailyReportVisualCard
+                    reportText={report.text}
+                    storeName={report.storeName}
+                    dateLabel={report.dateLabel}
+                    reportPdfHref={`${downloadHref}&format=pdf`}
+                  />
+                ) : (
+                  <DailyReportCard
+                    reportText={report.text}
+                    storeName={report.storeName}
+                    dateLabel={report.dateLabel}
+                    downloadBaseHref={downloadHref}
+                    compact
+                  />
+                )}
+              </div>
             )}
           </div>
         </div>

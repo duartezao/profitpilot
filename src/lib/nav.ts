@@ -11,6 +11,7 @@ import {
   Package,
   ShoppingBag,
   RotateCcw,
+  ShieldAlert,
   Boxes,
   Bell,
   ClipboardList,
@@ -52,6 +53,7 @@ export const storeNavItems: NavItem[] = [
   { label: "Payouts", href: "/payouts", icon: Banknote },
   { label: "Anúncios", href: "/anuncios", icon: Megaphone },
   { label: "Reembolsos", href: "/reembolsos", icon: RotateCcw },
+  { label: "Chargebacks", href: "/chargebacks", icon: ShieldAlert },
   { label: "Custos", href: "/cogs", icon: Boxes },
   { label: "Relatórios", href: "/notas", icon: NotebookPen },
   { label: "Alertas", href: "/alertas", icon: Bell },
@@ -67,31 +69,63 @@ export const storeRequiredPaths = new Set([
   "/produtos",
   "/pedidos",
   "/reembolsos",
+  "/chargebacks",
 ]);
 
 export function navItemsForStoreScope(storeId: string | null): NavItem[] {
   return storeId ? storeNavItems : workspaceNavItems;
 }
 
-/** Mobile — consolidado (mockup PWA). */
-export const mobileWorkspaceNavItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Lojas", href: "/lojas", icon: Store },
-  { label: "Decisão", href: "/decisao", icon: Scale },
-  { label: "Mais", href: "/definicoes", icon: MoreHorizontal },
-];
+/** Item especial da barra inferior — abre o menu com o resto das páginas. */
+export const MOBILE_MORE_HREF = "__more__";
 
-/** Mobile — loja selecionada. */
-export const mobileStoreNavItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Métricas", href: "/metricas", icon: BarChart3 },
-  { label: "Produtos", href: "/produtos", icon: Package },
-  { label: "Payouts", href: "/payouts", icon: Banknote },
-];
+export const mobileMoreNavItem: NavItem = {
+  label: "Mais",
+  href: MOBILE_MORE_HREF,
+  icon: MoreHorizontal,
+};
+
+export function isMobileMoreNavItem(item: NavItem): boolean {
+  return item.href === MOBILE_MORE_HREF;
+}
+
+/** Itens fixos na barra inferior (telemóvel). */
+export function mobilePrimaryNavItems(storeId: string | null): NavItem[] {
+  if (storeId) {
+    return [
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Métricas", href: "/metricas", icon: BarChart3 },
+      { label: "Produtos", href: "/produtos", icon: Package },
+      mobileMoreNavItem,
+    ];
+  }
+  return [
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "Lojas", href: "/lojas", icon: Store },
+    { label: "Decisão", href: "/decisao", icon: Scale },
+    mobileMoreNavItem,
+  ];
+}
+
+/** Restantes páginas da sidebar — acessíveis pelo menu «Mais». */
+export function mobileOverflowNavItems(storeId: string | null): NavItem[] {
+  const all = navItemsForStoreScope(storeId);
+  const primaryHrefs = new Set(
+    mobilePrimaryNavItems(storeId)
+      .filter((i) => !isMobileMoreNavItem(i))
+      .map((i) => i.href),
+  );
+  return all.filter((i) => !primaryHrefs.has(i.href));
+}
 
 export function mobileNavForStoreScope(storeId: string | null): NavItem[] {
-  return storeId ? mobileStoreNavItems : mobileWorkspaceNavItems;
+  return mobilePrimaryNavItems(storeId);
 }
+
+/** @deprecated usar mobilePrimaryNavItems */
+export const mobileWorkspaceNavItems = mobilePrimaryNavItems(null);
+/** @deprecated usar mobilePrimaryNavItems */
+export const mobileStoreNavItems = mobilePrimaryNavItems("store");
 
 /** @deprecated */
 export const navItems = workspaceNavItems;

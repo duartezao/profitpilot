@@ -17,6 +17,7 @@ import { CostRow, type CostRowData } from "./cost-row";
 import { CogsCsvImport } from "./cogs-csv-import";
 import { OrderCogsPanel } from "./order-cogs-panel";
 import { DayCogsPanel } from "./day-cogs-panel";
+import { CollapsibleSection } from "@/components/collapsible-section";
 
 export const metadata: Metadata = { title: "Custos (COGS)" };
 
@@ -144,33 +145,65 @@ export default async function CogsPage({
       </div>
 
       {scoped && activeMode === "order" && (
-        <OrderCogsPanel
-          storeId={String(scoped._id)}
-          storeName={scoped.name}
-          baseCurrency={baseCurrency}
-          inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
-          rows={orderRows}
-        />
+        <CollapsibleSection
+          title="COGS por encomenda"
+          description={`${orderRows.length} encomendas no painel.`}
+          flush
+        >
+          <OrderCogsPanel
+            storeId={String(scoped._id)}
+            storeName={scoped.name}
+            baseCurrency={baseCurrency}
+            inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+            rows={orderRows}
+          />
+        </CollapsibleSection>
       )}
 
       {scoped && activeMode === "day" && (
-        <DayCogsPanel
-          storeId={String(scoped._id)}
-          storeName={scoped.name}
-          baseCurrency={baseCurrency}
-          inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
-          rows={dayRows}
-        />
+        <CollapsibleSection
+          title="COGS por dia"
+          description={`${dayRows.length} dias no calendário.`}
+          flush
+        >
+          <DayCogsPanel
+            storeId={String(scoped._id)}
+            storeName={scoped.name}
+            baseCurrency={baseCurrency}
+            inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+            rows={dayRows}
+          />
+        </CollapsibleSection>
       )}
 
       {showVariantTable && (
         <>
-          <CogsCsvImport
-            stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
-            defaultStoreId={scoped ? String(scoped._id) : undefined}
-          />
+          <CollapsibleSection
+            title="Importar CSV"
+            description="Actualiza custos em massa por variante."
+          >
+            <CogsCsvImport
+              stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
+              defaultStoreId={scoped ? String(scoped._id) : undefined}
+            />
+          </CollapsibleSection>
 
-          <div className="rounded-lg border border-border bg-surface">
+          <CollapsibleSection
+            title="Produtos sem custo"
+            description={
+              rows.length > 0
+                ? `${rows.length} variantes vendidas sem COGS completo.`
+                : "Nenhuma venda em falta."
+            }
+            badge={
+              rows.length > 0 ? (
+                <span className="rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                  {rows.length}
+                </span>
+              ) : undefined
+            }
+            flush
+          >
             {rows.length === 0 ? (
               <div className="p-12 text-center text-sm text-muted-foreground">
                 {storeIds.length === 0
@@ -197,7 +230,7 @@ export default async function CogsPage({
                 </table>
               </div>
             )}
-          </div>
+          </CollapsibleSection>
         </>
       )}
     </div>

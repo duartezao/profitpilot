@@ -386,6 +386,10 @@ export async function buildPortfolioSummary(
     missingAdSpendDays,
     profitChart,
     dailyMetrics: [],
+    refundWindowDays: 30,
+    profitWindowStatus: "provisional",
+    profitWindowNote: "Lucro provisório — período dentro da janela de 30 dias; reembolsos ainda podem alterar o resultado.",
     generatedAt: new Date().toISOString(),
+    monthlyGoals: null,
   };
 }

@@ -47,6 +47,7 @@ async function shopifyGraphQL<T>(
   return json.data;
 }
 
+async function fetchShopifyOrderLinePrices(
   domain: string,
   token: string,
   shopifyIds: string[],

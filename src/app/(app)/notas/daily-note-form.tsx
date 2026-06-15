@@ -14,11 +14,13 @@ export function DailyNoteForm({
   defaultDate,
   defaultStoreId,
   canEdit,
+  embedded = false,
 }: {
   stores: StoreOption[];
   defaultDate: string;
   defaultStoreId?: string | null;
   canEdit: boolean;
+  embedded?: boolean;
 }) {
   const [state, action, pending] = useActionState<NoteState, FormData>(
     saveDailyNoteAction,
@@ -26,8 +28,13 @@ export function DailyNoteForm({
   );
 
   return (
-    <form action={action} className="space-y-4 rounded-lg border border-border bg-surface p-5">
-      <h2 className="text-lg font-semibold">Nota do dia</h2>
+    <form
+      action={action}
+      className={
+        embedded ? "space-y-4" : "space-y-4 rounded-lg border border-border bg-surface p-5"
+      }
+    >
+      {!embedded && <h2 className="text-lg font-semibold">Nota do dia</h2>}
       {state.error && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
           {state.error}

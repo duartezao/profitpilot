@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { ShoppingBag } from "lucide-react";
+import { ExportFormatLinks } from "@/components/export-format-links";
 import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
 import { listStoreOrders } from "@/lib/orders";
+import { scopeQueryFromInput } from "@/lib/scope-query";
+import { CollapsibleSection } from "@/components/collapsible-section";
 
 export const metadata: Metadata = { title: "Pedidos" };
 export const dynamic = "force-dynamic";
@@ -38,15 +41,29 @@ export default async function PedidosPage({
     { label: "Reembolsos", value: stats.refundedFmt },
   ];
 
+  const scopeQs = scopeQueryFromInput({
+    period,
+    from,
+    to,
+    dates,
+    store: storeId,
+  });
+  const exportHref = scopeQs
+    ? `/api/export/orders?${scopeQs}`
+    : `/api/export/orders?store=${storeId}`;
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           Pedidos · <span data-sensitive>{storeName || "Loja"}</span>
         </h1>
         <p className="text-sm text-muted-foreground">
           Encomendas no período · {periodLabel}
         </p>
+        </div>
+        <ExportFormatLinks href={exportHref} />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -74,6 +91,16 @@ export default async function PedidosPage({
           </p>
         </div>
       ) : (
+        <CollapsibleSection
+          title="Lista de pedidos"
+          description={`${rows.length} encomendas no período.`}
+          badge={
+            <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {rows.length}
+            </span>
+          }
+          flush
+        >
         <>
           <div className="hidden overflow-x-auto rounded-lg border border-border bg-surface md:block">
             <table className="w-full min-w-[720px] text-sm">
@@ -170,6 +197,7 @@ export default async function PedidosPage({
             ))}
           </div>
         </>
+        </CollapsibleSection>
       )}
     </div>
   );

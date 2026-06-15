@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { Megaphone, Boxes } from "lucide-react";
+import { ExportFormatLinks } from "@/components/export-format-links";
 import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
 import { buildWorkspacePnl } from "@/lib/metrics";
@@ -11,6 +13,14 @@ import { formatCurrency, formatPercent } from "@/lib/utils";
 import { formatProfitBreakdown } from "@/lib/profit";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
 import { StoreCashFlowSection } from "@/components/financas/store-cash-flow";
+import { ExpensesPanel } from "@/components/financas/expenses-panel";
+import { BusinessPnlPanel } from "@/components/financas/business-pnl-panel";
+import { FinancasModeToggle } from "@/components/financas/financas-mode-toggle";
+import { CollapsibleSection } from "@/components/collapsible-section";
+import { connectToDatabase } from "@/lib/db";
+import { Store } from "@/models/Store";
+import { listWorkspaceExpenses, sumWorkspaceMonthlyFixedBase } from "@/lib/expenses";
+import { storeQueryForUser } from "@/lib/store-scope";
 
 export const metadata: Metadata = { title: "Lucro & Finanças" };
 export const dynamic = "force-dynamic";
@@ -24,11 +34,13 @@ export default async function FinancasPage({
     from?: string;
     to?: string;
     dates?: string;
+    mode?: string;
   }>;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  const { store: storeId, period, from, to, dates } = await searchParams;
+  const { store: storeId, period, from, to, dates, mode } = await searchParams;
+  const businessMode = mode === "business" && !storeId;
   if (storeId && !canAccessStore(user.storeAccess, storeId)) {
     redirect("/financas");
   }
@@ -70,6 +82,14 @@ export default async function FinancasPage({
     { label: "Taxas de transação", value: -totals.fees, tone: "text-negative", share: totals.fees },
     { label: "Ad Spend", value: -totals.adSpend, tone: "text-negative", share: totals.adSpend },
   ];
+  if (totals.operatingExpenses > 0) {
+    lines.push({
+      label: "Apps e fixos",
+      value: -totals.operatingExpenses,
+      tone: "text-negative",
+      share: totals.operatingExpenses,
+    });
+  }
   if (totals.refunds > 0) {
     lines.push({
       label: "Reembolsos (já na receita)",
@@ -82,6 +102,28 @@ export default async function FinancasPage({
   const scopeQs = scopeQueryFromInput({ period, from, to, dates, store: storeId });
   const cogsHref = scopeQs ? `/cogs?${scopeQs}` : "/cogs";
   const adsHref = scopeQs ? `/anuncios?${scopeQs}` : "/anuncios";
+  const pnlExportHref = scopeQs
+    ? `/api/export/pnl?${scopeQs}`
+    : "/api/export/pnl";
+
+  await connectToDatabase();
+  const storeDocs = await Store.find(storeQueryForUser(user))
+    .select("name")
+    .lean();
+  const storeNames = new Map(storeDocs.map((s) => [String(s._id), s.name]));
+  const storeOptions = storeDocs.map((s) => ({
+    id: String(s._id),
+    name: s.name,
+  }));
+  const expenses = await listWorkspaceExpenses(
+    user.workspaceId,
+    storeNames,
+    currency,
+  );
+  const canEditExpenses = ["owner", "admin", "editor"].includes(user.role);
+  const fixedMonthly = businessMode
+    ? await sumWorkspaceMonthlyFixedBase(user.workspaceId)
+    : 0;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -102,7 +144,13 @@ export default async function FinancasPage({
             : `P&L real · ${pnl.periodLabel}.`}
         </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {!storeId && (
+            <Suspense fallback={null}>
+              <FinancasModeToggle />
+            </Suspense>
+          )}
+          <ExportFormatLinks href={pnlExportHref} />
           <Link
             href={cogsHref}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
@@ -129,17 +177,24 @@ export default async function FinancasPage({
         adsHref={adsHref}
       />
 
-      {storeCash && <StoreCashFlowSection cash={storeCash} />}
+      {businessMode && (
+        <BusinessPnlPanel
+          totals={totals}
+          currency={currency}
+          fixedMonthly={fixedMonthly}
+          storeCount={stores.length}
+        />
+      )}
 
-      <div>
-        <h2 className="text-lg font-semibold">
-          {scopeName ? "Lucro do período" : "Resumo do período"}
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Métricas do intervalo seleccionado na topbar — independente do saldo
-          acumulado acima.
-        </p>
-      </div>
+      {storeCash && (
+        <CollapsibleSection
+          id="caixa-loja"
+          title="Caixa da loja"
+          description={`Desde ${storeCash.sinceLabel} — saldo acumulado independente do período.`}
+        >
+          <StoreCashFlowSection cash={storeCash} embedded />
+        </CollapsibleSection>
+      )}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="rounded-lg border border-border bg-surface p-5">
@@ -151,7 +206,13 @@ export default async function FinancasPage({
         <div className="rounded-lg border border-border bg-surface p-5">
           <p className="text-[13px] font-medium text-muted-foreground">Custos totais</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums" data-sensitive>
-            {money(totals.cogs + totals.shipping + totals.fees + totals.adSpend)}
+            {money(
+              totals.cogs +
+                totals.shipping +
+                totals.fees +
+                totals.adSpend +
+                totals.operatingExpenses,
+            )}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-5">
@@ -175,13 +236,11 @@ export default async function FinancasPage({
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-surface">
-        <div className="border-b border-border p-5">
-          <h2 className="text-lg font-semibold">Demonstração de resultados</h2>
-          <p className="text-sm text-muted-foreground">
-            Onde está a ir o dinheiro (peso sobre a receita).
-          </p>
-        </div>
+      <CollapsibleSection
+        title="Demonstração de resultados"
+        description="Onde está a ir o dinheiro no período seleccionado."
+        flush
+      >
         <div className="divide-y divide-border">
           {lines.map((l) => (
             <div key={l.label} className="flex items-center justify-between px-5 py-3">
@@ -215,14 +274,14 @@ export default async function FinancasPage({
             </span>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      {!scopeName && (
-      <div className="rounded-lg border border-border bg-surface">
-        <div className="border-b border-border p-5">
-          <h2 className="text-lg font-semibold">Por loja</h2>
-          <p className="text-sm text-muted-foreground">Lucro real de cada loja.</p>
-        </div>
+      {!scopeName && stores.length > 0 && (
+      <CollapsibleSection
+        title="Por loja"
+        description={`${stores.length} loja${stores.length === 1 ? "" : "s"} no período.`}
+        flush
+      >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[800px] text-sm">
             <thead>
@@ -238,53 +297,52 @@ export default async function FinancasPage({
               </tr>
             </thead>
             <tbody>
-              {stores.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    Sem dados ainda. Liga e sincroniza uma loja para ver o lucro real.
+              {stores.map((s) => (
+                <tr key={s.name} className="border-t border-border hover:bg-muted">
+                  <td className="px-5 py-3 font-medium" data-sensitive>
+                    {s.name}
+                  </td>
+                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                    {money(s.revenue)}
+                  </td>
+                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                    {money(s.cogs)}
+                  </td>
+                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                    {money(s.adSpend)}
+                  </td>
+                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                    {money(s.fees)}
+                  </td>
+                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                    {money(s.refunds)}
+                  </td>
+                  <td
+                    className={`px-5 py-3 text-right tabular-nums ${s.netProfit >= 0 ? "text-positive" : "text-negative"}`}
+                    data-sensitive
+                  >
+                    {money(s.netProfit)}
+                  </td>
+                  <td
+                    className={`px-5 py-3 text-right tabular-nums ${s.margin >= 0 ? "" : "text-negative"}`}
+                    data-sensitive
+                  >
+                    {formatPercent(s.margin)}
                   </td>
                 </tr>
-              ) : (
-                stores.map((s) => (
-                  <tr key={s.name} className="border-t border-border hover:bg-muted">
-                    <td className="px-5 py-3 font-medium" data-sensitive>
-                      {s.name}
-                    </td>
-                    <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                      {money(s.revenue)}
-                    </td>
-                    <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                      {money(s.cogs)}
-                    </td>
-                    <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                      {money(s.adSpend)}
-                    </td>
-                    <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                      {money(s.fees)}
-                    </td>
-                    <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                      {money(s.refunds)}
-                    </td>
-                    <td
-                      className={`px-5 py-3 text-right tabular-nums ${s.netProfit >= 0 ? "text-positive" : "text-negative"}`}
-                      data-sensitive
-                    >
-                      {money(s.netProfit)}
-                    </td>
-                    <td
-                      className={`px-5 py-3 text-right tabular-nums ${s.margin >= 0 ? "" : "text-negative"}`}
-                      data-sensitive
-                    >
-                      {formatPercent(s.margin)}
-                    </td>
-                  </tr>
-                ))
-              )}
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
+      </CollapsibleSection>
       )}
+
+      <ExpensesPanel
+        expenses={expenses}
+        stores={storeOptions}
+        canEdit={canEditExpenses}
+        baseCurrency={currency}
+      />
     </div>
   );
 }

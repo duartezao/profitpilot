@@ -9,6 +9,7 @@ import { canAccessStore } from "@/lib/store-access";
 import { formatDateInput } from "@/lib/period";
 import { DailyNoteForm } from "./daily-note-form";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
+import { CollapsibleSection } from "@/components/collapsible-section";
 
 export const metadata: Metadata = { title: "Notas & Relatórios" };
 export const dynamic = "force-dynamic";
@@ -87,15 +88,10 @@ export default async function NotasPage({
         </p>
       </div>
 
-      {!scoped && (
-        <div className="rounded-lg border border-dashed border-border bg-muted/40 px-4 py-4 text-sm text-muted-foreground">
-          <p className="font-medium text-foreground">Relatório diário</p>
-          <p className="mt-1">
-            Seleciona uma <strong>loja no topo</strong> para gerar o relatório
-            automático (REV, funil, profit) com botão <strong>Copiar</strong>.
-            Também disponível em <strong>Métricas</strong> com loja seleccionada.
-          </p>
-        </div>
+      {!scoped && stores.length > 0 && (
+        <Suspense fallback={<div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />}>
+          <DailyReportPanel />
+        </Suspense>
       )}
 
       {scoped && (
@@ -104,26 +100,35 @@ export default async function NotasPage({
         </Suspense>
       )}
 
-      <DailyNoteForm
-        canEdit={canEdit}
-        defaultDate={today}
-        defaultStoreId={scoped ? String(scoped._id) : null}
-        stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
-      />
+      <CollapsibleSection
+        title="Nova nota"
+        description="Regista scale, humor ou observações do dia."
+      >
+        <DailyNoteForm
+          canEdit={canEdit}
+          defaultDate={today}
+          defaultStoreId={scoped ? String(scoped._id) : null}
+          stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
+          embedded
+        />
+      </CollapsibleSection>
 
-      <div className="rounded-lg border border-border bg-surface">
-        <div className="border-b border-border p-5">
-          <h2 className="text-lg font-semibold">Histórico</h2>
-          <p className="text-sm text-muted-foreground">
-            {scopeName ? (
-              <>
-                Últimas notas de <span data-sensitive>{scopeName}</span>.
-              </>
-            ) : (
-              "Últimas notas deste workspace."
-            )}
-          </p>
-        </div>
+      <CollapsibleSection
+        title="Histórico"
+        description={
+          scopeName
+            ? `Últimas notas de ${scopeName}.`
+            : "Últimas notas deste workspace."
+        }
+        badge={
+          filteredNotes.length > 0 ? (
+            <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {filteredNotes.length}
+            </span>
+          ) : undefined
+        }
+        flush
+      >
         {filteredNotes.length === 0 ? (
           <p className="p-8 text-center text-sm text-muted-foreground">
             Ainda não há notas. Regista o primeiro dia acima.
@@ -162,7 +167,7 @@ export default async function NotasPage({
             ))}
           </ul>
         )}
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }
