@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ExportFormatLinks } from "@/components/export-format-links";
-import { BackfillSnapshotsButton } from "@/components/metricas/backfill-snapshots-button";
 import { StoreMetricsView } from "@/components/dashboard/store-metrics-view";
 import { StoreDashboardHeader } from "@/components/dashboard/store-dashboard-view";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
@@ -63,12 +62,9 @@ export function MetricasClient() {
           periodLabel={periodLabel}
           prevPeriodLabel={prevPeriodLabel}
         />
-        <div className="flex flex-wrap items-end gap-2">
-          <ExportFormatLinks
-            href={`/api/export/daily-metrics?store=${encodeURIComponent(storeId)}`}
-          />
-          <BackfillSnapshotsButton storeId={storeId} />
-        </div>
+        <ExportFormatLinks
+          href={`/api/export/daily-metrics?store=${encodeURIComponent(storeId)}`}
+        />
       </div>
 
       {isError && (
