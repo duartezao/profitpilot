@@ -11,6 +11,9 @@ import { getCurrentUser, listUserWorkspaces } from "@/lib/auth";
 import { connectToDatabase } from "@/lib/db";
 import { activeStoreQueryForUser } from "@/lib/store-scope";
 import { Store } from "@/models/Store";
+import { TEAM_INVITES_ENABLED } from "@/lib/feature-flags";
+import { listPendingInvitationsForUser } from "@/lib/invitations";
+import { PendingInvitesBanner } from "@/components/pending-invites-banner";
 
 export default async function AppLayout({
   children,
@@ -31,6 +34,17 @@ export default async function AppLayout({
   const storeIds = stores.map((s) => s.id);
   const workspaces = await listUserWorkspaces(user.id);
 
+  const pendingInviteCount =
+    TEAM_INVITES_ENABLED
+      ? (
+          await listPendingInvitationsForUser({
+            id: user.id,
+            email: user.email,
+            username: user.username,
+          })
+        ).length
+      : 0;
+
   return (
     <WorkspaceProvider
       key={user.workspaceId}
@@ -46,6 +60,7 @@ export default async function AppLayout({
         <AppSidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar user={user} stores={stores} workspaces={workspaces} />
+          <PendingInvitesBanner count={pendingInviteCount} />
           <main className="flex-1 p-4 pb-24 md:p-6 md:pb-6">{children}</main>
         </div>
         <BottomNav />

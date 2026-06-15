@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 const links = [
   { id: "conta", label: "Conta" },
   { id: "convites", label: "Convites" },
+  { id: "convidar", label: "Convidar" },
   { id: "meus-workspaces", label: "Workspaces" },
   { id: "workspace-activo", label: "Workspace activo" },
   { id: "equipa", label: "Equipa" },
@@ -15,13 +16,19 @@ const links = [
 
 export function SettingsNav({
   showInvites,
+  showSendInvites,
   showMoveStores,
+  showTeam = false,
 }: {
   showInvites?: boolean;
+  showSendInvites?: boolean;
   showMoveStores?: boolean;
+  showTeam?: boolean;
 }) {
   const visible = links.filter((l) => {
     if (l.id === "convites" && !showInvites) return false;
+    if (l.id === "convidar" && !showSendInvites) return false;
+    if (l.id === "equipa" && !showTeam) return false;
     if (l.id === "lojas-workspaces" && !showMoveStores) return false;
     return true;
   });

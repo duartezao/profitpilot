@@ -11,7 +11,7 @@ import {
   listPendingInvitationsForUser,
   listSentInvitationsForWorkspace,
 } from "@/lib/invitations";
-import { canManageMembers } from "@/lib/rbac";
+import { canManageMembers, canInviteMembers } from "@/lib/rbac";
 import { WorkspaceForm } from "./workspace-form";
 import { StoreSettingsForm } from "./store-settings-form";
 import { StoreWorkspaceManager } from "./store-workspace-manager";
@@ -44,6 +44,9 @@ import {
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
 import { listOwnedWorkspacesForUser } from "@/lib/workspaces";
+import { TEAM_INVITES_ENABLED, TEAM_MEMBERSHIP_ENABLED } from "@/lib/feature-flags";
+import { InviteMemberForm } from "./invite-member-form";
+import { SentInvitations } from "./sent-invitations";
 
 export const metadata: Metadata = { title: "Definições" };
 
@@ -71,6 +74,7 @@ export default async function DefinicoesPage() {
   const canEditWorkspace = ["owner", "admin"].includes(user?.role ?? "");
   const canEditStores = ["owner", "admin", "editor"].includes(user?.role ?? "");
   const canManageTeam = canManageMembers(user?.role ?? "");
+  const canInvite = canInviteMembers(user?.role ?? "");
   const globalSyncLabel = formatGlobalSyncInterval();
   const canAssignStores = canEditWorkspace;
 
@@ -107,19 +111,22 @@ export default async function DefinicoesPage() {
     name: w.name,
   }));
 
-  const teamMembers = user?.workspaceId
-    ? await listWorkspaceMembers(user.workspaceId, user.id)
-    : [];
+  const teamMembers =
+    TEAM_MEMBERSHIP_ENABLED && user?.workspaceId
+      ? await listWorkspaceMembers(user.workspaceId, user.id)
+      : [];
 
-  const pendingInvitations = user
-    ? await listPendingInvitationsForUser({
-        email: user.email,
-        username: user.username,
-      })
-    : [];
+  const pendingInvitations =
+    TEAM_INVITES_ENABLED && user
+      ? await listPendingInvitationsForUser({
+          id: user.id,
+          email: user.email,
+          username: user.username,
+        })
+      : [];
 
   const sentInvitations =
-    canManageTeam && user?.workspaceId
+    TEAM_INVITES_ENABLED && canInvite && user?.workspaceId
       ? await listSentInvitationsForWorkspace(user.workspaceId)
       : [];
 
@@ -158,14 +165,15 @@ export default async function DefinicoesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Definições</h1>
         <p className="text-sm text-muted-foreground">
-          Conta, workspaces, equipa e configuração das lojas — abre só o que
-          precisares.
+          Conta, workspaces e configuração das lojas — abre só o que precisares.
         </p>
       </div>
 
       <SettingsNav
-        showInvites={pendingInvitations.length > 0}
+        showInvites={TEAM_INVITES_ENABLED && pendingInvitations.length > 0}
+        showSendInvites={TEAM_INVITES_ENABLED && canInvite}
         showMoveStores={canAssignStores}
+        showTeam={TEAM_MEMBERSHIP_ENABLED}
       />
 
       <SettingsCollapsibleSection id="conta" title="Conta">
@@ -174,8 +182,14 @@ export default async function DefinicoesPage() {
             <p className="font-medium" data-sensitive>{user?.name}</p>
             <p className="text-sm text-muted-foreground" data-sensitive>{user?.email}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {roleLabel[user?.role ?? "viewer"]} ·{" "}
-              <span data-sensitive>{user?.workspaceName}</span>
+              {TEAM_MEMBERSHIP_ENABLED ? (
+                <>
+                  {roleLabel[user?.role ?? "viewer"]} ·{" "}
+                  <span data-sensitive>{user?.workspaceName}</span>
+                </>
+              ) : (
+                <span data-sensitive>{user?.workspaceName}</span>
+              )}
             </p>
           </div>
           <form action={logoutAction}>
@@ -190,7 +204,7 @@ export default async function DefinicoesPage() {
         </div>
       </SettingsCollapsibleSection>
 
-      {pendingInvitations.length > 0 && (
+      {TEAM_INVITES_ENABLED && pendingInvitations.length > 0 && (
         <SettingsCollapsibleSection
           id="convites"
           title="Convites pendentes"
@@ -237,24 +251,38 @@ export default async function DefinicoesPage() {
         />
       </SettingsCollapsibleSection>
 
-      <SettingsCollapsibleSection
-        id="equipa"
-        title="Equipa"
-        description={
-          canManageTeam
-            ? "Convida membros, define papéis e que lojas podem ver."
-            : "Membros com acesso a este workspace. Só o proprietário gere permissões."
-        }
-      >
-        <TeamMembers
-          members={teamMembers}
-          actorRole={user?.role ?? "viewer"}
-          actorUserId={user?.id ?? ""}
-          canManage={canManageTeam}
-          stores={inviteStores}
-          sentInvitations={sentInvitations}
-        />
-      </SettingsCollapsibleSection>
+      {TEAM_INVITES_ENABLED && canInvite && !TEAM_MEMBERSHIP_ENABLED && (
+        <SettingsCollapsibleSection
+          id="convidar"
+          title="Convidar membros"
+          description="Envia convites por email ou utilizador. A pessoa vê o pedido em Definições ao iniciar sessão."
+          defaultOpen
+        >
+          <InviteMemberForm stores={inviteStores} />
+          <SentInvitations invitations={sentInvitations} />
+        </SettingsCollapsibleSection>
+      )}
+
+      {TEAM_MEMBERSHIP_ENABLED && (
+        <SettingsCollapsibleSection
+          id="equipa"
+          title="Equipa"
+          description={
+            canManageTeam
+              ? "Convida membros, define papéis e que lojas podem ver."
+              : "Membros com acesso a este workspace. Só o proprietário gere permissões."
+          }
+        >
+          <TeamMembers
+            members={teamMembers}
+            actorRole={user?.role ?? "viewer"}
+            actorUserId={user?.id ?? ""}
+            canManage={canManageTeam}
+            stores={inviteStores}
+            sentInvitations={sentInvitations}
+          />
+        </SettingsCollapsibleSection>
+      )}
 
       {canAssignStores && (
         <SettingsCollapsibleSection

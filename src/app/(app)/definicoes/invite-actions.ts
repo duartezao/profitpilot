@@ -11,11 +11,22 @@ import {
   revokeInvitation,
   resolveInviteIdentifier,
 } from "@/lib/invitations";
-import { canManageMembers } from "@/lib/rbac";
+import {
+  TEAM_INVITES_DISABLED_MESSAGE,
+  TEAM_INVITES_ENABLED,
+} from "@/lib/feature-flags";
+import { canInviteMembers } from "@/lib/rbac";
 import { parseStoreIdsFromForm } from "@/lib/store-access";
 import { validateInviteIdentifier } from "@/lib/username";
 
 export type InviteActionState = { ok?: boolean; error?: string };
+
+function teamInvitesBlocked(): InviteActionState | null {
+  if (!TEAM_INVITES_ENABLED) {
+    return { error: TEAM_INVITES_DISABLED_MESSAGE };
+  }
+  return null;
+}
 
 const inviteSchema = z.object({
   role: z.enum(["admin", "editor", "viewer"]),
@@ -28,7 +39,9 @@ export async function inviteMemberAction(
 ): Promise<InviteActionState> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (!canManageMembers(user.role)) {
+  const blocked = teamInvitesBlocked();
+  if (blocked) return blocked;
+  if (!canInviteMembers(user.role)) {
     return { error: "Só o proprietário pode convidar membros." };
   }
 
@@ -63,6 +76,7 @@ export async function inviteMemberAction(
   if (!result.ok) return { error: result.error };
 
   revalidatePath("/definicoes");
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -72,6 +86,8 @@ export async function acceptInvitationAction(
 ): Promise<InviteActionState> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  const blocked = teamInvitesBlocked();
+  if (blocked) return blocked;
 
   const invitationId = String(formData.get("invitationId") ?? "").trim();
   if (!invitationId) return { error: "Convite inválido." };
@@ -95,11 +111,14 @@ export async function declineInvitationAction(
 ): Promise<InviteActionState> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  const blocked = teamInvitesBlocked();
+  if (blocked) return blocked;
 
   const invitationId = String(formData.get("invitationId") ?? "").trim();
   if (!invitationId) return { error: "Convite inválido." };
 
   const result = await declineInvitation(invitationId, {
+    id: user.id,
     email: user.email,
     username: user.username,
   });
@@ -115,7 +134,9 @@ export async function revokeInvitationAction(
 ): Promise<InviteActionState> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (!canManageMembers(user.role)) {
+  const blocked = teamInvitesBlocked();
+  if (blocked) return blocked;
+  if (!canInviteMembers(user.role)) {
     return { error: "Só o proprietário pode revogar convites." };
   }
 
