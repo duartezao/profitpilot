@@ -15,6 +15,34 @@ export function monthKeyFromDateKey(dateKey: string): string {
   return dateKey.slice(0, 7);
 }
 
+/** Normaliza BSON Binary / Uint8Array do MongoDB para Buffer Node. */
+export function blobToBuffer(blob: unknown): Buffer {
+  if (!blob) return Buffer.alloc(0);
+  if (Buffer.isBuffer(blob)) return blob;
+  if (blob instanceof Uint8Array) return Buffer.from(blob);
+  if (typeof blob === "object" && blob !== null) {
+    const o = blob as {
+      _bsontype?: string;
+      buffer?: Uint8Array | ArrayBuffer;
+      value?: (encoding?: string) => Buffer;
+    };
+    if (o._bsontype === "Binary" && o.buffer) {
+      return Buffer.from(o.buffer);
+    }
+    if (typeof o.value === "function") {
+      try {
+        return o.value();
+      } catch {
+        /* fall through */
+      }
+    }
+    if (o.buffer) {
+      return Buffer.from(o.buffer);
+    }
+  }
+  return Buffer.from(blob as ArrayBuffer);
+}
+
 /** Gzip de array JSON — ~200–400 B por mês típico. */
 export function encodeMonthBlob(days: Map<number, DaySessionCounts>): Buffer {
   const arr: DayTuple[] = [];
@@ -25,12 +53,13 @@ export function encodeMonthBlob(days: Map<number, DaySessionCounts>): Buffer {
   return gzipSync(JSON.stringify(arr));
 }
 
-export function decodeMonthBlob(blob: Buffer): Map<number, DaySessionCounts> {
+export function decodeMonthBlob(blob: unknown): Map<number, DaySessionCounts> {
   const out = new Map<number, DaySessionCounts>();
-  if (!blob?.length) return out;
+  const buf = blobToBuffer(blob);
+  if (!buf.length) return out;
 
   try {
-    const raw = gunzipSync(blob).toString("utf8");
+    const raw = gunzipSync(buf).toString("utf8");
     const arr = JSON.parse(raw) as DayTuple[];
     if (!Array.isArray(arr)) return out;
 
@@ -39,10 +68,10 @@ export function decodeMonthBlob(blob: Buffer): Map<number, DaySessionCounts> {
       const [dom, s, ca, ch, co] = row;
       if (dom < 1 || dom > 31) continue;
       out.set(dom, {
-        sessions: s,
-        cart: ca,
-        checkout: ch,
-        completed: co,
+        sessions: Number(s) || 0,
+        cart: Number(ca) || 0,
+        checkout: Number(ch) || 0,
+        completed: Number(co) || 0,
       });
     }
   } catch {

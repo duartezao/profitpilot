@@ -106,6 +106,17 @@ export default async function NotasPage({
         </p>
       </div>
 
+      {!scoped && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/40 px-4 py-4 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">Relatório diário</p>
+          <p className="mt-1">
+            Seleciona uma <strong>loja no topo</strong> para gerar o relatório
+            automático (REV, funil, profit) com botão <strong>Copiar</strong>.
+            Também disponível em <strong>Métricas</strong> com loja seleccionada.
+          </p>
+        </div>
+      )}
+
       {dailyReport && (
         <DailyReportCard
           reportText={dailyReport.text}

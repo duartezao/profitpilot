@@ -1,11 +1,33 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { MetricasClient } from "./metricas-client";
+import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
+import { getCurrentUser } from "@/lib/auth";
+import { canAccessStore } from "@/lib/store-access";
 
 export const metadata: Metadata = { title: "Métricas" };
 export const dynamic = "force-dynamic";
 
-export default function MetricasPage() {
+function ReportSection({ storeId }: { storeId: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface p-5">
+      <Suspense fallback={<div className="h-32 animate-pulse rounded-lg bg-muted" />}>
+        <DailyReportPanel storeId={storeId} />
+      </Suspense>
+    </div>
+  );
+}
+
+export default async function MetricasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ store?: string }>;
+}) {
+  const user = await getCurrentUser();
+  const { store: storeId } = await searchParams;
+  const showReport =
+    Boolean(user && storeId && canAccessStore(user.storeAccess, storeId));
+
   return (
     <Suspense
       fallback={
@@ -22,7 +44,10 @@ export default function MetricasPage() {
         </div>
       }
     >
-      <MetricasClient />
+      <div className="mx-auto max-w-7xl space-y-6">
+        {showReport && storeId && <ReportSection storeId={storeId} />}
+        <MetricasClient />
+      </div>
     </Suspense>
   );
 }

@@ -647,11 +647,15 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   const domain = normalizeShopDomain(store.shopDomain ?? "");
 
   // Token fresco (client credentials) — válido ~24h, pedido a cada sync.
-  const { accessToken } = await getClientCredentialsToken(
+  const { accessToken, scope: tokenScope } = await getClientCredentialsToken(
     domain,
     creds.clientId,
     creds.clientSecret,
   );
+  store.scopes = tokenScope
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   try {
     const shop = await testShopifyConnection(domain, accessToken);
@@ -683,7 +687,7 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   } catch (e) {
     payoutsError = e instanceof Error ? e.message : "Falha a obter payouts.";
   }
-  store.payoutsError = payoutsError ?? null;
+    store.payoutsError = payoutsError ?? null;
 
   let sessionMetricsDays = 0;
   let sessionMetricsError: string | undefined;

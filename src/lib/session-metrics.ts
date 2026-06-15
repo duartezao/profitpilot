@@ -25,6 +25,7 @@ import {
   decodeMonthBlob,
   encodeMonthBlob,
   monthKeyFromDateKey,
+  blobToBuffer,
   type DaySessionCounts,
 } from "@/lib/session-metrics-codec";
 import { SessionMetricsMonth } from "@/models/SessionMetricsMonth";
@@ -160,7 +161,7 @@ async function loadMonthDays(
     .lean();
 
   for (const doc of docs) {
-    const byDom = decodeMonthBlob(doc.blob as Buffer);
+    const byDom = decodeMonthBlob(doc.blob);
     for (const [dom, counts] of byDom) {
       out.set(dateKeyFromMonthDay(doc.monthKey, dom), counts);
     }
@@ -192,7 +193,7 @@ async function upsertDayRows(
     }).lean();
 
     const days = existing
-      ? decodeMonthBlob(existing.blob as Buffer)
+      ? decodeMonthBlob(existing.blob)
       : new Map<number, DaySessionCounts>();
 
     for (const row of monthRows) {
@@ -299,6 +300,36 @@ export async function syncSessionMetricsForStore(
     if (hadError && isAllZero(existing)) return true;
     return false;
   });
+
+  // Blobs corrompidos na BD (gzip inválido) — forçar novo pedido à Shopify.
+  const corruptedMonths = new Set<string>();
+  for (const mk of [...new Set(keysToSync.map(monthKeyFromDateKey))]) {
+    const doc = await SessionMetricsMonth.findOne({
+      storeId: store._id,
+      monthKey: mk,
+      countryKey,
+    })
+      .select("blob")
+      .lean();
+    if (!doc?.blob) continue;
+    const buf = blobToBuffer(doc.blob);
+    if (buf.length > 0 && decodeMonthBlob(buf).size === 0) {
+      corruptedMonths.add(mk);
+    }
+  }
+  if (corruptedMonths.size) {
+    await SessionMetricsMonth.deleteMany({
+      storeId: store._id,
+      countryKey,
+      monthKey: { $in: [...corruptedMonths] },
+    });
+    stored.clear();
+    for (const k of keysToSync) {
+      if (corruptedMonths.has(monthKeyFromDateKey(k))) {
+        if (!missing.includes(k)) missing.push(k);
+      }
+    }
+  }
 
   if (!missing.length) {
     await Store.updateOne(

@@ -2,14 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { KpiCard } from "@/components/ui/kpi-card";
-import { Sparkline } from "@/components/ui/sparkline";
+import { ProfitChart } from "@/components/dashboard/profit-chart";
+import { DataWarnings } from "@/components/dashboard/data-warnings";
+import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
 import {
   StoreDashboardView,
   StoreDashboardHeader,
 } from "@/components/dashboard/store-dashboard-view";
-import { ProfitChart } from "@/components/dashboard/profit-chart";
-import { DataWarnings } from "@/components/dashboard/data-warnings";
+import { Sparkline } from "@/components/ui/sparkline";
 import { Sensitive } from "@/components/privacy-mode";
 import { useWorkspace } from "@/components/workspace-context";
 import {
@@ -125,18 +125,11 @@ export function DashboardClient() {
             />
           )}
 
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
-            {(data?.kpis ?? Array.from({ length: 6 })).map((k, i) =>
-              k ? (
-                <KpiCard key={k.label} {...k} />
-              ) : (
-                <div
-                  key={i}
-                  className="h-[116px] animate-pulse rounded-lg border border-border bg-muted"
-                />
-              ),
-            )}
-          </div>
+          <DashboardKpiSection
+            kpis={data?.kpis ?? []}
+            extendedKpis={data?.extendedKpis ?? []}
+            variant="workspace"
+          />
 
           <div className="rounded-lg border border-border bg-surface p-5">
             <h2 className="text-lg font-semibold">Lucro líquido</h2>
