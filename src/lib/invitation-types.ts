@@ -11,7 +11,7 @@ export type PendingInvitationView = {
 
 export type SentInvitationView = {
   id: string;
-  email: string;
+  inviteeLabel: string;
   role: string;
   storeAccessLabel: string;
   expiresAt: string;

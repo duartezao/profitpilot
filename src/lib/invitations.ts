@@ -28,6 +28,16 @@ export type { PendingInvitationView, SentInvitationView };
 
 const INVITE_TTL_DAYS = 14;
 
+export type InviteTarget =
+  | { type: "email"; email: string }
+  | { type: "username"; username: string; userId: string };
+
+export type InviteUserRef = {
+  id: string;
+  email: string | null;
+  username: string | null;
+};
+
 function inviteExpiry(): Date {
   return new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 }
@@ -36,10 +46,42 @@ function newToken(): string {
   return randomBytes(24).toString("base64url");
 }
 
-/** Resolve email ou @utilizador para o email do convite. */
+function inviteeOrFilter(
+  email: string | null | undefined,
+  username: string | null | undefined,
+): Record<string, string>[] {
+  const or: Record<string, string>[] = [];
+  const e = email?.trim().toLowerCase();
+  const u = username?.trim() ? normalizeUsername(username) : null;
+  if (e) or.push({ email: e });
+  if (u) or.push({ username: u });
+  return or;
+}
+
+function invitationMatchesUser(
+  inv: { email?: string | null; username?: string | null },
+  user: Pick<InviteUserRef, "email" | "username">,
+): boolean {
+  const e = user.email?.trim().toLowerCase();
+  const u = user.username ? normalizeUsername(user.username) : null;
+  if (inv.email && e && inv.email === e) return true;
+  if (inv.username && u && inv.username === u) return true;
+  return false;
+}
+
+function inviteeLabel(inv: {
+  email?: string | null;
+  username?: string | null;
+}): string {
+  if (inv.username) return `@${inv.username}`;
+  if (inv.email) return inv.email;
+  return "—";
+}
+
+/** Resolve email ou @utilizador para o alvo do convite. */
 export async function resolveInviteIdentifier(
   identifier: string,
-): Promise<{ ok: true; email: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; target: InviteTarget } | { ok: false; error: string }> {
   const raw = identifier.trim();
   if (!raw) {
     return { ok: false, error: "Preenche o email ou utilizador." };
@@ -49,7 +91,7 @@ export async function resolveInviteIdentifier(
     const email = raw.toLowerCase();
     const emailError = validateEmail(email);
     if (emailError) return { ok: false, error: emailError };
-    return { ok: true, email };
+    return { ok: true, target: { type: "email", email } };
   }
 
   const username = normalizeUsername(raw);
@@ -57,7 +99,7 @@ export async function resolveInviteIdentifier(
   if (usernameError) return { ok: false, error: usernameError };
 
   await connectToDatabase();
-  const user = await User.findOne({ username }).select("email").lean();
+  const user = await User.findOne({ username }).select("_id").lean();
   if (!user) {
     return {
       ok: false,
@@ -65,37 +107,39 @@ export async function resolveInviteIdentifier(
         "Utilizador não encontrado. Para convidar alguém sem conta, usa o email.",
     };
   }
-  if (!user.email) {
-    return {
-      ok: false,
-      error:
-        "Esta conta só tem utilizador — convida por email ou pede-lhe para adicionar email.",
-    };
-  }
 
-  return { ok: true, email: user.email };
+  return {
+    ok: true,
+    target: { type: "username", username, userId: String(user._id) },
+  };
 }
 
 async function workspaceStoreCount(workspaceId: mongoose.Types.ObjectId) {
   return Store.countDocuments({ workspaceId, deletedAt: null });
 }
 
-export async function listPendingInvitationsForEmail(
-  email: string,
-): Promise<PendingInvitationView[]> {
-  await connectToDatabase();
-  const normalized = email.toLowerCase().trim();
+async function expireStaleInvites(filter: Record<string, unknown>) {
   const now = new Date();
-
   await Invitation.updateMany(
-    { email: normalized, status: "pending", expiresAt: { $lte: now } },
+    { ...filter, status: "pending", expiresAt: { $lte: now } },
     { $set: { status: "expired" } },
   );
+}
+
+export async function listPendingInvitationsForUser(
+  user: Pick<InviteUserRef, "email" | "username">,
+): Promise<PendingInvitationView[]> {
+  await connectToDatabase();
+  const or = inviteeOrFilter(user.email, user.username);
+  if (!or.length) return [];
+
+  const now = new Date();
+  await expireStaleInvites({ $or: or });
 
   const invites = await Invitation.find({
-    email: normalized,
     status: "pending",
     expiresAt: { $gt: now },
+    $or: or,
   })
     .sort({ createdAt: -1 })
     .lean();
@@ -133,6 +177,11 @@ export async function listPendingInvitationsForEmail(
   return views;
 }
 
+/** @deprecated Usar listPendingInvitationsForUser */
+export async function listPendingInvitationsForEmail(email: string) {
+  return listPendingInvitationsForUser({ email, username: null });
+}
+
 export async function listSentInvitationsForWorkspace(
   workspaceId: string,
 ): Promise<SentInvitationView[]> {
@@ -154,7 +203,7 @@ export async function listSentInvitationsForWorkspace(
     const access = normalizeStoreAccess(inv.storeAccess);
     return {
       id: String(inv._id),
-      email: inv.email,
+      inviteeLabel: inviteeLabel(inv),
       role: inv.role,
       storeAccessLabel: storeAccessLabel(access, storeCount),
       expiresAt: new Date(inv.expiresAt).toISOString(),
@@ -167,7 +216,7 @@ export async function createWorkspaceInvitation(input: {
   workspaceId: string;
   invitedByUserId: string;
   actorRole: string;
-  email: string;
+  target: InviteTarget;
   role: "admin" | "editor" | "viewer";
   storeAccess: StoreAccess;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -175,8 +224,8 @@ export async function createWorkspaceInvitation(input: {
   if (!assign.ok) return assign;
 
   await connectToDatabase();
-  const email = input.email.toLowerCase().trim();
   const wsId = new mongoose.Types.ObjectId(input.workspaceId);
+  const { target } = input;
 
   if (input.storeAccess !== "all" && input.storeAccess.length === 0) {
     return { ok: false, error: "Selecciona pelo menos uma loja ou «todas»." };
@@ -184,7 +233,9 @@ export async function createWorkspaceInvitation(input: {
 
   if (input.storeAccess !== "all") {
     const validCount = await Store.countDocuments({
-      _id: { $in: input.storeAccess.map((id) => new mongoose.Types.ObjectId(id)) },
+      _id: {
+        $in: input.storeAccess.map((id) => new mongoose.Types.ObjectId(id)),
+      },
       workspaceId: wsId,
       deletedAt: null,
     });
@@ -193,10 +244,22 @@ export async function createWorkspaceInvitation(input: {
     }
   }
 
-  const existingUser = await User.findOne({ email }).lean();
-  if (existingUser) {
+  let email: string | undefined;
+  let username: string | undefined;
+  let inviteeUserId: mongoose.Types.ObjectId | undefined;
+
+  if (target.type === "email") {
+    email = target.email;
+    const existingUser = await User.findOne({ email }).lean();
+    if (existingUser) inviteeUserId = existingUser._id;
+  } else {
+    username = target.username;
+    inviteeUserId = new mongoose.Types.ObjectId(target.userId);
+  }
+
+  if (inviteeUserId) {
     const member = await Membership.findOne({
-      userId: existingUser._id,
+      userId: inviteeUserId,
       workspaceId: wsId,
       status: "active",
     }).lean();
@@ -205,11 +268,15 @@ export async function createWorkspaceInvitation(input: {
     }
   }
 
+  const dupOr: Record<string, string>[] = [];
+  if (email) dupOr.push({ email });
+  if (username) dupOr.push({ username });
+
   const pending = await Invitation.findOne({
     workspaceId: wsId,
-    email,
     status: "pending",
     expiresAt: { $gt: new Date() },
+    $or: dupOr,
   });
   if (pending) {
     return {
@@ -220,7 +287,8 @@ export async function createWorkspaceInvitation(input: {
 
   await Invitation.create({
     workspaceId: wsId,
-    email,
+    ...(email ? { email } : {}),
+    ...(username ? { username } : {}),
     role: input.role,
     storeAccess: input.storeAccess,
     token: newToken(),
@@ -234,8 +302,7 @@ export async function createWorkspaceInvitation(input: {
 
 export async function acceptInvitation(
   invitationId: string,
-  userId: string,
-  userEmail: string,
+  user: InviteUserRef,
 ): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
   await connectToDatabase();
   const inv = await Invitation.findById(invitationId);
@@ -247,16 +314,11 @@ export async function acceptInvitation(
     await inv.save();
     return { ok: false, error: "Este convite expirou." };
   }
-  if (inv.email !== userEmail.toLowerCase().trim()) {
-    return {
-      ok: false,
-      error: userEmail
-        ? "Este convite não é para a tua conta."
-        : "Esta conta não tem email — não podes aceitar convites por email.",
-    };
+  if (!invitationMatchesUser(inv, user)) {
+    return { ok: false, error: "Este convite não é para a tua conta." };
   }
 
-  const userOid = new mongoose.Types.ObjectId(userId);
+  const userOid = new mongoose.Types.ObjectId(user.id);
   const existing = await Membership.findOne({
     userId: userOid,
     workspaceId: inv.workspaceId,
@@ -284,14 +346,14 @@ export async function acceptInvitation(
 
 export async function declineInvitation(
   invitationId: string,
-  userEmail: string,
+  user: Pick<InviteUserRef, "email" | "username">,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await connectToDatabase();
   const inv = await Invitation.findById(invitationId);
   if (!inv || inv.status !== "pending") {
     return { ok: false, error: "Convite inválido ou já tratado." };
   }
-  if (inv.email !== userEmail.toLowerCase().trim()) {
+  if (!invitationMatchesUser(inv, user)) {
     return { ok: false, error: "Este convite não é para a tua conta." };
   }
 

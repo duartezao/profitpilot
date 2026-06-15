@@ -92,8 +92,7 @@ export function InviteMemberForm({
               className={inputCls}
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Utilizador só funciona se a pessoa já tiver conta. Sem conta, usa
-              o email.
+              Utilizador — a conta tem de existir. Sem conta, usa o email.
             </p>
           </div>
 
