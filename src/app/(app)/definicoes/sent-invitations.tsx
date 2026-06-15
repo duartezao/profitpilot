@@ -23,7 +23,7 @@ function SentRow({ invite }: { invite: SentInvitationView }) {
   return (
     <tr className="border-t border-border align-middle text-sm">
       <td className="px-4 py-3">
-        <Sensitive as="span">{invite.email}</Sensitive>
+        <Sensitive as="span">{invite.inviteeLabel}</Sensitive>
       </td>
       <td className="px-4 py-3">{roleLabel[invite.role] ?? invite.role}</td>
       <td className="px-4 py-3 text-muted-foreground">
@@ -63,7 +63,7 @@ export function SentInvitations({
       <table className="w-full min-w-[480px] text-sm">
         <thead>
           <tr className="text-left text-xs font-medium text-muted-foreground">
-            <th className="px-4 py-3">Email</th>
+            <th className="px-4 py-3">Convidado</th>
             <th className="px-4 py-3">Papel</th>
             <th className="px-4 py-3">Lojas</th>
             <th className="px-4 py-3 text-right">Ação</th>

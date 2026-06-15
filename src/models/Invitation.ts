@@ -8,7 +8,10 @@ const InvitationSchema = new Schema(
       required: true,
       index: true,
     },
-    email: { type: String, required: true, trim: true, lowercase: true },
+    /** Convite por email (conta nova ou existente). */
+    email: { type: String, trim: true, lowercase: true, sparse: true },
+    /** Convite por utilizador (conta existente, com ou sem email). */
+    username: { type: String, trim: true, lowercase: true, sparse: true },
     role: {
       type: String,
       enum: ["admin", "editor", "viewer"],
@@ -30,7 +33,12 @@ const InvitationSchema = new Schema(
 
 InvitationSchema.index(
   { workspaceId: 1, email: 1, status: 1 },
-  { partialFilterExpression: { status: "pending" } },
+  { partialFilterExpression: { status: "pending", email: { $type: "string" } } },
+);
+
+InvitationSchema.index(
+  { workspaceId: 1, username: 1, status: 1 },
+  { partialFilterExpression: { status: "pending", username: { $type: "string" } } },
 );
 
 export type InvitationDoc = mongoose.InferSchemaType<typeof InvitationSchema> & {

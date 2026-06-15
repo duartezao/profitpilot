@@ -8,7 +8,7 @@ import { Store } from "@/models/Store";
 import { logoutAction } from "@/app/(app)/actions";
 import { listWorkspaceMembers } from "@/lib/members";
 import {
-  listPendingInvitationsForEmail,
+  listPendingInvitationsForUser,
   listSentInvitationsForWorkspace,
 } from "@/lib/invitations";
 import { canManageMembers } from "@/lib/rbac";
@@ -86,8 +86,11 @@ export default async function DefinicoesPage() {
     ? await listWorkspaceMembers(user.workspaceId, user.id)
     : [];
 
-  const pendingInvitations = user?.email
-    ? await listPendingInvitationsForEmail(user.email)
+  const pendingInvitations = user
+    ? await listPendingInvitationsForUser({
+        email: user.email,
+        username: user.username,
+      })
     : [];
 
   const sentInvitations =

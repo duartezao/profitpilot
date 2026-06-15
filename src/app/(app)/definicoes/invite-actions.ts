@@ -55,7 +55,7 @@ export async function inviteMemberAction(
     workspaceId: user.workspaceId,
     invitedByUserId: user.id,
     actorRole: user.role,
-    email: resolved.email,
+    target: resolved.target,
     role: parsed.data.role,
     storeAccess,
   });
@@ -76,11 +76,11 @@ export async function acceptInvitationAction(
   const invitationId = String(formData.get("invitationId") ?? "").trim();
   if (!invitationId) return { error: "Convite inválido." };
 
-  const result = await acceptInvitation(
-    invitationId,
-    user.id,
-    user.email ?? "",
-  );
+  const result = await acceptInvitation(invitationId, {
+    id: user.id,
+    email: user.email,
+    username: user.username,
+  });
   if (!result.ok) return { error: result.error };
 
   await switchWorkspace(result.workspaceId);
@@ -99,7 +99,10 @@ export async function declineInvitationAction(
   const invitationId = String(formData.get("invitationId") ?? "").trim();
   if (!invitationId) return { error: "Convite inválido." };
 
-  const result = await declineInvitation(invitationId, user.email ?? "");
+  const result = await declineInvitation(invitationId, {
+    email: user.email,
+    username: user.username,
+  });
   if (!result.ok) return { error: result.error };
 
   revalidatePath("/definicoes");
