@@ -1,6 +1,5 @@
 import type { DashboardSummary } from "@/lib/metrics";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
-import { Sensitive } from "@/components/privacy-mode";
 import { ProfitChart } from "@/components/dashboard/profit-chart";
 import { StoreDailyMetricsTable } from "@/components/dashboard/store-daily-metrics-table";
 
@@ -21,6 +20,7 @@ export function StoreMetricsView({
         funnelError={dashboard?.funnelError}
         sessionCountryLabel={dashboard?.sessionCountryLabel}
         variant="store"
+        showExtended
       />
 
       <div className="rounded-lg border border-border bg-surface p-5">
@@ -36,13 +36,14 @@ export function StoreMetricsView({
         <div className="border-b border-border p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Métricas por dia</h2>
           <p className="text-sm text-muted-foreground">
-            Um cartão por dia do período selecionado na topbar. Net Profit = REV
-            − COGS − envio − taxas − ad spend.
+            Um cartão por dia do período na topbar. Passa o rato sobre o Net
+            Profit para ver REV − COGS − taxas − ads. O número grande no KPI é
+            euros; a % por baixo é só comparação com o período anterior.
             {dashboard?.sessionCountryLabel && (
               <>
                 {" "}
                 Sessões:{" "}
-                <Sensitive as="span">{dashboard.sessionCountryLabel}</Sensitive>.
+                <span data-sensitive>{dashboard.sessionCountryLabel}</span>.
               </>
             )}
           </p>

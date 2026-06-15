@@ -9,7 +9,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { Topbar } from "@/components/topbar";
 import { getCurrentUser, listUserWorkspaces } from "@/lib/auth";
 import { connectToDatabase } from "@/lib/db";
-import { storeAccessMongoFilter } from "@/lib/store-access";
+import { activeStoreQueryForUser } from "@/lib/store-scope";
 import { Store } from "@/models/Store";
 
 export default async function AppLayout({
@@ -21,13 +21,7 @@ export default async function AppLayout({
   if (!user) redirect("/login");
 
   await connectToDatabase();
-  const storeAccessFilter = storeAccessMongoFilter(user.storeAccess);
-  const storeQuery: Record<string, unknown> = {
-    workspaceId: user.workspaceId,
-    deletedAt: null,
-    status: { $ne: "archived" },
-  };
-  if (storeAccessFilter) Object.assign(storeQuery, storeAccessFilter);
+  const storeQuery = activeStoreQueryForUser(user);
 
   const storeDocs = await Store.find(storeQuery)
     .select("name")

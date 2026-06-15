@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   // Pacotes nativos/server que não devem ser empacotados pelo bundler.
   serverExternalPackages: ["mongoose", "@node-rs/argon2"],
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
 };
 
 export default nextConfig;

@@ -1,5 +1,31 @@
 import mongoose, { Schema } from "mongoose";
 
+/** Campos manuais do template do relatório diário (app.md). */
+export type DailyNoteReportFields = {
+  productsTested?: string;
+  collectionsTested?: string;
+  collectionsTestedList?: string;
+  nextCollection?: string;
+  bestSellerCollection?: string;
+  dayNumber?: string;
+  difficulties?: string;
+  obs?: string;
+};
+
+const ReportFieldsSchema = new Schema(
+  {
+    productsTested: { type: String, trim: true, default: "" },
+    collectionsTested: { type: String, trim: true, default: "" },
+    collectionsTestedList: { type: String, trim: true, default: "" },
+    nextCollection: { type: String, trim: true, default: "" },
+    bestSellerCollection: { type: String, trim: true, default: "" },
+    dayNumber: { type: String, trim: true, default: "" },
+    difficulties: { type: String, trim: true, default: "" },
+    obs: { type: String, trim: true, default: "" },
+  },
+  { _id: false },
+);
+
 const DailyNoteSchema = new Schema(
   {
     workspaceId: {
@@ -18,6 +44,7 @@ const DailyNoteSchema = new Schema(
       type: String,
       enum: ["good", "bad", "neutral"],
     },
+    reportFields: { type: ReportFieldsSchema, default: () => ({}) },
   },
   { timestamps: true },
 );

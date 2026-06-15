@@ -1,6 +1,19 @@
 import "server-only";
 import type { AnyBulkWriteOperation } from "mongoose";
 import { orderNetRevenue } from "@/lib/order-revenue";
+import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
+import {
+  computeOrderFees,
+  ensureFeeSchedule,
+  resolveFeeConfigForDateKey,
+  shouldPreserveStoredOrderFees,
+  type FeeScheduleEntry,
+} from "@/lib/fee-schedule";
+import {
+  dateKeyInTimezone,
+  importDateKey,
+  normalizeStoreTimezone,
+} from "@/lib/store-timezone";
 import { connectToDatabase } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import {
@@ -10,6 +23,7 @@ import {
   testShopifyConnection,
 } from "@/lib/shopify";
 import { Store, type StoreDoc } from "@/models/Store";
+import { Workspace } from "@/models/Workspace";
 import { Order } from "@/models/Order";
 import { ProductCost } from "@/models/ProductCost";
 import {
@@ -22,6 +36,7 @@ import {
 import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
+import { buildOrderAmountsBase } from "@/lib/order-money";
 
 type GraphQLResult<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -188,13 +203,28 @@ async function syncProductCosts(
   return { count, changedVariantIds };
 }
 
-/** Importa orders (com COGS por linha e taxas estimadas pelo feeConfig). */
+/** Importa orders (com COGS por linha e taxas estimadas pelo calendário de taxas). */
 async function syncOrders(
   store: StoreDoc,
   domain: string,
   token: string,
 ): Promise<number> {
   const resolveCost = await loadCostResolverForStore(store._id);
+  const workspace = await Workspace.findById(store.workspaceId)
+    .select("baseCurrency")
+    .lean();
+  const baseCurrency = workspace?.baseCurrency ?? "EUR";
+  const storeCurrency = (store.currency ?? "EUR").toUpperCase();
+
+  const tz = normalizeStoreTimezone(store.ianaTimezone);
+  const floorKey =
+    importDateKey(store.importStartDate, store.createdAt, tz) ??
+    dateKeyInTimezone(new Date(store.createdAt ?? Date.now()), tz);
+  const feeSchedule = ensureFeeSchedule(
+    store.feeSchedule as FeeScheduleEntry[] | undefined,
+    store.feeConfig,
+    floorKey,
+  );
 
   // Desde quando importar: data definida na loja, última sync, ou 90 dias.
   const since =
@@ -202,11 +232,6 @@ async function syncOrders(
     store.importStartDate ??
     new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
   const searchQuery = `created_at:>=${since.toISOString()}`;
-
-  const fee = store.feeConfig ?? {};
-  const feePercent =
-    (num(fee.processingPercent) + num(fee.transactionFeePercent)) / 100;
-  const feeFixed = num(fee.processingFixed);
 
   const query = `query($cursor: String, $q: String) {
     orders(first: 50, after: $cursor, query: $q, sortKey: CREATED_AT) {
@@ -281,18 +306,29 @@ async function syncOrders(
       storeId: store._id,
       shopifyId: { $in: ids },
     })
-      .select("shopifyId lineItems.variantId lineItems.unitCost")
+      .select(
+        "shopifyId orderDate fees lineItems.variantId lineItems.unitCost manualCogs",
+      )
       .lean();
     const existingMap = new Map<string, Map<string, number>>();
+    const existingFees = new Map<string, number>();
+    const existingManualCogs = new Map<string, number | null>();
     for (const eo of existingOrders) {
       const m = new Map<string, number>();
       for (const li of eo.lineItems ?? []) {
         m.set(String(li.variantId), num(li.unitCost));
       }
       existingMap.set(String(eo.shopifyId), m);
+      if (eo.fees != null) existingFees.set(String(eo.shopifyId), num(eo.fees));
+      existingManualCogs.set(
+        String(eo.shopifyId),
+        eo.manualCogs != null ? num(eo.manualCogs) : null,
+      );
     }
 
-    const ops = conn.nodes.map((o) => {
+    const ops: AnyBulkWriteOperation[] = [];
+
+    for (const o of conn.nodes) {
       const orderDate = new Date(o.createdAt);
       const prevLine = existingMap.get(o.id);
       const lineItems = o.lineItems.nodes.map((li) => {
@@ -321,10 +357,43 @@ async function syncOrders(
       const totalPrice = num(o.currentTotalPriceSet?.shopMoney.amount);
       const subtotal = num(o.subtotalPriceSet?.shopMoney.amount);
       const refunded = num(o.totalRefundedSet?.shopMoney.amount);
+      const shipping = num(o.totalShippingPriceSet?.shopMoney.amount);
       const netRevenue = orderNetRevenue({ subtotal, totalPrice, refunded });
-      const fees = totalPrice * feePercent + (totalPrice > 0 ? feeFixed : 0);
+      const orderDateKey = dateKeyInTimezone(orderDate, tz);
+      const feeConfig = resolveFeeConfigForDateKey(
+        feeSchedule,
+        store.feeConfig,
+        orderDateKey,
+        floorKey,
+      );
+      let fees = computeOrderFees(totalPrice, feeConfig);
+      const prevFees = existingFees.get(o.id);
+      if (
+        shouldPreserveStoredOrderFees(prevFees, orderDateKey, feeSchedule)
+      ) {
+        fees = prevFees!;
+      }
 
-      return {
+      const manualCogs = existingManualCogs.get(o.id) ?? null;
+      const cogsForBase = manualCogs != null ? manualCogs : cogs;
+      const amountsBase = await buildOrderAmountsBase(
+        {
+          subtotal,
+          totalPrice,
+          refunded,
+          netRevenue,
+          cogs: cogsForBase,
+          shipping,
+          fees,
+        },
+        storeCurrency,
+        baseCurrency,
+        orderDate,
+        tz,
+        manualCogs,
+      );
+
+      ops.push({
         updateOne: {
           filter: { storeId: store._id, shopifyId: o.id },
           update: {
@@ -341,18 +410,19 @@ async function syncOrders(
               subtotal,
               netRevenue,
               discounts: num(o.totalDiscountsSet?.shopMoney.amount),
-              shipping: num(o.totalShippingPriceSet?.shopMoney.amount),
+              shipping,
               tax: num(o.totalTaxSet?.shopMoney.amount),
               refunded,
               cogs,
               fees,
               lineItems,
+              amountsBase,
             },
           },
           upsert: true,
         },
-      };
-    });
+      });
+    }
 
     if (ops.length) {
       await Order.bulkWrite(ops as AnyBulkWriteOperation[], { ordered: false });
@@ -362,6 +432,8 @@ async function syncOrders(
     if (!conn.pageInfo.hasNextPage) break;
     cursor = conn.pageInfo.endCursor;
   }
+
+  await backfillOrderNetRevenueForStore(store._id);
 
   return count;
 }
@@ -667,9 +739,15 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   }
 
   const { count: products } = await syncProductCosts(store, domain, accessToken);
-  const assimilatedBefore = await assimilatePendingCogsForStore(store._id);
+  const cogsMode = store.cogsMode ?? "shopify";
+  const assimilateCogs = cogsMode === "shopify" || cogsMode === "variant";
+  const assimilatedBefore = assimilateCogs
+    ? await assimilatePendingCogsForStore(store._id)
+    : { ordersUpdated: 0, linesFilled: 0 };
   const orders = await syncOrders(store, domain, accessToken);
-  const assimilatedAfter = await assimilatePendingCogsForStore(store._id);
+  const assimilatedAfter = assimilateCogs
+    ? await assimilatePendingCogsForStore(store._id)
+    : { ordersUpdated: 0, linesFilled: 0 };
   const assimilated = mergeAssimilateResults(assimilatedBefore, assimilatedAfter);
 
   // Payouts são opcionais: um erro aqui (ex.: scope em falta) não deve

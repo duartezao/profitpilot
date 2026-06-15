@@ -33,16 +33,18 @@ function actionDot(level: TodayAction["level"]) {
 
 function StatusBadge({ status }: { status: DecisionRow["status"] }) {
   return (
-    <span
-      className={cn(
-        "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
-        status === "scale" && "border border-positive/30 bg-positive/10 text-positive",
-        status === "kill" && "border border-negative/30 bg-negative/10 text-negative",
-        status === "maintain" && "border border-border bg-muted text-muted-foreground",
-      )}
-    >
-      {status === "scale" ? "Scale" : status === "kill" ? "Kill" : "Manter"}
-    </span>
+    <Sensitive>
+      <span
+        className={cn(
+          "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
+          status === "scale" && "border border-positive/30 bg-positive/10 text-positive",
+          status === "kill" && "border border-negative/30 bg-negative/10 text-negative",
+          status === "maintain" && "border border-border bg-muted text-muted-foreground",
+        )}
+      >
+        {status === "scale" ? "Scale" : status === "kill" ? "Kill" : "Manter"}
+      </span>
+    </Sensitive>
   );
 }
 
@@ -64,9 +66,16 @@ export function DecisaoClient() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Decisão</h1>
         <p className="text-sm text-muted-foreground">
-          {isStore
-            ? `O que fazer hoje em ${data?.scopeName} · ${data?.periodLabel ?? ""}`
-            : `Prioridades em todas as lojas · ${data?.periodLabel ?? ""}`}
+          {isStore ? (
+            <>
+              O que fazer hoje em{" "}
+              <Sensitive as="span">{data?.scopeName}</Sensitive>
+              {" · "}
+              {data?.periodLabel ?? ""}
+            </>
+          ) : (
+            `Prioridades em todas as lojas · ${data?.periodLabel ?? ""}`
+          )}
         </p>
       </div>
 
@@ -97,7 +106,7 @@ export function DecisaoClient() {
                         actionDot(action.level),
                       )}
                     />
-                    <span>{action.text}</span>
+                    <Sensitive>{action.text}</Sensitive>
                   </li>
                 ))}
               </ul>
@@ -195,10 +204,10 @@ export function DecisaoClient() {
                           <StatusBadge status={row.status} />
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
-                          {row.roas}
+                          <Sensitive>{row.roas}</Sensitive>
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
-                          {row.ber}
+                          <Sensitive>{row.ber}</Sensitive>
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
                           <Sensitive>{row.margin}</Sensitive>

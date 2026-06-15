@@ -78,14 +78,14 @@ export function TreasuryClient() {
     ? scopeStore
       ? [
           {
-            label: "Por pagar (Shopify)",
-            value: scopeStore.availableFmt,
-            title: scopeStore.availableFmt,
+            label: "Saldo em conta",
+            value: scopeStore.cashOnHandFmt,
+            title: scopeStore.cashOnHandTitle,
           },
           {
-            label: "A caminho",
-            value: scopeStore.incomingFmt,
-            title: scopeStore.incomingFmt,
+            label: "A receber (Shopify)",
+            value: scopeStore.shopifyPendingFmt,
+            title: scopeStore.shopifyPendingTitle,
           },
           {
             label: "Recebido",
@@ -93,21 +93,21 @@ export function TreasuryClient() {
             title: scopeStore.receivedFmt,
           },
           {
-            label: "Saldo projetado",
-            value: scopeStore.projectedFmt,
-            title: scopeStore.projectedTitle,
+            label: "Saídas (COGS+ads)",
+            value: scopeStore.outflowsTotalFmt,
+            title: scopeStore.outflowsTotalFmt,
           },
         ]
       : [
           {
-            label: "Por pagar (Shopify)",
-            value: data!.totals.availableFmt,
-            title: data!.totals.availableFmt,
+            label: "Saldo em conta",
+            value: data!.totals.cashOnHandFmt,
+            title: data!.totals.cashOnHandTitle,
           },
           {
-            label: "A caminho",
-            value: data!.totals.incomingFmt,
-            title: data!.totals.incomingFmt,
+            label: "A receber (Shopify)",
+            value: data!.totals.shopifyPendingFmt,
+            title: data!.totals.shopifyPendingFmt,
           },
           {
             label: "Recebido",
@@ -115,9 +115,9 @@ export function TreasuryClient() {
             title: data!.totals.receivedFmt,
           },
           {
-            label: "Saldo projetado",
-            value: data!.totals.projectedFmt,
-            title: data!.totals.projectedTitle,
+            label: "Saídas",
+            value: data!.totals.outflowsTotalFmt,
+            title: data!.totals.outflowsTotalFmt,
           },
         ]
     : [];
@@ -169,6 +169,13 @@ export function TreasuryClient() {
             </span>
             {updatedAt ? `Ao vivo · ${updatedAt}` : "A ligar…"}
           </span>
+          <ScopeLink
+            href="/definicoes#capital-negocio"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+          >
+            <Wallet className="h-4 w-4" />
+            Capital no negócio
+          </ScopeLink>
           <ScopeLink
             href="/definicoes"
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
@@ -233,9 +240,9 @@ export function TreasuryClient() {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Saldo projetado = saldo inicial + recebido + por pagar (Shopify) + a
-            caminho. Quando a Shopify marca o payout como pago (após sync), o
-            valor passa de «a caminho» para «recebido» e o projetado atualiza.
+            Saldo em conta = saldo inicial + payouts recebidos − COGS − envio − ad
+            spend (desde o início da loja). Quando a Shopify marca o payout como
+            pago, o valor entra em «recebido» após sincronizar.
           </p>
 
           <div className="rounded-lg border border-border bg-surface">
@@ -281,7 +288,8 @@ export function TreasuryClient() {
                       <th className="px-5 py-3 text-right">Por pagar</th>
                       <th className="px-5 py-3 text-right">A caminho</th>
                       <th className="px-5 py-3 text-right">Recebido</th>
-                      <th className="px-5 py-3 text-right">Projetado</th>
+                      <th className="px-5 py-3 text-right">Saídas</th>
+                      <th className="px-5 py-3 text-right">Em conta</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -302,12 +310,15 @@ export function TreasuryClient() {
                         <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
                           {s.receivedFmt}
                         </td>
+                        <td className="px-5 py-3 text-right tabular-nums text-negative" data-sensitive>
+                          {s.outflowsTotalFmt}
+                        </td>
                         <td
                           className="px-5 py-3 text-right tabular-nums"
-                          title={s.projectedTitle}
+                          title={s.cashOnHandTitle}
                           data-sensitive
                         >
-                          {s.projectedFmt}
+                          {s.cashOnHandFmt}
                         </td>
                       </tr>
                     ))}

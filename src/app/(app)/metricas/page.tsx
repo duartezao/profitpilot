@@ -6,7 +6,6 @@ import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
 
 export const metadata: Metadata = { title: "Métricas" };
-export const dynamic = "force-dynamic";
 
 function ReportSection({ storeId }: { storeId: string }) {
   return (

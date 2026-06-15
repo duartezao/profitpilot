@@ -9,7 +9,10 @@ import {
   startOfDay,
   endOfDay,
 } from "@/lib/period";
+import type { AdSpendLineStored } from "@/lib/ad-spend-platforms";
+import { AD_PLATFORM_LABELS, adSpendLineTotalBase } from "@/lib/ad-spend-platforms";
 import { isAdSpendDayLockedForApi } from "@/lib/ad-spend-lock";
+import { dayKeysBetweenInTimezone, normalizeStoreTimezone } from "@/lib/store-timezone";
 
 export const AD_SPEND_LOOKBACK_DAYS = 60;
 
@@ -55,18 +58,24 @@ export type PeriodSlice = {
   specificDates?: string[];
 };
 
+export type AdSpendLineView = AdSpendLineStored & {
+  platformLabel: string;
+  totalBase: number;
+};
+
 export type AdSpendDayRow = {
   dateKey: string;
   label: string;
-  /** Valor na moeda base (EUR). */
+  /** Valor na moeda base (EUR) — só ads, sem fees. */
   amount: number | null;
   inputAmount: number | null;
   inputCurrency: string | null;
   fxRate: number | null;
   extraFee: number | null;
   inputExtraFee: number | null;
-  /** amount + extraFee na moeda base. */
+  /** amount + extraFee (inclui fees fixas e % agência). */
   totalAmount: number | null;
+  lines: AdSpendLineView[];
   baseCurrency: string;
   hasOrders: boolean;
   isYesterday: boolean;
@@ -74,6 +83,8 @@ export type AdSpendDayRow = {
   isLocked: boolean;
   source: "manual" | "api" | null;
   note?: string;
+  /** ISO timestamp para detecção de conflitos (optimistic locking). */
+  revisionAt: string | null;
 };
 
 export type StoreAdSpendSummary = {
@@ -83,9 +94,21 @@ export type StoreAdSpendSummary = {
   yesterdayMissing: boolean;
 };
 
-function adSpendDateMatch(slice: PeriodSlice): Record<string, unknown> {
+function adSpendDateMatch(
+  slice: PeriodSlice,
+  storeTimeZone?: string | null,
+): Record<string, unknown> {
   if (slice.specificDates?.length) {
     return { dateKey: { $in: slice.specificDates } };
+  }
+  if (storeTimeZone) {
+    const keys = dayKeysBetweenInTimezone(
+      slice.start,
+      slice.end,
+      storeTimeZone,
+    );
+    if (!keys.length) return { dateKey: { $in: [] } };
+    return { dateKey: { $gte: keys[0], $lte: keys[keys.length - 1] } };
   }
   return {
     dateKey: {
@@ -117,10 +140,46 @@ function dayRangeKeys(from: Date, to: Date): string[] {
   return keys;
 }
 
+/** Dias com registo manual de ad spend no período (por loja). */
+export async function countAdSpendEntriesByStore(
+  storeIds: Types.ObjectId[],
+  slice: PeriodSlice,
+  storeTimeZone?: string | null,
+): Promise<Map<string, number>> {
+  if (!storeIds.length) return new Map();
+
+  const rows = await ManualAdSpend.aggregate<{ _id: Types.ObjectId; count: number }>([
+    {
+      $match: {
+        storeId: { $in: storeIds },
+        ...adSpendDateMatch(slice, storeTimeZone),
+      },
+    },
+    { $group: { _id: "$storeId", count: { $sum: 1 } } },
+  ]);
+
+  return new Map(rows.map((r) => [String(r._id), r.count]));
+}
+
+/** Total de dias com registo manual de ad spend no período. */
+export async function countAdSpendEntriesInPeriod(
+  storeIds: Types.ObjectId[],
+  slice: PeriodSlice,
+  storeTimeZone?: string | null,
+): Promise<number> {
+  const byStore = await countAdSpendEntriesByStore(
+    storeIds,
+    slice,
+    storeTimeZone,
+  );
+  return [...byStore.values()].reduce((s, n) => s + n, 0);
+}
+
 /** Soma ad spend manual de uma ou várias lojas num período. */
 export async function sumAdSpendForPeriod(
   storeIds: Types.ObjectId[],
   slice: PeriodSlice,
+  storeTimeZone?: string | null,
 ): Promise<number> {
   if (!storeIds.length) return 0;
 
@@ -128,13 +187,47 @@ export async function sumAdSpendForPeriod(
     {
       $match: {
         storeId: { $in: storeIds },
-        ...adSpendDateMatch(slice),
+        ...adSpendDateMatch(slice, storeTimeZone),
       },
     },
     { $group: { _id: null, total: { $sum: { $add: ["$amount", { $ifNull: ["$extraFee", 0] }] } } } },
   ]);
 
   return rows[0]?.total ?? 0;
+}
+
+export type AdSpendStoreRef = {
+  _id: Types.ObjectId;
+  ianaTimezone?: string | null;
+};
+
+/** Soma e contagens por loja, cada uma no seu fuso horário. */
+export async function aggregateAdSpendForStores(
+  stores: AdSpendStoreRef[],
+  slice: PeriodSlice,
+): Promise<{
+  total: number;
+  byStore: Map<string, number>;
+  entriesByStore: Map<string, number>;
+}> {
+  const byStore = new Map<string, number>();
+  const entriesByStore = new Map<string, number>();
+
+  await Promise.all(
+    stores.map(async (s) => {
+      const sid = String(s._id);
+      const tz = normalizeStoreTimezone(s.ianaTimezone);
+      const [sum, entries] = await Promise.all([
+        sumAdSpendForPeriod([s._id], slice, tz),
+        countAdSpendEntriesByStore([s._id], slice, tz),
+      ]);
+      byStore.set(sid, sum);
+      entriesByStore.set(sid, entries.get(sid) ?? 0);
+    }),
+  );
+
+  const total = [...byStore.values()].reduce((a, b) => a + b, 0);
+  return { total, byStore, entriesByStore };
 }
 
 /** Dias com encomendas (para destacar dias com vendas sem ad spend). */
@@ -181,26 +274,60 @@ export async function buildAdSpendCalendar(
       dateKey: { $in: dateKeys },
     })
       .select(
-        "dateKey amount inputAmount inputCurrency fxRate extraFee inputExtraFee note currency source",
+        "dateKey amount inputAmount inputCurrency fxRate extraFee inputExtraFee lines note currency source updatedAt",
       )
       .lean(),
     orderDaysInRange(storeId, from, yesterday),
   ]);
 
   const byKey = new Map(
-    entries.map((e) => [
-      e.dateKey,
-      {
-        amount: e.amount,
-        inputAmount: e.inputAmount,
-        inputCurrency: e.inputCurrency,
-        fxRate: e.fxRate,
-        extraFee: e.extraFee,
-        inputExtraFee: e.inputExtraFee,
-        note: e.note ?? "",
-        source: e.source as "manual" | "api" | undefined,
-      },
-    ]),
+    entries.map((e) => {
+      const rawLines = (e.lines ?? []) as AdSpendLineStored[];
+      const lines: AdSpendLineView[] =
+        rawLines.length > 0
+          ? rawLines.map((l) => ({
+              ...l,
+              platformLabel: AD_PLATFORM_LABELS[l.platform] ?? l.platform,
+              totalBase: adSpendLineTotalBase(l),
+            }))
+          : e.amount != null
+            ? [
+                {
+                  platform: "meta" as const,
+                  inputAmount: e.inputAmount ?? Number(e.amount),
+                  inputCurrency: e.inputCurrency ?? e.currency ?? baseCurrency,
+                  amount: Number(e.amount),
+                  fxRate: e.fxRate ?? null,
+                  extraFee: Number(e.extraFee ?? 0),
+                  inputExtraFee: e.inputExtraFee ?? null,
+                  agencyFeePercent: 0,
+                  agencyFeeAmount: 0,
+                  inputAgencyFeeAmount: null,
+                  platformLabel: "Total (legado)",
+                  totalBase:
+                    Number(e.amount) + Number(e.extraFee ?? 0),
+                },
+              ]
+            : [];
+
+      return [
+        e.dateKey,
+        {
+          amount: e.amount,
+          inputAmount: e.inputAmount,
+          inputCurrency: e.inputCurrency,
+          fxRate: e.fxRate,
+          extraFee: e.extraFee,
+          inputExtraFee: e.inputExtraFee,
+          lines,
+          note: e.note ?? "",
+          source: e.source as "manual" | "api" | undefined,
+          revisionAt: e.updatedAt
+            ? new Date(e.updatedAt).toISOString()
+            : null,
+        },
+      ];
+    }),
   );
   const yesterdayKey = formatDateInput(yesterday);
 
@@ -225,12 +352,14 @@ export async function buildAdSpendCalendar(
           entry?.inputExtraFee != null ? Number(entry.inputExtraFee) : null,
         totalAmount:
           amount != null ? amount + (extraFee ?? 0) : null,
+        lines: entry?.lines ?? [],
         baseCurrency,
         hasOrders: orderDays.has(dateKey),
         isYesterday: dateKey === yesterdayKey,
         isLocked: isAdSpendDayLockedForApi(dateKey),
         source: entry?.source ?? null,
         note: entry?.note,
+        revisionAt: entry?.revisionAt ?? null,
       };
     });
 }

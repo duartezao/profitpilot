@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { startTransition, useEffect, useRef } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   clearPersistedStore,
@@ -34,7 +34,9 @@ export function ScopeSync({
       next.delete("store");
       clearPersistedStore(workspaceId);
       const qs = next.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname);
+      startTransition(() => {
+        router.replace(qs ? `${pathname}?${qs}` : pathname);
+      });
     }
 
     if (ids.length === 0) {
@@ -58,7 +60,9 @@ export function ScopeSync({
     const next = new URLSearchParams(searchParams.toString());
     next.set("store", persisted);
     const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname);
+    startTransition(() => {
+      router.replace(qs ? `${pathname}?${qs}` : pathname);
+    });
   }, [workspaceId, pathname, searchParams, router]);
 
   return null;

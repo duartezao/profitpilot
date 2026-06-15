@@ -24,3 +24,72 @@ export function berRoas(input: ProfitInputs): number | null {
   if (cm <= 0) return null;
   return input.revenue / cm;
 }
+
+/** POAS = lucro líquido / ad spend */
+export function calcPoas(netProfit: number, adSpend: number): number | null {
+  if (adSpend <= 0) return null;
+  return netProfit / adSpend;
+}
+
+export function fmtPoas(v: number | null): string {
+  if (v == null) return "—";
+  return v.toFixed(2).replace(".", ",");
+}
+
+export type ProfitBreakdownInput = {
+  revenue: number;
+  cogs: number;
+  shipping?: number;
+  fees?: number;
+};
+
+/** Texto legível: REV − custos − ads = lucro (para tooltips e títulos). */
+export function formatProfitBreakdown(
+  input: ProfitBreakdownInput,
+  adSpend: number,
+  fmtMoney: (v: number) => string,
+  opts?: { note?: string; adSpendKnown?: boolean },
+): string {
+  const adSpendKnown = opts?.adSpendKnown !== false;
+  const adForProfit = adSpendKnown ? adSpend : 0;
+  const profit = calcNetProfit(
+    {
+      revenue: input.revenue,
+      cogs: input.cogs,
+      shipping: input.shipping ?? 0,
+      fees: input.fees ?? 0,
+    },
+    adForProfit,
+  );
+  const parts = [`REV ${fmtMoney(input.revenue)}`, `COGS −${fmtMoney(input.cogs)}`];
+  if ((input.fees ?? 0) > 0) parts.push(`taxas −${fmtMoney(input.fees ?? 0)}`);
+  if ((input.shipping ?? 0) > 0) {
+    parts.push(`envio −${fmtMoney(input.shipping ?? 0)}`);
+  }
+  if (adSpendKnown && adSpend > 0) parts.push(`ads −${fmtMoney(adSpend)}`);
+  let note = opts?.note;
+  if (!note && !adSpendKnown) {
+    note = "ad spend por preencher — lucro sem ads";
+  }
+  if (
+    !note &&
+    adSpendKnown &&
+    input.revenue === 0 &&
+    input.cogs === 0 &&
+    (input.fees ?? 0) === 0 &&
+    adSpend > 0
+  ) {
+    note = "sem vendas neste dia — só ads";
+  }
+  if (
+    !note &&
+    adSpendKnown &&
+    input.revenue === 0 &&
+    input.cogs === 0 &&
+    (input.fees ?? 0) === 0 &&
+    adSpend === 0
+  ) {
+    note = "sem vendas nem ads";
+  }
+  return `${parts.join(" · ")} = ${fmtMoney(profit)}${note ? ` (${note})` : ""}`;
+}

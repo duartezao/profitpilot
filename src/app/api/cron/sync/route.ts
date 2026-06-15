@@ -8,9 +8,7 @@ export const maxDuration = 300;
  * Endpoint único de sync automático (Vercel Cron ou agendador externo).
  * Um pedido sincroniza todas as lojas em falta — intervalo global (4 h).
  *
- * Protegido por CRON_SECRET:
- * - Vercel Cron envia `Authorization: Bearer <CRON_SECRET>` automaticamente
- * - Agendador externo: header ou `?secret=<CRON_SECRET>`
+ * Protegido por CRON_SECRET (header `Authorization: Bearer <CRON_SECRET>`).
  */
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -22,11 +20,9 @@ export async function GET(request: Request) {
   }
 
   const auth = request.headers.get("authorization");
-  const url = new URL(request.url);
-  const provided =
-    auth?.replace(/^Bearer\s+/i, "") ?? url.searchParams.get("secret") ?? "";
+  const provided = auth?.replace(/^Bearer\s+/i, "") ?? "";
 
-  if (provided !== secret) {
+  if (!provided || provided !== secret) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 

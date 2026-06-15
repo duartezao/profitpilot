@@ -4,7 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { DailyNote } from "@/models/DailyNote";
-import { storeQueryForUser } from "@/lib/store-scope";
+import { activeStoreQueryForUser } from "@/lib/store-scope";
 import { canAccessStore } from "@/lib/store-access";
 import { formatDateInput } from "@/lib/period";
 import { DailyNoteForm } from "./daily-note-form";
@@ -29,7 +29,7 @@ export default async function NotasPage({
   const { store: storeId } = await searchParams;
   await connectToDatabase();
 
-  const stores = await Store.find(storeQueryForUser(user))
+  const stores = await Store.find(activeStoreQueryForUser(user))
     .select("name")
     .sort({ name: 1 })
     .lean();

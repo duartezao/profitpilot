@@ -1,9 +1,12 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { saveManualAdSpendAction, type AdSpendState } from "./actions";
 import { Sensitive } from "@/components/privacy-mode";
-import { AdSpendCurrencySelect } from "./ad-spend-currency-select";
+import {
+  AdSpendPlatformFields,
+  type PlatformDefaults,
+} from "./ad-spend-platform-fields";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
@@ -14,24 +17,32 @@ export function AdSpendForm({
   storeName,
   baseCurrency,
   defaultDate,
-  defaultAmount,
+  platformDefaults,
   defaultCurrency = "USD",
   minDate,
   canEdit,
+  onSaved,
 }: {
   storeId: string;
   storeName: string;
   baseCurrency: string;
   defaultDate: string;
-  defaultAmount?: string;
+  platformDefaults?: PlatformDefaults;
   defaultCurrency?: string;
   minDate?: string;
   canEdit: boolean;
+  onSaved?: () => void;
 }) {
   const [state, action, pending] = useActionState<AdSpendState, FormData>(
     saveManualAdSpendAction,
     {},
   );
+
+  useEffect(() => {
+    if (state.ok || state.conflict) {
+      onSaved?.();
+    }
+  }, [state.ok, state.conflict, onSaved]);
 
   return (
     <form
@@ -41,13 +52,20 @@ export function AdSpendForm({
       <div>
         <h2 className="text-lg font-semibold">Registar ad spend</h2>
         <p className="text-sm text-muted-foreground">
-          Introduz o gasto em ads em <Sensitive as="span">{storeName}</Sensitive>. Se estiver em USD (ou outra
-          moeda), converte automaticamente para {baseCurrency} com a taxa do dia.
+          Por plataforma em <Sensitive as="span">{storeName}</Sensitive> — gasto,
+          fee fixa de agência e % sobre o gasto. Converte para {baseCurrency}{" "}
+          com a taxa do dia.
         </p>
       </div>
 
       {state.error && (
-        <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
+        <p
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            state.conflict
+              ? "border-warning/40 bg-warning/10 text-warning"
+              : "border-negative/30 bg-negative/10 text-negative"
+          }`}
+        >
           {state.error}
         </p>
       )}
@@ -59,59 +77,24 @@ export function AdSpendForm({
 
       <input type="hidden" name="storeId" value={storeId} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
-          <label className={labelCls}>Data</label>
-          <input
-            name="date"
-            type="date"
-            defaultValue={defaultDate}
-            min={minDate}
-            disabled={!canEdit}
-            className={inputCls}
-            required
-          />
-        </div>
-        <div>
-          <label className={labelCls}>Gasto em ads</label>
-          <div className="flex gap-2">
-            <input
-              name="amount"
-              type="number"
-              step="0.01"
-              min="0"
-              defaultValue={defaultAmount ?? ""}
-              disabled={!canEdit}
-              placeholder="0,00"
-              className={`${inputCls} tabular-nums`}
-              required
-              data-sensitive
-            />
-            <AdSpendCurrencySelect
-              defaultValue={defaultCurrency}
-              disabled={!canEdit}
-            />
-          </div>
-        </div>
+      <div className="max-w-xs">
+        <label className={labelCls}>Data</label>
+        <input
+          name="date"
+          type="date"
+          defaultValue={defaultDate}
+          min={minDate}
+          disabled={!canEdit}
+          className={inputCls}
+          required
+        />
       </div>
 
-      <div>
-        <label className={labelCls}>Fee extra (opcional)</label>
-        <input
-          name="extraFee"
-          type="number"
-          step="0.01"
-          min="0"
-          disabled={!canEdit}
-          placeholder="0,00"
-          className={`${inputCls} tabular-nums`}
-          data-sensitive
-        />
-        <p className="mt-1 text-xs text-muted-foreground">
-          Na mesma moeda do gasto (ex.: comissão agência). Converte para{" "}
-          {baseCurrency} e soma ao total do dia.
-        </p>
-      </div>
+      <AdSpendPlatformFields
+        defaults={platformDefaults}
+        inputCurrency={defaultCurrency}
+        disabled={!canEdit}
+      />
 
       <div>
         <label className={labelCls}>Nota (opcional)</label>
@@ -119,7 +102,7 @@ export function AdSpendForm({
           name="note"
           type="text"
           disabled={!canEdit}
-          placeholder="Ex.: Meta + TikTok"
+          placeholder="Ex.: campanha Black Friday"
           className={inputCls}
         />
       </div>

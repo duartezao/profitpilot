@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { RotateCcw } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
+import { canAccessStore } from "@/lib/store-access";
 import { listStoreRefunds } from "@/lib/orders";
 
 export const metadata: Metadata = { title: "Reembolsos" };
@@ -19,11 +20,13 @@ export default async function ReembolsosPage({
   }>;
 }) {
   const user = await getCurrentUser();
+  if (!user) redirect("/login");
   const { store: storeId, period, from, to, dates } = await searchParams;
   if (!storeId) redirect("/dashboard");
+  if (!canAccessStore(user.storeAccess, storeId)) redirect("/dashboard");
 
   const { rows, stats, storeName, periodLabel } = await listStoreRefunds(
-    user?.workspaceId ?? "",
+    user,
     storeId,
     { period, from, to, dates },
   );

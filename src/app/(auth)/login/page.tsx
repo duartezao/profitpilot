@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { LoginForm } from "../login-form";
 
@@ -11,7 +12,9 @@ export default function LoginPage() {
       <p className="mt-1 text-sm text-muted-foreground">
         Acede à tua conta.
       </p>
-      <LoginForm />
+      <Suspense fallback={null}>
+        <LoginForm />
+      </Suspense>
       <p className="mt-4 text-center text-sm text-muted-foreground">
         Não tens conta?{" "}
         <Link href="/registo" className="font-medium text-accent">

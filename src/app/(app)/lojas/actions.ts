@@ -18,6 +18,14 @@ import {
 } from "@/lib/shopify";
 import { syncStore } from "@/lib/shopify-sync";
 import { Store } from "@/models/Store";
+import { findStoreForUser } from "@/lib/store-scope";
+import {
+  COGS_MODES,
+  defaultCogsInputCurrency,
+  defaultCogsMode,
+  isCogsInputCurrency,
+  isCogsMode,
+} from "@/lib/cogs-modes";
 
 export type AddStoreState = { error?: string };
 export type SyncState = { ok?: boolean; message?: string; error?: string };
@@ -43,6 +51,8 @@ const schema = z.object({
   clientSecret: z.string().trim().min(1, "Cola a Chave secreta (Client secret)."),
   importStartDate: z.string().trim().optional(),
   workspaceId: z.string().trim().optional(),
+  cogsMode: z.enum(COGS_MODES).optional(),
+  cogsInputCurrency: z.enum(["EUR", "USD"]).optional(),
 });
 
 export async function addStoreAction(
@@ -63,6 +73,8 @@ export async function addStoreAction(
     clientSecret: formData.get("clientSecret"),
     importStartDate: formData.get("importStartDate") ?? "",
     workspaceId: formData.get("workspaceId") ?? "",
+    cogsMode: String(formData.get("cogsMode") ?? ""),
+    cogsInputCurrency: String(formData.get("cogsInputCurrency") ?? ""),
   });
 
   if (!parsed.success) {
@@ -71,6 +83,14 @@ export async function addStoreAction(
 
   const { name, shopDomain, displayUrl, clientId, clientSecret, importStartDate } =
     parsed.data;
+  const cogsMode = isCogsMode(parsed.data.cogsMode ?? "")
+    ? parsed.data.cogsMode
+    : defaultCogsMode();
+  const cogsInputCurrency = isCogsInputCurrency(
+    parsed.data.cogsInputCurrency ?? "",
+  )
+    ? parsed.data.cogsInputCurrency
+    : defaultCogsInputCurrency();
 
   // Obtém um token (client credentials) e testa a ligação antes de guardar.
   let shop;
@@ -120,6 +140,8 @@ export async function addStoreAction(
     shopDomain: shop.myshopifyDomain || normalizeShopDomain(shopDomain),
     displayUrl: normalizeDisplayUrl(displayUrl),
     currency: shop.currencyCode || "EUR",
+    cogsMode,
+    cogsInputCurrency,
     credentials,
     importStartDate: importStartDate ? new Date(importStartDate) : undefined,
     ianaTimezone: shop.ianaTimezone || undefined,
@@ -143,12 +165,8 @@ export async function syncStoreAction(
   if (!storeId) return { error: "Loja inválida." };
 
   await connectToDatabase();
-  const store = await Store.findOne({
-    _id: storeId,
-    workspaceId: user.workspaceId,
-    deletedAt: null,
-  });
-  if (!store) return { error: "Loja não encontrada." };
+  const storeDoc = await findStoreForUser(user, storeId, "_id");
+  if (!storeDoc) return { error: "Loja não encontrada ou sem acesso." };
 
   try {
     const r = await syncStore(storeId);

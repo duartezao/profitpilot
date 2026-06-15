@@ -23,7 +23,10 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
         </div>
       )}
 
-      <ProductsProfitTable products={data.topProducts} />
+      <ProductsProfitTable
+        products={data.topProducts}
+        mode={data.topProductsMode}
+      />
     </div>
   );
 }

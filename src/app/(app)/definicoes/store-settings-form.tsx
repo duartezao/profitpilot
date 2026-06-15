@@ -1,9 +1,19 @@
 "use client";
 
 import { useActionState } from "react";
-import { updateStoreSettingsAction, type SettingsState } from "./actions";
+import {
+  updateStoreSettingsAction,
+  type SettingsState,
+} from "./actions";
+import { RemoveBankrollForm } from "./remove-bankroll-form";
 import { listSessionCountryOptions } from "@/lib/shopify-countries";
 import { Sensitive } from "@/components/privacy-mode";
+import {
+  COGS_MODES,
+  COGS_MODE_LABELS,
+  COGS_INPUT_CURRENCIES,
+  type CogsMode,
+} from "@/lib/cogs-modes";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -17,12 +27,11 @@ export type StoreValues = {
   currency: string;
   status: "active" | "paused" | "archived";
   autoSync: boolean;
-  processingPercent: number;
-  processingFixed: number;
-  transactionFeePercent: number;
   startingBalance: number;
   startingBalanceDate: string;
   analyticsSessionCountry: string;
+  cogsMode: CogsMode;
+  cogsInputCurrency: string;
 };
 
 function currencySymbol(currency: string) {
@@ -54,23 +63,11 @@ export function StoreSettingsForm({
   const countryOptions = listSessionCountryOptions();
 
   return (
-    <form action={action} className="space-y-4 rounded-lg border border-border bg-surface p-5">
+    <div className="space-y-4">
+    <form action={action} className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 sm:p-5">
       <input type="hidden" name="storeId" value={store.id} />
 
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <Sensitive as="p" className="truncate font-medium">
-            {store.name}
-          </Sensitive>
-          <Sensitive as="p" className="truncate text-sm text-muted-foreground">
-            {store.displayUrl || store.shopDomain}
-          </Sensitive>
-          {store.displayUrl && (
-            <Sensitive as="p" className="truncate text-xs text-muted-foreground">
-              API: {store.shopDomain}
-            </Sensitive>
-          )}
-        </div>
+      <div className="flex items-center justify-end gap-3">
         {state.ok && <span className="text-xs text-positive">Guardado</span>}
         {state.error && <span className="text-xs text-negative">{state.error}</span>}
       </div>
@@ -92,6 +89,10 @@ export function StoreSettingsForm({
             <option value="paused">Pausada</option>
             <option value="archived">Arquivada</option>
           </select>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Arquivada: deixa de aparecer no seletor e nas métricas consolidadas.
+            O histórico mantém-se — reativa para voltar a contar.
+          </p>
         </div>
         <div className="sm:col-span-2">
           <label className={labelCls}>URL público da loja</label>
@@ -112,53 +113,44 @@ export function StoreSettingsForm({
       </div>
 
       <div>
-        <p className="text-sm font-medium">
-          Taxa de processamento{" "}
-          <span className="text-muted-foreground">(por encomenda)</span>
-        </p>
+        <p className="text-sm font-medium">Custos (COGS)</p>
         <p className="mb-2 text-xs text-muted-foreground">
-          Percentagem + valor fixo por encomenda. Ex.: Shopify Payments 1,5% +
-          0,30 {symbol}. Usado para estimar o lucro real.
+          Define como preenches o COGS nesta loja. Podes alterar depois do setup
+          inicial.
         </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className={labelCls}>Percentagem (%)</label>
-            <input
-              name="processingPercent"
-              type="number"
-              step="0.01"
-              placeholder="1.5"
-              defaultValue={store.processingPercent}
+            <label className={labelCls}>Modo de COGS</label>
+            <select
+              name="cogsMode"
+              defaultValue={store.cogsMode}
               disabled={!canEdit}
               className={inputCls}
-            />
+            >
+              {COGS_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {COGS_MODE_LABELS[m]}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
-            <label className={labelCls}>Fixo por encomenda ({symbol})</label>
-            <input
-              name="processingFixed"
-              type="number"
-              step="0.01"
-              placeholder="0.30"
-              defaultValue={store.processingFixed}
+            <label className={labelCls}>Moeda de entrada</label>
+            <select
+              name="cogsInputCurrency"
+              defaultValue={store.cogsInputCurrency}
               disabled={!canEdit}
               className={inputCls}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>
-              Taxa extra (%){" "}
-              <span className="text-muted-foreground">(opcional)</span>
-            </label>
-            <input
-              name="transactionFeePercent"
-              type="number"
-              step="0.01"
-              placeholder="0"
-              defaultValue={store.transactionFeePercent}
-              disabled={!canEdit}
-              className={inputCls}
-            />
+            >
+              {COGS_INPUT_CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              USD converte para a moeda base do workspace na dashboard.
+            </p>
           </div>
         </div>
       </div>
@@ -170,7 +162,11 @@ export function StoreSettingsForm({
         </p>
         <p className="mb-2 text-xs text-muted-foreground">
           Saldo conhecido numa data — ponto de partida para o “tenho € ou não?”
-          desta loja.
+          desta loja. Para reforços de caixa depois, usa{" "}
+          <a href="#capital-negocio" className="font-medium text-accent hover:underline">
+            Capital no negócio
+          </a>
+          .
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -196,6 +192,13 @@ export function StoreSettingsForm({
             />
           </div>
         </div>
+        {canEdit &&
+          (store.startingBalance !== 0 || Boolean(store.startingBalanceDate)) && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Para remover o saldo inicial, usa o bloco «Retirar banca» abaixo
+              deste formulário.
+            </p>
+          )}
       </div>
 
       <div>
@@ -214,6 +217,7 @@ export function StoreSettingsForm({
           defaultValue={store.analyticsSessionCountry}
           disabled={!canEdit}
           className={inputCls}
+          data-sensitive
         >
           <option value="">Todos os países</option>
           {countryOptions.map((c) => (
@@ -254,5 +258,10 @@ export function StoreSettingsForm({
         </button>
       )}
     </form>
+    {canEdit &&
+      (store.startingBalance !== 0 || Boolean(store.startingBalanceDate)) && (
+        <RemoveBankrollForm storeId={store.id} />
+      )}
+    </div>
   );
 }

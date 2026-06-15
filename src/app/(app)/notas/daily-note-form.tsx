@@ -94,11 +94,82 @@ export function DailyNoteForm({
           name="text"
           rows={4}
           disabled={!canEdit}
-          placeholder="Mudanças, testes, o que funcionou ou não…"
+          placeholder="Mudanças, testes, o que funcionou ou não… (aparece em OBS no relatório diário)"
           className={inputCls}
           data-sensitive
         />
       </div>
+
+      <fieldset className="space-y-4 rounded-lg border border-border p-4">
+        <legend className="px-1 text-sm font-medium">
+          Campos do relatório diário
+        </legend>
+        <p className="text-xs text-muted-foreground">
+          Preenchidos no template automático em Métricas e Notas (produtos, coleções, dificuldades).
+        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>Produtos testados</label>
+            <input
+              name="productsTested"
+              type="text"
+              disabled={!canEdit}
+              className={inputCls}
+              data-sensitive
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Coleções testadas</label>
+            <input
+              name="collectionsTested"
+              type="text"
+              disabled={!canEdit}
+              className={inputCls}
+              data-sensitive
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>Quais coleções já testadas</label>
+            <input
+              name="collectionsTestedList"
+              type="text"
+              disabled={!canEdit}
+              className={inputCls}
+              data-sensitive
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Próxima coleção a testar</label>
+            <input
+              name="nextCollection"
+              type="text"
+              disabled={!canEdit}
+              className={inputCls}
+              data-sensitive
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Coleção best-seller</label>
+            <input
+              name="bestSellerCollection"
+              type="text"
+              disabled={!canEdit}
+              className={inputCls}
+              data-sensitive
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>Principais dificuldades</label>
+            <input
+              name="difficulties"
+              type="text"
+              disabled={!canEdit}
+              className={inputCls}
+              data-sensitive
+            />
+          </div>
+        </div>
+      </fieldset>
 
       {canEdit && (
         <button

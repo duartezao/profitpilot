@@ -10,8 +10,8 @@ import {
 } from "@/lib/store-timezone";
 import { orderNetRevenue } from "@/lib/order-revenue";
 import { Order } from "@/models/Order";
-import { Store } from "@/models/Store";
-import { Workspace } from "@/models/Workspace";
+import type { CurrentUser } from "@/lib/auth";
+import { findStoreForUser } from "@/lib/store-scope";
 
 export type OrderListRow = {
   id: string;
@@ -77,25 +77,24 @@ type ListResult = {
 };
 
 async function resolveStoreContext(
-  workspaceId: string,
+  user: Pick<CurrentUser, "workspaceId" | "storeAccess">,
   storeId: string,
   periodInput?: PeriodInput,
 ) {
   await connectToDatabase();
-  const wsId = new mongoose.Types.ObjectId(workspaceId);
-  const store = await Store.findOne({
-    _id: storeId,
-    workspaceId: wsId,
-    deletedAt: null,
-  })
-    .select("name currency ianaTimezone")
-    .lean();
+  const store = await findStoreForUser(
+    user,
+    storeId,
+    "name currency ianaTimezone",
+  );
+  const wsId = new mongoose.Types.ObjectId(user.workspaceId);
   const storeTz = store
     ? normalizeStoreTimezone(store.ianaTimezone)
     : null;
   const period = storeTz
     ? resolvePeriodForStore(periodInput, storeTz)
     : resolvePeriod(periodInput);
+  const { Workspace } = await import("@/models/Workspace");
   const workspace = await Workspace.findById(wsId).lean();
   const currency =
     workspace?.baseCurrency ?? store?.currency ?? "EUR";
@@ -134,13 +133,13 @@ function buildStats(
 
 /** Lista de encomendas da loja no período (mais recentes primeiro). */
 export async function listStoreOrders(
-  workspaceId: string,
+  user: Pick<CurrentUser, "workspaceId" | "storeAccess">,
   storeId: string,
   periodInput?: PeriodInput,
   limit = 100,
 ): Promise<ListResult> {
   const { period, wsId, store, currency, storeTz } = await resolveStoreContext(
-    workspaceId,
+    user,
     storeId,
     periodInput,
   );
@@ -207,13 +206,13 @@ export async function listStoreOrders(
 
 /** Encomendas com reembolso no período + refund rate agregado. */
 export async function listStoreRefunds(
-  workspaceId: string,
+  user: Pick<CurrentUser, "workspaceId" | "storeAccess">,
   storeId: string,
   periodInput?: PeriodInput,
   limit = 100,
 ): Promise<ListResult> {
   const { period, wsId, store, currency, storeTz } = await resolveStoreContext(
-    workspaceId,
+    user,
     storeId,
     periodInput,
   );

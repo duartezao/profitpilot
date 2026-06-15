@@ -1,12 +1,15 @@
 "use client";
 
 import { useActionState } from "react";
+import { useSearchParams } from "next/navigation";
 import { loginAction, type AuthState } from "./actions";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 
 export function LoginForm() {
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next") ?? "";
   const [state, action, pending] = useActionState<AuthState, FormData>(
     loginAction,
     {},
@@ -14,6 +17,7 @@ export function LoginForm() {
 
   return (
     <form action={action} className="mt-5 space-y-3">
+      <input type="hidden" name="next" value={next} />
       {state.error && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
           {state.error}

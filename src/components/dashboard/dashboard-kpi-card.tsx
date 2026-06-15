@@ -78,6 +78,7 @@ export function DashboardKpiCard({
       {isStore && deltaLabel && (
         <span className="mt-0.5 block truncate font-normal text-muted-foreground">
           {deltaLabel}
+          <span className="hidden sm:inline"> — não é euros</span>
         </span>
       )}
     </Sensitive>

@@ -153,7 +153,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * Editar loja
 * Desativar loja (mantém dados, pausa sincronização)
 * Reativar loja
-* **Arquivar loja** (remove das vistas ativas mas mantém todo o histórico)
+* **Arquivar loja** (remove do seletor e das métricas consolidadas; histórico mantém-se — reativa em Definições → Lojas para voltar a contar)
 * **Agrupar lojas** por marca/nicho/país (ex.: "Lojas PT", "Lojas Pet")
 * **Definir moeda base** por workspace para consolidar tudo numa única moeda
 
@@ -310,15 +310,26 @@ Net Profit =
 
 ## Configuração de custos (COGS)
 
-* **Buscar o COGS automaticamente da Shopify** — a Shopify guarda o campo **"Cost per item" (custo por artigo, em €)** em cada variante (`InventoryItem.unitCost` via Admin GraphQL API). A app puxa esse valor automaticamente em cada sync e usa-o no cálculo do lucro, sem teres de inserir nada à mão.
-* Definir/editar **COGS por produto e por variante** manualmente (substitui o valor da Shopify quando quiseres)
-* Importar COGS via **CSV** ou **API do fornecedor** (AliExpress / CJ / Zendrop) como alternativa
-* **COGS histórico** — coleção `cogsHistory` com versões por variante (`effectiveFrom` / `effectiveTo`). O lucro de encomendas antigas usa o custo da altura; alterações futuras (Shopify ou manual) não reescrevem linhas já registadas.
-* **Página COGS** — lista apenas **produtos vendidos sem custo** (linhas de encomenda com `unitCost` em falta), não o catálogo inteiro.
-* **Assimilação automática** — em cada sync (antes e depois das encomendas), percorre vendas sem COGS e preenche com o custo válido na data da venda. Se o preço do fornecedor mudou, o histórico (`cogsHistory`) garante o valor certo por dia; vendas já com custo confirmado não são reescritas.
-* COGS por defeito / margem-alvo para produtos sem custo definido (com alerta visual de "custo em falta")
-* **Aviso de COGS em falta** — só conta variantes vendidas **no período selecionado** sem custo na linha da encomenda. O Net Profit mostra sempre o valor calculado; se faltar COGS, banner âmbar avisa que o lucro pode estar superestimado nessas linhas. Encomendas com custo registado usam o valor da altura da venda — **não substitui** a actualização quando o fornecedor muda o preço (Shopify / manual / COGS); custo desatualizado distorce o lucro sem o superestimar necessariamente.
-* Prioridade de fonte do custo configurável: **manual > CSV > Shopify cost per item > fornecedor**
+**Modo no setup da loja** (`cogsMode` + `cogsInputCurrency`):
+
+| Modo | Como preencher | Top produtos na dashboard |
+|------|----------------|---------------------------|
+| `shopify` (defeito) | Cost per item da Shopify no sync | Por lucro |
+| `variant` | Manual / CSV por variante | Por lucro |
+| `order` | COGS total por encomenda em `/cogs` | **Por unidades vendidas** |
+| `day` | COGS total por dia civil (fuso da loja) em `/cogs` | **Por unidades vendidas** |
+
+* **Moeda de entrada** — EUR ou USD no setup (`cogsInputCurrency`). Valores em USD convertem com taxa Frankfurter do dia (fallback fixo se API falhar).
+* **Dashboard sempre em EUR** (moeda base do workspace) — encomendas de lojas Shopify em USD/GBP/etc. guardam `amountsBase` no sync; revenue, COGS, envio e taxas entram convertidos no lucro.
+* **Buscar o COGS automaticamente da Shopify** — modo `shopify`: `InventoryItem.unitCost` via Admin GraphQL API.
+* Definir/editar **COGS por produto e por variante** manualmente (modo `variant`)
+* Importar COGS via **CSV** (modos `shopify` / `variant`)
+* **COGS por encomenda** — `manualCogs` na order, convertido para moeda base; lucro usa este valor em vez da soma das linhas.
+* **COGS por dia** — coleção `manualCogsDays` (espelho do ad spend manual); um valor por dia com vendas.
+* **COGS histórico** — coleção `cogsHistory` com versões por variante (`effectiveFrom` / `effectiveTo`). O lucro de encomendas antigas usa o custo da altura; alterações futuras não reescrevem linhas já registadas.
+* **Página COGS** — painel conforme o modo: variantes em falta, tabela de encomendas, ou dias desde importação.
+* **Assimilação automática** — só nos modos `shopify` e `variant`; em `order`/`day` o utilizador preenche manualmente.
+* **Aviso de COGS em falta** — variantes sem custo (modos shopify/variant), encomendas sem `manualCogs` (modo order), ou dias com vendas sem registo (modo day).
 
 ## Visualizações de lucro
 
@@ -346,7 +357,7 @@ Net Profit =
 * A app vai buscar automaticamente o **valor gasto (spend)** por dia, por campanha e por conta.
 * Sincronização diária automática + opção de **refresh manual** a qualquer momento.
 * **Regra de sync**: em cada sync periódico, o gasto de **hoje** é **substituído** pelo valor fresco das APIs; **ontem e dias anteriores ficam fechados** (já não é possível gastar mais nesses dias). O manual preenche dias em falta, sobretudo ontem.
-* **Ad spend manual** (`/anuncios`) — se não houver contas ligadas ou o sync falhar, preenches o **total gasto por dia e por loja** (USD, EUR ou GBP). Dias em falta contam **desde a `importStartDate` da loja** (escolhida no setup) até ontem. Converte automaticamente para a **moeda base** do workspace com a taxa do dia.
+* **Ad spend manual** (`/anuncios`) — se não houver contas ligadas ou o sync falhar, preenches o gasto **por dia, loja e plataforma** (Meta, Google, TikTok) em USD, EUR ou GBP. Cada plataforma tem gasto em ads, fee fixa de agência e fee % sobre o gasto (varia por dia). Dias em falta contam **desde a `importStartDate` da loja** (escolhida no setup) até ontem. Converte automaticamente para a **moeda base** do workspace com a taxa do dia. A página **actualiza-se automaticamente** (polling ~10 s) — não é preciso refresh manual. Se **dois utilizadores guardarem o mesmo dia ao mesmo tempo**, prevalece o **primeiro** (optimistic locking com `updatedAt`); o segundo vê aviso e a lista actualiza-se.
 
 ## Ligação Meta Ads (Facebook/Instagram)
 
@@ -533,7 +544,7 @@ Cada loja deve ter:
 
 > Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
 
-**Estado (implementado):** em `/notas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, PROFIT (aviso COGS), funil ATC/checkout/CVR. CPC/CTR/CPM e campos de testes de coleções ficam `—` até API de ads e campos extra na nota.
+**Estado (implementado):** em `/notas` e `/metricas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, PROFIT (aviso COGS), funil ATC/checkout/CVR. Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). CPC/CTR/CPM ficam `—` até API de ads.
 
 ## Exemplo do template gerado
 
@@ -568,8 +579,8 @@ Principais dificuldades: 0
 | REV | Vendas líquidas do dia (subtotal após descontos − reembolsos, alinhado com Shopify Net sales) |
 | COGS | Custo dos produtos vendidos no dia (cost per item × unidades) |
 | REFUNDS | Reembolsos do dia (informativo — já reflectidos na REV) |
-| ADSPEND | Soma do ad spend (Meta + Google + TikTok) |
-| PROFIT | Net Profit = REV − COGS − envio − taxas − ad spend; aviso se faltar COGS em produtos vendidos nesse dia |
+| ADSPEND | Valor **só** quando registado em Anúncios (`manualAdSpend`); dias por preencher mostram `—` e **não** entram no lucro |
+| PROFIT | Net Profit = REV − COGS − envio − taxas − ad spend (quando registado); aviso se faltar COGS em produtos vendidos nesse dia |
 | SESSÕES | ShopifyQL (`read_reports`), filtradas pelo **país configurado na loja** (`analyticsSessionCountry` em Definições; vazio = todos os países); lidas da BD (`session_metrics_months`) |
 | ATC % | `sessões com add to cart / sessões` — mesma origem e **mesmo filtro de país** que SESSÕES |
 | REACHED CHECKOUT % | `sessões que chegaram ao checkout / sessões` — mesma origem e **mesmo filtro de país** |
@@ -674,7 +685,9 @@ Principais dificuldades: 0
 
 * **Ao criar conta**, é criado automaticamente o **primeiro workspace** (ex.: "As minhas lojas") — para as tuas lojas.
 * Podes **criar mais workspaces** com o nome que quiseres (ex.: "Cliente X", "Agência", "Projeto da Maria"), para separar contextos.
-* **Seletor de workspace** (workspace switcher) no topo da app: trocas de workspace e **tudo muda** para esse contexto — lojas, dashboard, payouts, tesouraria, notas. Os dados de cada workspace **nunca se misturam**.
+* **Gerir workspaces** (Definições → «Os teus workspaces» ou link no seletor): **renomear**, **criar** e **apagar** os workspaces de que és **proprietário**. Sem lojas → apaga de imediato. Com lojas → confirmação dupla (checkbox + escrever o nome). Não podes apagar o único workspace a que tens acesso.
+* **Seletor de workspace** (workspace switcher) no topo da app: trocas de workspace e **tudo muda** para esse contexto — lojas, dashboard, payouts, tesouraria, notas. Os dados de cada workspace **nunca se misturam** na edição/configuração.
+* **Vista portfolio** (seletor «Vista de métricas» no topo, só se tiveres 2+ workspaces): escolhe **todos os workspaces** ou **2+ específicos** e vê no **Dashboard** KPIs agregados, gráfico de lucro total e **tabela comparativa** (revenue, lucro, margem, ad spend, ROAS) com destaque ao workspace mais rentável. Valores convertidos para a moeda base do workspace activo. O filtro por loja fica indisponível nesta vista.
 * Cada workspace tem o **seu seletor de lojas** (consolidado vs uma loja), independente dos outros.
 * A **faturação/plano** é por workspace (cada workspace tem o seu plano), o que encaixa no modelo SaaS — um workspace de agência pode ter um plano superior.
 
@@ -992,7 +1005,8 @@ Lucro após taxas =
 
 **O que defines à mão para ficar exato:**
 
-* **Saldo inicial (cash on hand) por loja** — defines, **em cada loja**, quanto tens nessa data; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria (saldo + data).
+* **Saldo inicial (banca) por loja** — defines, **em cada loja**, quanto tens nessa data; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria. **Retirar banca**: botão com confirmação zera o saldo inicial — tesouraria e finanças deixam de contar esse valor (histórico de vendas mantém-se).
+* **Injeções de capital** — em Definições → **Capital no negócio**: regista quando depositas ou levantas dinheiro da conta do negócio (com data, valor e confirmação), sem alterar o saldo inicial por engano.
 * **Contas a pagar a fornecedores** — quanto e quando pagas o produto (AliExpress/CJ/etc.), para a saída de caixa ser real. (Em dropshipping é o que mais mexe no caixa.)
 * **Reserva para impostos/IVA** — defines uma % a separar; a app guarda esse valor à parte e mostra o caixa "limpo".
 * Ajustes pontuais (entradas/saídas manuais).
@@ -1204,7 +1218,8 @@ Lucro após taxas =
 * `displayUrl` (domínio público `.com` — título da dashboard, listagens e campo LOJA dos reports)
 * `credentials` (encriptado AES-256-GCM — Shopify: `clientId`, `clientSecret`. Token obtido on-demand via client credentials, não persistido. **Nunca em texto simples**)
 * `scopes` (array de permissões concedidas)
-* `feeConfig` (taxas estimadas de fallback: `processingPercent`, `processingFixed`, `transactionFeePercent`)
+* `feeConfig` (taxa actual — espelho da última entrada do calendário)
+* `feeSchedule[]` — histórico: `effectiveFromKey`, `processingPercent`, `processingFixed`, `transactionFeePercent` (taxa só aplica a encomendas desde esse dia; dias anteriores mantêm fees gravados)
 * `startingBalance` (saldo inicial de caixa **desta loja**, definido manualmente — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
 * `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
@@ -1324,20 +1339,27 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## manualAdSpend
 
-> Total diário introduzido à mão por loja (quando não há API ou como fallback).
+> Total diário introduzido à mão por loja (quando não há API ou como fallback). Em `/anuncios` preenches **por plataforma** (Meta, Google, TikTok).
 
 * `_id`
 * `workspaceId`
 * `storeId`
 * `dateKey` (YYYY-MM-DD)
-* `amount` (na moeda base do workspace — entra no lucro)
+* `amount` (gasto em ads na moeda base — entra no lucro)
 * `currency` (moeda base, ex. EUR)
-* `inputAmount` / `inputCurrency` (valor original, ex. USD da conta Meta)
-* `extraFee` / `inputExtraFee` (fee extra opcional, mesma moeda do input — converte e soma ao total do dia no lucro)
+* `inputAmount` / `inputCurrency` (soma dos gastos originais, ex. USD)
+* `extraFee` / `inputExtraFee` (fees fixas de agência + % sobre o gasto, convertidas e somadas ao total do dia)
+* `lines[]` — breakdown por plataforma:
+  * `platform` (`meta` / `google` / `tiktok`)
+  * `inputAmount`, `inputCurrency`, `amount`, `fxRate` (gasto em ads dessa plataforma)
+  * `extraFee`, `inputExtraFee` (fee fixa de agência)
+  * `agencyFeePercent`, `agencyFeeAmount`, `inputAgencyFeeAmount` (% sobre o gasto em ads dessa plataforma)
 * `source` (`manual` / `api`)
 * `note` (opcional)
 
-> Na entrada manual, o utilizador escolhe USD/EUR/GBP; a app converte para a moeda base com taxa histórica (Frankfurter/ECB) do dia do gasto. Sync API: só reescreve **hoje**; `dateKey < hoje` nunca é tocado pelo sync automático.
+> Na entrada manual, escolhes USD/EUR/GBP para todos os valores do dia; a app converte para a moeda base com taxa histórica (Frankfurter/ECB) do dia do gasto. Preenche só as plataformas usadas nesse dia. Fee fixa e % aplicam-se **por plataforma** sobre o respetivo gasto. Sync API: só reescreve **hoje**; `dateKey < hoje` nunca é tocado pelo sync automático.
+>
+> **Lucro:** o ad spend **só** é subtraído quando existe registo em `manualAdSpend` para esse `dateKey`. Dias sem valor (incluindo **hoje** antes de preencheres) mostram `—` na coluna Ad Spend e o lucro é calculado sem ads (provisório). Quando introduzes `0 €`, conta como zero gasto nesse dia.
 
 ## expenses
 
@@ -1452,7 +1474,10 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 ## Autenticação e acesso
 
 * Autenticação forte com **sessões seguras** (cookies `httpOnly`, `Secure`, `SameSite`).
-* **2FA obrigatório** (TOTP) para contas com acesso a dados financeiros.
+* **Middleware** (`src/middleware.ts`): todas as rotas da app e APIs exigem cookie de sessão; `/login` e `/registo` são públicos; `/api/cron/*` usa segredo próprio.
+* **Guards de API** (`src/lib/require-auth.ts`): `requireUser`, `requireWorkspaceStore` (loja ∈ workspace activo + `storeAccess`), `requireRole`.
+* Troca de workspace só via `switchWorkspace` — valida membership activa na BD (não confia no `workspaceId` do cliente).
+* **2FA obrigatório** (TOTP) para contas com acesso a dados financeiros — por fazer.
 * Política de **passwords fortes** + hashing com **Argon2** (ou bcrypt).
 * **RBAC** (owner / admin / viewer) e isolamento total de dados entre workspaces/tenants.
 * Bloqueio após tentativas falhadas e **rate limiting** no login.
@@ -1488,7 +1513,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * Dependências verificadas (auditoria de vulnerabilidades, ex.: `npm audit`, Dependabot).
 * Secrets scanning no CI para impedir fugas.
 * **Princípios RGPD/GDPR**: minimização de dados, direito a exportar/apagar dados de clientes.
-* Ambiente de produção isolado do de desenvolvimento; acesso restrito à base de dados.
+* **Scripts de diagnóstico** que acediam à BD directamente foram removidos do repositório — sync manual só via UI autenticada ou cron protegido.
 
 ---
 
@@ -1576,7 +1601,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 5. **Decisão** — "o que fazer hoje", kill/scale, recomendações.
 6. **Notas & Relatórios** — diário, relatório diário automático, exportações.
 7. **Anúncios** — ad spend por plataforma/campanha.
-8. **Definições** — lojas, contas de ads, custos, equipa/permissões, conta, faturação.
+8. **Definições** — secções colapsáveis (fechadas por defeito) com atalhos: Conta, Workspaces, Workspace activo, Equipa, Lojas (uma sub-secção por loja), Capital, Mover lojas.
 
 ## Padrões de ecrã
 
@@ -1619,7 +1644,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * Reage ao **período** da topbar (presets, intervalo custom, dias específicos).
 * **KPIs financeiros** + **funil Shopify** (sessões, ATC %, checkout %, CVR %) filtrado pelo país configurado na loja.
 * **Gráfico** lucro por dia (área Recharts) — dias do período da topbar.
-* **Tabela dia a dia**: um dia por linha/cartão (mobile), alinhado ao período; ícone de olho quando há nota diária; REV, refunds, ad spend, profit, sessões e funil.
+* **Tabela dia a dia**: um dia por linha/cartão (mobile), alinhado ao período; ícone de olho quando há nota diária; REV, refunds, ad spend (`—` se por preencher), profit, sessões e funil.
 
 ## Apoio à Decisão (desktop)
 
@@ -1654,17 +1679,17 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * **Base PWA + responsividade mobile-first** desde o primeiro ecrã
 
 ## Fase 2 — Lucro Real
-* COGS automático da Shopify (cost per item) + manual + CSV + cogsHistory — **feito** (CSV por implementar)
+* COGS automático da Shopify (cost per item) + manual + CSV + cogsHistory — **feito**
 * Ad spend manual (`/anuncios`) + integração em métricas — **feito**; ligação Meta/Google/TikTok API — **por implementar**
 * Refunds no cálculo e páginas `/pedidos` + `/reembolsos` — **feito**; chargebacks — **por implementar**
-* Cálculo de Net Profit, margem, ROAS/MER e **BER** — **feito**; POAS nos KPIs — **por implementar**
+* Cálculo de Net Profit, margem, ROAS/MER, **BER** e **POAS** nos KPIs estendidos — **feito**
 * Aviso COGS em falta por período + lucro sempre visível + gráfico lucro consolidado + sparklines — **feito**
-* Dashboard consolidado multi-loja + tabela comparativa loja a loja — **feito** (parcial: sem ordenação por coluna)
-* Testes automatizados do cálculo de lucro — **por implementar**
+* Dashboard consolidado multi-loja + tabela comparativa loja a loja (ordenável, coluna Ad Spend) — **feito**
+* Testes automatizados do cálculo de lucro (incl. POAS) — **feito**
 
 ## Fase 3 — Operação e Histórico
 
-* **Notas diárias** (scale / mudanças) com marcadores nos gráficos
+* **Notas diárias** (scale / mudanças) com marcadores nos gráficos — **feito**
 * **Relatório diário automático** (template auto-preenchido, por plataforma, média vs total, export)
 * Google Ads e TikTok Ads (várias contas por loja)
 * Registo de custos de apps / ferramentas
@@ -1675,7 +1700,8 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## Fase 4 — Inteligência
 
-* Dashboard de **saúde financeira** (score + diagnóstico do que prejudica) e **tesouraria** (tenho € ou não)
+* **Tesouraria por loja** (`/financas` → Resumo com loja, `/tesouraria`) — saldo em conta desde início (inicial + payouts + injeções − COGS/envio/ads − levantamentos), payouts na BD — **feito**
+* **Injeções de capital** (Definições → Capital no negócio) — **feito**
 * **Apoio à decisão**: resumo "o que fazer hoje", semáforo kill/scale, recomendação de budget
 * Lucro provisório vs consolidado (janela de refunds)
 * IA para insights + resumo diário + chat sobre dados

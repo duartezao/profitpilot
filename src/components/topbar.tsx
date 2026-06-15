@@ -4,6 +4,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { PrivacyToggle } from "@/components/privacy-mode";
 import { StoreSelector, type StoreOption } from "@/components/store-selector";
 import { WorkspaceSelector } from "@/components/workspace-selector";
+import { PortfolioScopeSelector } from "@/components/portfolio-scope-selector";
 import { PeriodSelector } from "@/components/period-selector";
 import { logoutAction } from "@/app/(app)/actions";
 import type { CurrentUser, UserWorkspace } from "@/lib/auth";
@@ -91,9 +92,20 @@ export function Topbar({
               <div className="h-9 rounded-lg border border-border bg-muted" />
             }
           >
-            <StoreSelector stores={stores} className="min-w-0" />
+            <PortfolioScopeSelector
+              workspaces={workspaces}
+              userId={user.id}
+              className="min-w-0"
+            />
           </Suspense>
         </div>
+        <Suspense
+          fallback={
+            <div className="h-9 rounded-lg border border-border bg-muted" />
+          }
+        >
+          <StoreSelector stores={stores} className="min-w-0" />
+        </Suspense>
         <div className="flex min-w-0 items-center gap-2">
           <Suspense
             fallback={
@@ -117,6 +129,17 @@ export function Topbar({
             }
           >
             <StoreSelector stores={stores} />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div className="h-9 w-40 rounded-lg border border-border bg-muted" />
+            }
+          >
+            <PortfolioScopeSelector
+              workspaces={workspaces}
+              userId={user.id}
+              className="w-40 shrink-0"
+            />
           </Suspense>
           <Suspense
             fallback={

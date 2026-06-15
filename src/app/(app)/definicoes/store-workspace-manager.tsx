@@ -53,6 +53,7 @@ function StoreWorkspaceAssignRow({
         <select
           name="workspaceId"
           defaultValue={store.workspaceId}
+          data-sensitive
           className="min-w-[10rem] rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent"
         >
           {workspaces.map((w) => (

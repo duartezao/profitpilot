@@ -7,7 +7,29 @@ import { Workspace } from "@/models/Workspace";
 import { Order } from "@/models/Order";
 import { Payout } from "@/models/Payout";
 import { netRevenueSumExpr, orderNetRevenue } from "@/lib/order-revenue";
-import { sumAdSpendForPeriod, buildStoreAdSpendSummaries } from "@/lib/ad-spend";
+import {
+  netRevenueSumBaseExpr,
+  shippingSumBaseExpr,
+  feesSumBaseExpr,
+  refundsSumBaseExpr,
+  cogsSumBaseExpr,
+  orderModeCogsSumExpr,
+} from "@/lib/order-money";
+import {
+  sumManualCogsForPeriod,
+  sumManualCogsByDay,
+  countOrdersMissingManualCogs,
+  countMissingCogsDays,
+} from "@/lib/manual-cogs";
+import {
+  ranksProductsByUnits,
+  type CogsMode,
+} from "@/lib/cogs-modes";
+import {
+  sumAdSpendForPeriod,
+  buildStoreAdSpendSummaries,
+  aggregateAdSpendForStores,
+} from "@/lib/ad-spend";
 import { countSoldVariantsMissingCost, countMissingCogsByDay } from "@/lib/cogs";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import {
@@ -17,6 +39,11 @@ import {
   dayKeysBetweenInTimezone,
   importDateKey,
 } from "@/lib/store-timezone";
+import {
+  canAccessStore,
+  type StoreAccess,
+} from "@/lib/store-access";
+import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import {
   resolvePeriod,
   orderDateMatch,
@@ -34,6 +61,7 @@ import {
 } from "@/lib/period";
 import {
   fetchStoreDailyNotesForPeriod,
+  fetchWorkspaceDailyNotesForPeriod,
   type StoreDailyNoteView,
 } from "@/lib/daily-notes";
 import {
@@ -46,7 +74,12 @@ import {
   calcNetProfit,
   contributionMarginPct,
   berRoas,
+  calcPoas,
+  fmtPoas,
+  formatProfitBreakdown,
 } from "@/lib/profit";
+import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
+import { buildStoreColorMap } from "@/lib/store-colors";
 
 export type KpiIcon = "euro" | "percent" | "target" | "trending";
 
@@ -67,13 +100,23 @@ export type SummaryKpi = {
 };
 
 export type SummaryStore = {
+  storeId: string;
   name: string;
+  color: string;
   revenue: string;
   profit: string;
   margin: string;
+  adSpend: string;
   roas: string;
   positive: boolean;
   trend: number[];
+  sort: {
+    revenue: number;
+    profit: number;
+    margin: number;
+    adSpend: number;
+    roas: number | null;
+  };
 };
 
 export type TopProduct = {
@@ -114,12 +157,33 @@ export type StoreDashboardData = {
   lastSessionMetricsError?: string | null;
 };
 
+export type ProfitChartStoreSlice = {
+  storeId: string;
+  name: string;
+  color: string;
+  profit: number;
+  profitFmt: string;
+};
+
+export type ProfitChartSeries = {
+  storeId: string;
+  name: string;
+  color: string;
+  /** Chave numérica em cada ponto do gráfico (Recharts). */
+  key: string;
+};
+
 export type ProfitChartPoint = {
   dateKey: string;
   label: string;
   dateLabel: string;
   profit: number;
   profitFmt: string;
+  hasNote?: boolean;
+  notePreview?: string;
+  didScale?: boolean;
+  /** Lucro por loja (vista consolidada). */
+  byStore?: ProfitChartStoreSlice[];
 };
 
 /** Linha da tabela diária (métricas por dia — página /metricas). */
@@ -132,8 +196,10 @@ export type StoreDailyMetricRow = {
   adSpend: string;
   profit: string;
   profitPositive: boolean;
-  /** Tooltip quando COGS em falta distorce o lucro do dia. */
+  /** Tooltip com breakdown REV − custos − ads. */
   profitTitle?: string;
+  /** Encomendas neste dia (0 = sem vendas). */
+  ordersCount?: number;
   sessions: number | null;
   atcPct: string;
   checkoutPct: string;
@@ -152,6 +218,8 @@ export type DashboardSummary = {
   scopeDomain: string | null;
   /** Top produtos (só na vista de uma loja). */
   topProducts: TopProduct[];
+  /** Ranking por lucro ou por unidades (modos COGS por encomenda/dia). */
+  topProductsMode: "profit" | "units";
   /** Dados extra da dashboard por loja (waterfall, payout). */
   storeDashboard: StoreDashboardData | null;
   /** Notas diárias (vista por loja). */
@@ -163,6 +231,8 @@ export type DashboardSummary = {
   missingAdSpendDays: number;
   /** Série diária de lucro (vista consolidada). */
   profitChart: ProfitChartPoint[];
+  /** Metadados das linhas por loja (consolidado, 2+ lojas). */
+  profitChartSeries?: ProfitChartSeries[];
   /** Métricas dia a dia (vista por loja). */
   dailyMetrics: StoreDailyMetricRow[];
   /** Métricas extra (custos, funil, encomendas…) — painel «Ver mais». */
@@ -187,6 +257,25 @@ function calcProfit(
   return calcNetProfit(a, adSpend);
 }
 
+function resolveDailyAdSpend(
+  adByDay: Map<string, number>,
+  dateKey: string,
+): { amount: number; hasEntry: boolean } {
+  const hasEntry = adByDay.has(dateKey);
+  return {
+    hasEntry,
+    amount: hasEntry ? adByDay.get(dateKey)! : 0,
+  };
+}
+
+function formatAdSpendCell(
+  hasEntry: boolean,
+  amount: number,
+  fmtMoney: (v: number) => string,
+): string {
+  return hasEntry ? fmtMoney(amount) : "—";
+}
+
 function deltaPct(current: number, prev: number) {
   if (prev === 0) return current > 0 ? 100 : 0;
   return ((current - prev) / Math.abs(prev)) * 100;
@@ -201,6 +290,8 @@ function buildExtendedStoreKpis(
   prev: StoreAgg,
   curAdSpend: number,
   prevAdSpend: number,
+  curAdSpendKnown: boolean,
+  prevAdSpendKnown: boolean,
   funnelCur: SessionFunnelMetrics,
   funnelPrev: SessionFunnelMetrics | null,
   deltaSuffix: string,
@@ -211,8 +302,20 @@ function buildExtendedStoreKpis(
   const prevCm = contributionMarginPct(prev);
   const curAov = cur.orders > 0 ? cur.revenue / cur.orders : null;
   const prevAov = prev.orders > 0 ? prev.revenue / prev.orders : null;
-  const curMer = curAdSpend > 0 ? cur.revenue / curAdSpend : null;
-  const prevMer = prevAdSpend > 0 ? prev.revenue / prevAdSpend : null;
+  const curMer =
+    curAdSpendKnown && curAdSpend > 0 ? cur.revenue / curAdSpend : null;
+  const prevMer =
+    prevAdSpendKnown && prevAdSpend > 0 ? prev.revenue / prevAdSpend : null;
+  const curProfit = calcProfit(cur, curAdSpendKnown ? curAdSpend : 0);
+  const prevProfit = calcProfit(prev, prevAdSpendKnown ? prevAdSpend : 0);
+  const curPoas =
+    curAdSpendKnown && curAdSpend > 0
+      ? calcPoas(curProfit, curAdSpend)
+      : null;
+  const prevPoas =
+    prevAdSpendKnown && prevAdSpend > 0
+      ? calcPoas(prevProfit, prevAdSpend)
+      : null;
 
   const costKpis: SummaryKpi[] = [
     {
@@ -251,10 +354,15 @@ function buildExtendedStoreKpis(
     },
     {
       label: "Ad Spend",
-      value: money(curAdSpend),
-      title: fmtMoney(curAdSpend),
-      delta: deltaPct(curAdSpend, prevAdSpend),
-      deltaLabel: deltaSuffix,
+      value: curAdSpendKnown ? money(curAdSpend) : "—",
+      title: curAdSpendKnown
+        ? fmtMoney(curAdSpend)
+        : "Por preencher em Anúncios — não entra no lucro até registares",
+      delta:
+        curAdSpendKnown && prevAdSpendKnown
+          ? deltaPct(curAdSpend, prevAdSpend)
+          : undefined,
+      deltaLabel: curAdSpendKnown ? deltaSuffix : undefined,
       icon: "euro",
     },
     {
@@ -297,6 +405,17 @@ function buildExtendedStoreKpis(
       deltaLabel: curMer != null ? deltaSuffix : undefined,
       icon: "target",
     },
+    {
+      label: "POAS",
+      value: fmtPoas(curPoas),
+      title: "Profit on Ad Spend = lucro líquido / ad spend",
+      delta:
+        curPoas != null && prevPoas != null
+          ? deltaPct(curPoas, prevPoas)
+          : undefined,
+      deltaLabel: curPoas != null ? deltaSuffix : undefined,
+      icon: "trending",
+    },
   ];
 
   return [...costKpis, ...buildFunnelKpis(funnelCur, funnelPrev, deltaSuffix)];
@@ -307,6 +426,8 @@ function buildExtendedWorkspaceKpis(
   prev: StoreAgg,
   curAdSpend: number,
   prevAdSpend: number,
+  curAdSpendKnown: boolean,
+  prevAdSpendKnown: boolean,
   deltaSuffix: string,
   money: (v: number) => string,
   fmtMoney: (v: number) => string,
@@ -315,6 +436,18 @@ function buildExtendedWorkspaceKpis(
   const prevCm = contributionMarginPct(prev);
   const curAov = cur.orders > 0 ? cur.revenue / cur.orders : null;
   const prevAov = prev.orders > 0 ? prev.revenue / prev.orders : null;
+  const curProfit = calcProfit(cur, curAdSpendKnown ? curAdSpend : 0);
+  const prevProfit = calcProfit(prev, prevAdSpendKnown ? prevAdSpend : 0);
+  const curMer =
+    curAdSpendKnown && curAdSpend > 0 ? cur.revenue / curAdSpend : null;
+  const prevMer =
+    prevAdSpendKnown && prevAdSpend > 0 ? prev.revenue / prevAdSpend : null;
+  const curPoas =
+    curAdSpendKnown && curAdSpend > 0 ? calcPoas(curProfit, curAdSpend) : null;
+  const prevPoas =
+    prevAdSpendKnown && prevAdSpend > 0
+      ? calcPoas(prevProfit, prevAdSpend)
+      : null;
 
   return [
     {
@@ -378,11 +511,38 @@ function buildExtendedWorkspaceKpis(
     },
     {
       label: "Ad Spend",
-      value: money(curAdSpend),
-      title: fmtMoney(curAdSpend),
-      delta: deltaPct(curAdSpend, prevAdSpend),
-      deltaLabel: deltaSuffix,
+      value: curAdSpendKnown ? money(curAdSpend) : "—",
+      title: curAdSpendKnown
+        ? fmtMoney(curAdSpend)
+        : "Por preencher em Anúncios — não entra no lucro até registares",
+      delta:
+        curAdSpendKnown && prevAdSpendKnown
+          ? deltaPct(curAdSpend, prevAdSpend)
+          : undefined,
+      deltaLabel: curAdSpendKnown ? deltaSuffix : undefined,
       icon: "euro",
+    },
+    {
+      label: "MER",
+      value: fmtRoasRatio(curMer),
+      title: "Marketing Efficiency Ratio = REV / ad spend",
+      delta:
+        curMer != null && prevMer != null
+          ? deltaPct(curMer, prevMer)
+          : undefined,
+      deltaLabel: curMer != null ? deltaSuffix : undefined,
+      icon: "target",
+    },
+    {
+      label: "POAS",
+      value: fmtPoas(curPoas),
+      title: "Profit on Ad Spend = lucro líquido / ad spend",
+      delta:
+        curPoas != null && prevPoas != null
+          ? deltaPct(curPoas, prevPoas)
+          : undefined,
+      deltaLabel: curPoas != null ? deltaSuffix : undefined,
+      icon: "trending",
     },
   ];
 }
@@ -505,10 +665,11 @@ async function aggregateDailyOrders(
   storeOids: mongoose.Types.ObjectId[],
   slice: PeriodSlice,
   storeTimeZone?: string | null,
+  cogsMode?: CogsMode | null,
 ): Promise<
   Map<
     string,
-    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
+    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds" | "orders">
   >
 > {
   const match: Record<string, unknown> = {
@@ -523,6 +684,13 @@ async function aggregateDailyOrders(
     match.storeId = { $in: storeOids };
   }
 
+  const cogsExpr =
+    cogsMode === "order"
+      ? orderModeCogsSumExpr
+      : cogsMode === "day"
+        ? { $sum: 0 }
+        : cogsSumBaseExpr;
+
   const rows = await Order.aggregate<{
     _id: string;
     revenue: number;
@@ -530,6 +698,7 @@ async function aggregateDailyOrders(
     shipping: number;
     fees: number;
     refunds: number;
+    orders: number;
   }>([
     { $match: match },
     {
@@ -545,17 +714,18 @@ async function aggregateDailyOrders(
           : {
               $dateToString: { format: "%Y-%m-%d", date: "$orderDate" },
             },
-        revenue: netRevenueSumExpr,
-        cogs: { $sum: "$cogs" },
-        shipping: { $sum: "$shipping" },
-        fees: { $sum: "$fees" },
-        refunds: { $sum: "$refunded" },
+        revenue: netRevenueSumBaseExpr,
+        cogs: cogsExpr,
+        shipping: shippingSumBaseExpr,
+        fees: feesSumBaseExpr,
+        refunds: refundsSumBaseExpr,
+        orders: { $sum: 1 },
       },
     },
     { $sort: { _id: 1 } },
   ]);
 
-  return new Map(
+  const result = new Map(
     rows.map((r) => [
       r._id,
       {
@@ -564,9 +734,206 @@ async function aggregateDailyOrders(
         shipping: r.shipping,
         fees: r.fees,
         refunds: r.refunds,
+        orders: r.orders,
       },
     ]),
   );
+
+  if (cogsMode === "day" && storeOids.length === 1) {
+    const dayKeys = [...result.keys()];
+    const dayCogs = await sumManualCogsByDay(storeOids[0], dayKeys);
+    for (const [dateKey, data] of result) {
+      data.cogs = dayCogs.get(dateKey) ?? 0;
+    }
+  }
+
+  return result;
+}
+
+function storeDayKey(dateKey: string, storeId: string) {
+  return `${dateKey}:${storeId}`;
+}
+
+async function aggregateDailyOrdersByStore(
+  wsId: mongoose.Types.ObjectId,
+  storeOids: mongoose.Types.ObjectId[],
+  slice: PeriodSlice,
+  storeTimeZone?: string | null,
+): Promise<
+  Map<string, Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">>
+> {
+  if (!storeOids.length) return new Map();
+
+  const dateExpr = storeTimeZone
+    ? {
+        $dateToString: {
+          format: "%Y-%m-%d",
+          date: "$orderDate",
+          timezone: normalizeStoreTimezone(storeTimeZone),
+        },
+      }
+    : { $dateToString: { format: "%Y-%m-%d", date: "$orderDate" } };
+
+  const rows = await Order.aggregate<{
+    _id: { dateKey: string; storeId: mongoose.Types.ObjectId };
+    revenue: number;
+    cogs: number;
+    shipping: number;
+    fees: number;
+    refunds: number;
+  }>([
+    {
+      $match: {
+        workspaceId: wsId,
+        storeId: { $in: storeOids },
+        ...(storeTimeZone
+          ? orderDateMatchInTimezone(slice, storeTimeZone)
+          : orderDateMatch(slice)),
+      },
+    },
+    {
+      $group: {
+        _id: { dateKey: dateExpr, storeId: "$storeId" },
+        revenue: netRevenueSumBaseExpr,
+        cogs: cogsSumBaseExpr,
+        shipping: shippingSumBaseExpr,
+        fees: feesSumBaseExpr,
+        refunds: refundsSumBaseExpr,
+      },
+    },
+  ]);
+
+  const map = new Map<
+    string,
+    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
+  >();
+  for (const r of rows) {
+    map.set(storeDayKey(r._id.dateKey, String(r._id.storeId)), {
+      revenue: r.revenue,
+      cogs: r.cogs,
+      shipping: r.shipping,
+      fees: r.fees,
+      refunds: r.refunds,
+    });
+  }
+  return map;
+}
+
+async function aggregateDailyAdSpendByStore(
+  storeOids: mongoose.Types.ObjectId[],
+  slice: PeriodSlice,
+  storeTimeZone?: string | null,
+): Promise<Map<string, number>> {
+  if (!storeOids.length) return new Map();
+
+  const rows = await ManualAdSpend.aggregate<{
+    _id: { dateKey: string; storeId: mongoose.Types.ObjectId };
+    total: number;
+  }>([
+    {
+      $match: {
+        storeId: { $in: storeOids },
+        ...adSpendDateMatch(slice, storeTimeZone),
+      },
+    },
+    {
+      $group: {
+        _id: { dateKey: "$dateKey", storeId: "$storeId" },
+        total: {
+          $sum: { $add: ["$amount", { $ifNull: ["$extraFee", 0] }] },
+        },
+      },
+    },
+  ]);
+
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    map.set(storeDayKey(r._id.dateKey, String(r._id.storeId)), r.total);
+  }
+  return map;
+}
+
+async function buildConsolidatedDailyProfitSeries(
+  wsId: mongoose.Types.ObjectId,
+  stores: Array<{ _id: mongoose.Types.ObjectId; name: string }>,
+  colorByStoreId: Map<string, string>,
+  slice: PeriodSlice,
+  fmtMoney: (v: number) => string,
+  storeTimeZone?: string | null,
+): Promise<{ points: ProfitChartPoint[]; series: ProfitChartSeries[] }> {
+  const storeOids = stores.map((s) => s._id);
+  const series: ProfitChartSeries[] = stores.map((s) => {
+    const sid = String(s._id);
+    return {
+      storeId: sid,
+      name: s.name,
+      color: colorByStoreId.get(sid) ?? "#2563EB",
+      key: `s_${sid}`,
+    };
+  });
+
+  const [ordersByStoreDay, adByStoreDay] = await Promise.all([
+    aggregateDailyOrdersByStore(wsId, storeOids, slice, storeTimeZone),
+    aggregateDailyAdSpendByStore(storeOids, slice, storeTimeZone),
+  ]);
+
+  const zeros = {
+    revenue: 0,
+    cogs: 0,
+    shipping: 0,
+    fees: 0,
+    refunds: 0,
+  };
+
+  const points = dayKeysInSlice(slice, storeTimeZone).map((dateKey) => {
+    const byStore: ProfitChartStoreSlice[] = [];
+    let totalProfit = 0;
+    const point: ProfitChartPoint & Record<string, number | string> = {
+      dateKey,
+      label: "",
+      dateLabel: "",
+      profit: 0,
+      profitFmt: "",
+    };
+
+    for (const meta of series) {
+      const o =
+        ordersByStoreDay.get(storeDayKey(dateKey, meta.storeId)) ?? zeros;
+      const storeKey = storeDayKey(dateKey, meta.storeId);
+      const hasEntry = adByStoreDay.has(storeKey);
+      const ad = hasEntry ? adByStoreDay.get(storeKey)! : 0;
+      const profit = calcProfit(o, hasEntry ? ad : 0);
+      byStore.push({
+        storeId: meta.storeId,
+        name: meta.name,
+        color: meta.color,
+        profit,
+        profitFmt: fmtMoney(profit),
+      });
+      point[meta.key] = profit;
+      totalProfit += profit;
+    }
+
+    const d = parseDateInput(dateKey);
+    point.label = d
+      ? d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })
+      : dateKey;
+    point.dateLabel = d
+      ? d.toLocaleDateString("pt-PT", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : dateKey;
+    point.profit = totalProfit;
+    point.profitFmt = fmtMoney(totalProfit);
+    point.byStore = byStore.sort(
+      (a, b) => Math.abs(b.profit) - Math.abs(a.profit),
+    );
+    return point;
+  });
+
+  return { points, series };
 }
 
 function dayKeysInSlice(slice: PeriodSlice, storeTimeZone?: string | null): string[] {
@@ -596,9 +963,10 @@ async function buildDailyProfitSeries(
   slice: PeriodSlice,
   fmtMoney: (v: number) => string,
   storeTimeZone?: string | null,
+  cogsMode?: CogsMode | null,
 ): Promise<ProfitChartPoint[]> {
   const [orderByDay, adByDay] = await Promise.all([
-    aggregateDailyOrders(wsId, storeOids, slice, storeTimeZone),
+    aggregateDailyOrders(wsId, storeOids, slice, storeTimeZone, cogsMode),
     aggregateDailyAdSpend(storeOids, slice, storeTimeZone),
   ]);
 
@@ -610,8 +978,8 @@ async function buildDailyProfitSeries(
       fees: 0,
       refunds: 0,
     };
-    const ad = adByDay.get(dateKey) ?? 0;
-    const profit = calcProfit(o, ad);
+    const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
+    const profit = calcProfit(o, hasEntry ? ad : 0);
     const d = parseDateInput(dateKey);
     const label = d
       ? d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })
@@ -632,6 +1000,31 @@ function pctFmtFromCounts(num: number, den: number): string {
   return formatPercent((num / den) * 100);
 }
 
+function annotateProfitChartNotes(
+  chart: ProfitChartPoint[],
+  notes: StoreDailyNoteView[],
+): ProfitChartPoint[] {
+  const byDate = new Map(notes.map((n) => [n.date, n]));
+  return chart.map((p) => {
+    const note = byDate.get(p.dateKey);
+    if (!note) return p;
+    const preview =
+      note.text.trim() ||
+      (note.didScale ? "Scale registado" : "") ||
+      (note.mood === "good"
+        ? "Dia positivo"
+        : note.mood === "bad"
+          ? "Dia negativo"
+          : "Nota");
+    return {
+      ...p,
+      hasNote: true,
+      notePreview: preview.slice(0, 120),
+      didScale: note.didScale,
+    };
+  });
+}
+
 async function buildStoreDailyMetrics(
   wsId: mongoose.Types.ObjectId,
   storeOid: mongoose.Types.ObjectId,
@@ -639,10 +1032,11 @@ async function buildStoreDailyMetrics(
   fmtMoney: (v: number) => string,
   analyticsSessionCountry: string | null | undefined,
   storeTimeZone?: string | null,
+  cogsMode?: CogsMode | null,
 ): Promise<StoreDailyMetricRow[]> {
   const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
     await Promise.all([
-      aggregateDailyOrders(wsId, [storeOid], slice, storeTimeZone),
+      aggregateDailyOrders(wsId, [storeOid], slice, storeTimeZone, cogsMode),
       aggregateDailyAdSpend([storeOid], slice, storeTimeZone),
       loadDailySessionCountsForSlice(
         storeOid,
@@ -650,44 +1044,54 @@ async function buildStoreDailyMetrics(
         slice,
         storeTimeZone,
       ),
-      countMissingCogsByDay([storeOid], slice, storeTimeZone),
+      cogsMode === "order" || cogsMode === "day"
+        ? Promise.resolve(new Map<string, number>())
+        : countMissingCogsByDay([storeOid], slice, storeTimeZone),
     ]);
 
   return dayKeysInSlice(slice, storeTimeZone)
     .map((dateKey) => {
-      const o = orderByDay.get(dateKey) ?? {
-        revenue: 0,
-        cogs: 0,
-        shipping: 0,
-        fees: 0,
-        refunds: 0,
-      };
-      const ad = adByDay.get(dateKey) ?? 0;
-      const profit = calcProfit(o, ad);
-      const missingCogs = missingCogsByDay.get(dateKey) ?? 0;
-      const d = parseDateInput(dateKey);
-      const dateLabel = d
-        ? d.toLocaleDateString("pt-PT", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          })
-        : dateKey;
-      const sess = sessionsByDay.get(dateKey);
-      const sessions = sess?.sessions ?? null;
-      return {
-        dateKey,
-        dateLabel,
-        revenue: fmtMoney(o.revenue),
-        cogs: fmtMoney(o.cogs),
-        refunds: fmtMoney(o.refunds),
-        adSpend: fmtMoney(ad),
-        profit: fmtMoney(profit),
-        profitPositive: profit >= 0,
-        profitTitle:
-          missingCogs > 0
-            ? `${fmtMoney(profit)} · ${missingCogsNote(missingCogs)}`
-            : `REV − COGS − envio − taxas − ad spend`,
+    const o = orderByDay.get(dateKey) ?? {
+      revenue: 0,
+      cogs: 0,
+      shipping: 0,
+      fees: 0,
+      refunds: 0,
+      orders: 0,
+    };
+    const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
+    const profit = calcProfit(o, hasEntry ? ad : 0);
+    const missingCogs =
+      cogsMode === "day" && o.orders > 0 && o.cogs === 0
+        ? 1
+        : missingCogsByDay.get(dateKey) ?? 0;
+    const d = parseDateInput(dateKey);
+    const dateLabel = d
+      ? d.toLocaleDateString("pt-PT", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : dateKey;
+    const sess = sessionsByDay.get(dateKey);
+    const sessions = sess?.sessions ?? null;
+    let profitTitle = formatProfitBreakdown(o, ad, fmtMoney, {
+      adSpendKnown: hasEntry,
+    });
+    if (missingCogs > 0) {
+      profitTitle += ` · ${missingCogsNote(missingCogs)}`;
+    }
+    return {
+      dateKey,
+      dateLabel,
+      revenue: fmtMoney(o.revenue),
+      cogs: fmtMoney(o.cogs),
+      refunds: fmtMoney(o.refunds),
+      adSpend: formatAdSpendCell(hasEntry, ad, fmtMoney),
+      profit: fmtMoney(profit),
+      profitPositive: profit >= 0,
+      profitTitle,
+      ordersCount: o.orders,
         sessions,
         atcPct: sess ? pctFmtFromCounts(sess.cart, sess.sessions) : "—",
         checkoutPct: sess ? pctFmtFromCounts(sess.checkout, sess.sessions) : "—",
@@ -726,6 +1130,50 @@ async function sumMissingAdSpendDays(
 ): Promise<number> {
   const summaries = await buildStoreAdSpendSummaries(stores, currency);
   return summaries.reduce((s, x) => s + x.missingCount, 0);
+}
+
+async function buildTopProductsByUnits(
+  storeOid: mongoose.Types.ObjectId,
+  slice: PeriodSlice,
+  fmtMoney: (v: number) => string,
+  limit = 5,
+  storeTimeZone?: string | null,
+): Promise<TopProduct[]> {
+  const orders = await Order.find({
+    storeId: storeOid,
+    ...(storeTimeZone
+      ? orderDateMatchInTimezone(slice, storeTimeZone)
+      : orderDateMatch(slice)),
+  })
+    .select("lineItems amountsBase.netRevenue netRevenue")
+    .lean();
+
+  const map = new Map<string, { units: number; revenue: number }>();
+
+  for (const order of orders) {
+    for (const li of order.lineItems ?? []) {
+      const title = li.title || "(sem nome)";
+      const rev =
+        (li.unitPrice ?? 0) * (li.quantity ?? 0);
+      const row = map.get(title) ?? { units: 0, revenue: 0 };
+      row.units += li.quantity ?? 0;
+      row.revenue += rev;
+      map.set(title, row);
+    }
+  }
+
+  return [...map.entries()]
+    .sort((a, b) => b[1].units - a[1].units)
+    .slice(0, limit)
+    .map(([title, p]) => ({
+      title,
+      units: p.units,
+      revenue: fmtMoney(p.revenue),
+      profit: "—",
+      margin: "—",
+      positive: true,
+      marginPositive: true,
+    }));
 }
 
 async function buildTopProductsByProfit(
@@ -819,6 +1267,7 @@ export async function buildWorkspacePnl(
   workspaceId: string,
   periodInput?: PeriodInput,
   storeId?: string,
+  storeAccess: StoreAccess = "all",
 ): Promise<WorkspacePnl> {
   await connectToDatabase();
 
@@ -848,14 +1297,26 @@ export async function buildWorkspacePnl(
   const workspace = await Workspace.findById(wsId).lean();
   const currency = workspace?.baseCurrency ?? "EUR";
 
-  const stores = await Store.find({ workspaceId: wsId, deletedAt: null })
+  const stores = await Store.find({
+    workspaceId: wsId,
+    deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
+  })
     .select("name importStartDate createdAt ianaTimezone")
     .lean();
   if (stores.length === 0) return { ...empty, currency };
 
-  const scoped = storeId
-    ? stores.find((s) => String(s._id) === storeId)
-    : null;
+  const accessibleStores =
+    storeAccess === "all"
+      ? stores
+      : stores.filter((s) => canAccessStore(storeAccess, String(s._id)));
+  if (accessibleStores.length === 0) return { ...empty, currency };
+
+  const scoped =
+    storeId && canAccessStore(storeAccess, storeId)
+      ? accessibleStores.find((s) => String(s._id) === storeId)
+      : null;
+  if (storeId && !scoped) return { ...empty, currency };
   const storeTz = scoped ? normalizeStoreTimezone(scoped.ianaTimezone) : null;
   const period = storeTz
     ? resolvePeriodForStore(periodInput, storeTz)
@@ -869,7 +1330,7 @@ export async function buildWorkspacePnl(
 
   empty.days = days;
   empty.periodLabel = period.label;
-  const storeList = scoped ? [scoped] : stores;
+  const storeList = scoped ? [scoped] : accessibleStores;
 
   const orderMatch: Record<string, unknown> = {
     workspaceId: wsId,
@@ -884,11 +1345,11 @@ export async function buildWorkspacePnl(
     {
       $group: {
         _id: "$storeId",
-        revenue: netRevenueSumExpr,
-        cogs: { $sum: "$cogs" },
-        shipping: { $sum: "$shipping" },
-        fees: { $sum: "$fees" },
-        refunds: { $sum: "$refunded" },
+        revenue: netRevenueSumBaseExpr,
+        cogs: cogsSumBaseExpr,
+        shipping: shippingSumBaseExpr,
+        fees: feesSumBaseExpr,
+        refunds: refundsSumBaseExpr,
         orders: { $sum: 1 },
       },
     },
@@ -898,7 +1359,8 @@ export async function buildWorkspacePnl(
   const adSpendByStore = new Map<string, number>();
   await Promise.all(
     storeList.map(async (s) => {
-      const v = await sumAdSpendForPeriod([s._id], pnlSlice);
+      const tz = normalizeStoreTimezone(s.ianaTimezone);
+      const v = await sumAdSpendForPeriod([s._id], pnlSlice, tz);
       adSpendByStore.set(String(s._id), v);
     }),
   );
@@ -991,6 +1453,7 @@ function emptySummary(currency = "EUR"): DashboardSummary {
     scopeName: null,
     scopeDomain: null,
     topProducts: [],
+    topProductsMode: "profit",
     storeDashboard: null,
     generatedAt: new Date().toISOString(),
     dailyNotes: [],
@@ -1011,6 +1474,7 @@ export async function buildWorkspaceSummary(
   workspaceId: string,
   storeId?: string,
   periodInput?: PeriodInput,
+  storeAccess: StoreAccess = "all",
 ): Promise<DashboardSummary> {
   await connectToDatabase();
 
@@ -1020,22 +1484,42 @@ export async function buildWorkspaceSummary(
   const workspace = await Workspace.findById(wsId).lean();
   const currency = workspace?.baseCurrency ?? "EUR";
 
-  const allStores = await Store.find({ workspaceId: wsId, deletedAt: null })
+  const allStores = await Store.find({
+    workspaceId: wsId,
+    deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
+  })
     .select(
-      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry ianaTimezone lastSessionMetricsError",
+      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry ianaTimezone lastSessionMetricsError cogsMode workspaceId",
     )
     .lean();
 
   if (allStores.length === 0) return emptySummary(currency);
 
+  const accessibleStores =
+    storeAccess === "all"
+      ? allStores
+      : allStores.filter((s) => canAccessStore(storeAccess, String(s._id)));
+  if (accessibleStores.length === 0) return emptySummary(currency);
+
+  const storeColorMap = buildStoreColorMap(
+    accessibleStores.map((s) => ({ id: String(s._id), name: s.name })),
+  );
+
   // Vista de uma só loja (se válida e pertencente ao workspace).
-  const scoped = storeId
-    ? allStores.find((s) => String(s._id) === storeId)
-    : null;
-  const stores = scoped ? [scoped] : allStores;
+  const scoped =
+    storeId && canAccessStore(storeAccess, storeId)
+      ? accessibleStores.find((s) => String(s._id) === storeId)
+      : null;
+  if (storeId && !scoped) return emptySummary(currency);
+  const stores = scoped ? [scoped] : accessibleStores;
   const scopeName = scoped ? scoped.name : null;
   const scopeDomain = scoped ? getStoreDisplayUrl(scoped) : null;
   const storeTz = scoped ? normalizeStoreTimezone(scoped.ianaTimezone) : null;
+  const scopedCogsMode = (scoped?.cogsMode ?? "shopify") as CogsMode;
+  const topProductsMode: "profit" | "units" = ranksProductsByUnits(scopedCogsMode)
+    ? "units"
+    : "profit";
 
   const period = storeTz
     ? resolvePeriodForStore(periodInput, storeTz)
@@ -1079,21 +1563,29 @@ export async function buildWorkspaceSummary(
     };
     if (storeOid) match.storeId = storeOid;
 
+    const mode = storeOid ? scopedCogsMode : null;
+    const cogsExpr =
+      mode === "order"
+        ? orderModeCogsSumExpr
+        : mode === "day"
+          ? { $sum: 0 }
+          : cogsSumBaseExpr;
+
     const [row] = await Order.aggregate<StoreAgg>([
       { $match: match },
       {
         $group: {
           _id: null,
-          revenue: netRevenueSumExpr,
-          cogs: { $sum: "$cogs" },
-          shipping: { $sum: "$shipping" },
-          fees: { $sum: "$fees" },
-          refunds: { $sum: "$refunded" },
+          revenue: netRevenueSumBaseExpr,
+          cogs: cogsExpr,
+          shipping: shippingSumBaseExpr,
+          fees: feesSumBaseExpr,
+          refunds: refundsSumBaseExpr,
           orders: { $sum: 1 },
         },
       },
     ]);
-    return row ?? {
+    const agg = row ?? {
       revenue: 0,
       cogs: 0,
       shipping: 0,
@@ -1101,6 +1593,12 @@ export async function buildWorkspaceSummary(
       refunds: 0,
       orders: 0,
     };
+
+    if (mode === "day" && storeOid) {
+      agg.cogs = await sumManualCogsForPeriod([storeOid], slice, storeTz);
+    }
+
+    return agg;
   }
 
   const orderMatch: Record<string, unknown> = {
@@ -1116,11 +1614,11 @@ export async function buildWorkspaceSummary(
     {
       $group: {
         _id: "$storeId",
-        revenue: netRevenueSumExpr,
-        cogs: { $sum: "$cogs" },
-        shipping: { $sum: "$shipping" },
-        fees: { $sum: "$fees" },
-        refunds: { $sum: "$refunded" },
+        revenue: netRevenueSumBaseExpr,
+        cogs: cogsSumBaseExpr,
+        shipping: shippingSumBaseExpr,
+        fees: feesSumBaseExpr,
+        refunds: refundsSumBaseExpr,
         orders: { $sum: 1 },
       },
     },
@@ -1135,22 +1633,39 @@ export async function buildWorkspaceSummary(
     rev > 0 ? formatPercent((profit / rev) * 100) : "—";
 
   const storeOids = stores.map((s) => s._id);
-  const adSpend = await sumAdSpendForPeriod(storeOids, currentSlice);
-  const prevAdSpend = await sumAdSpendForPeriod(storeOids, prevSlice);
+  const [curAdAgg, prevAdAgg] = await Promise.all([
+    aggregateAdSpendForStores(stores, currentSlice),
+    aggregateAdSpendForStores(stores, prevSlice),
+  ]);
+  const adSpend = curAdAgg.total;
+  const prevAdSpend = prevAdAgg.total;
+  const adSpendEntryByStore = curAdAgg.entriesByStore;
+  const prevAdSpendEntryByStore = prevAdAgg.entriesByStore;
+  const adSpendByStore = curAdAgg.byStore;
+  const curAdSpendKnownWorkspace = [...adSpendEntryByStore.values()].some(
+    (n) => n > 0,
+  );
+  const prevAdSpendKnownWorkspace = [...prevAdSpendEntryByStore.values()].some(
+    (n) => n > 0,
+  );
+  const scopedAdSpendKnown = scoped
+    ? (adSpendEntryByStore.get(String(scoped._id)) ?? 0) > 0
+    : false;
+  const scopedPrevAdSpendKnown = scoped
+    ? (prevAdSpendEntryByStore.get(String(scoped._id)) ?? 0) > 0
+    : false;
 
   const [missingCogsCount, missingAdSpendDays] = await Promise.all([
-    countSoldVariantsMissingCost(storeOids, currentSlice),
+    scoped
+      ? scopedCogsMode === "order"
+        ? countOrdersMissingManualCogs([scoped._id], currentSlice, storeTz)
+        : scopedCogsMode === "day"
+          ? countMissingCogsDays(scoped)
+          : countSoldVariantsMissingCost([scoped._id], currentSlice)
+      : countSoldVariantsMissingCost(storeOids, currentSlice),
     sumMissingAdSpendDays(stores, currency),
   ]);
   const cogsIncomplete = missingCogsCount > 0;
-
-  const adSpendByStore = new Map<string, number>();
-  await Promise.all(
-    stores.map(async (s) => {
-      const v = await sumAdSpendForPeriod([s._id], currentSlice);
-      adSpendByStore.set(String(s._id), v);
-    }),
-  );
 
   const summaryStores = await Promise.all(
     stores.map(async (s) => {
@@ -1163,9 +1678,14 @@ export async function buildWorkspaceSummary(
         orders: 0,
       };
       const storeAd = adSpendByStore.get(String(s._id)) ?? 0;
+      const storeAdKnown =
+        (adSpendEntryByStore.get(String(s._id)) ?? 0) > 0;
       const profit = calcProfit(a, storeAd);
+      const marginPct = a.revenue > 0 ? (profit / a.revenue) * 100 : 0;
+      const roasNum =
+        storeAdKnown && storeAd > 0 ? a.revenue / storeAd : null;
       const roas =
-        storeAd > 0 ? (a.revenue / storeAd).toFixed(2).replace(".", ",") : "—";
+        roasNum != null ? roasNum.toFixed(2).replace(".", ",") : "—";
       const trend = await buildStoreSparkline(
         wsId,
         s._id,
@@ -1173,24 +1693,30 @@ export async function buildWorkspaceSummary(
         storeTz,
       );
       return {
+        storeId: String(s._id),
         name: s.name,
+        color: storeColorMap.get(String(s._id)) ?? "#2563EB",
         revenue: fmtMoney(a.revenue),
         profit: fmtMoney(profit),
         margin: fmtMargin(a.revenue, profit),
+        adSpend: storeAdKnown ? fmtMoney(storeAd) : "—",
         roas,
         positive: profit >= 0,
         trend,
-        sortRevenue: a.revenue,
+        sort: {
+          revenue: a.revenue,
+          profit,
+          margin: marginPct,
+          adSpend: storeAd,
+          roas: roasNum,
+        },
       };
     }),
   );
 
-  const sortedStores: SummaryStore[] = summaryStores
-    .sort((x, y) => y.sortRevenue - x.sortRevenue)
-    .map(({ sortRevenue, ...rest }) => {
-      void sortRevenue;
-      return rest;
-    });
+  const sortedStores: SummaryStore[] = summaryStores.sort(
+    (x, y) => y.sort.revenue - x.sort.revenue,
+  );
 
   const totals = [...byStore.values()].reduce(
     (acc, a) => {
@@ -1205,13 +1731,20 @@ export async function buildWorkspaceSummary(
     { revenue: 0, cogs: 0, shipping: 0, fees: 0, refunds: 0, orders: 0 },
   );
 
-  const netProfit = calcProfit(totals, adSpend);
+  const netProfit = calcProfit(
+    totals,
+    curAdSpendKnownWorkspace ? adSpend : 0,
+  );
   const margin = totals.revenue > 0 ? (netProfit / totals.revenue) * 100 : 0;
   const curBer = berRoas(totals);
 
   const money = (v: number): SummaryKpi["value"] =>
     formatCurrencyCompact(v, currency);
-  const deltaSuffix = `vs ${prevPeriodLabel}`;
+  const deltaSuffix = `var. % vs ${prevPeriodLabel}`;
+
+  if (scoped) {
+    await backfillOrderNetRevenueForStore(scoped._id);
+  }
 
   let kpis: SummaryKpi[];
   let extendedKpis: SummaryKpi[] = [];
@@ -1220,8 +1753,10 @@ export async function buildWorkspaceSummary(
     const cur = await aggregateOrders(currentSlice, scoped._id);
     const prev = await aggregateOrders(prevSlice, scoped._id);
     const curAdSpend = adSpend;
-    const curProfit = calcProfit(cur, curAdSpend);
-    const prevProfit = calcProfit(prev, prevAdSpend);
+    const curAdSpendForProfit = scopedAdSpendKnown ? curAdSpend : 0;
+    const prevAdSpendForProfit = scopedPrevAdSpendKnown ? prevAdSpend : 0;
+    const curProfit = calcProfit(cur, curAdSpendForProfit);
+    const prevProfit = calcProfit(prev, prevAdSpendForProfit);
     const curMargin =
       cur.revenue > 0 ? (curProfit / cur.revenue) * 100 : 0;
     const prevMargin =
@@ -1230,16 +1765,22 @@ export async function buildWorkspaceSummary(
     const prevBer = berRoas(prev);
     const curCm = contributionMarginPct(cur);
     const prevCm = contributionMarginPct(prev);
-    const curRoas = curAdSpend > 0 ? cur.revenue / curAdSpend : null;
-    const prevRoas = prevAdSpend > 0 ? prev.revenue / prevAdSpend : null;
+    const curRoas =
+      scopedAdSpendKnown && curAdSpend > 0 ? cur.revenue / curAdSpend : null;
+    const prevRoas =
+      scopedPrevAdSpendKnown && prevAdSpend > 0
+        ? prev.revenue / prevAdSpend
+        : null;
 
     kpis = [
       {
         label: "Net Profit",
         value: money(curProfit),
         title: cogsIncomplete
-          ? `${fmtMoney(curProfit)} · ${missingCogsNote(missingCogsCount)}`
-          : fmtMoney(curProfit),
+          ? `${formatProfitBreakdown(cur, curAdSpend, fmtMoney, { adSpendKnown: scopedAdSpendKnown })} · ${missingCogsNote(missingCogsCount)}`
+          : formatProfitBreakdown(cur, curAdSpend, fmtMoney, {
+              adSpendKnown: scopedAdSpendKnown,
+            }),
         delta: deltaPct(curProfit, prevProfit),
         deltaLabel: deltaSuffix,
         icon: "euro",
@@ -1285,15 +1826,23 @@ export async function buildWorkspaceSummary(
         label: "Net Profit",
         value: money(netProfit),
         title: cogsIncomplete
-          ? `${fmtMoney(netProfit)} · ${missingCogsNote(missingCogsCount)}`
-          : fmtMoney(netProfit),
+          ? `${formatProfitBreakdown(totals, adSpend, fmtMoney, { adSpendKnown: curAdSpendKnownWorkspace })} · ${missingCogsNote(missingCogsCount)}`
+          : formatProfitBreakdown(totals, adSpend, fmtMoney, {
+              adSpendKnown: curAdSpendKnownWorkspace,
+            }),
       },
       { label: "Margem %", value: formatPercent(margin) },
-      { label: "Ad Spend", value: money(adSpend), title: fmtMoney(adSpend) },
+      {
+        label: "Ad Spend",
+        value: curAdSpendKnownWorkspace ? money(adSpend) : "—",
+        title: curAdSpendKnownWorkspace
+          ? fmtMoney(adSpend)
+          : "Por preencher em Anúncios — não entra no lucro até registares",
+      },
       {
         label: "ROAS",
         value:
-          adSpend > 0
+          curAdSpendKnownWorkspace && adSpend > 0
             ? (totals.revenue / adSpend).toFixed(2).replace(".", ",")
             : "—",
       },
@@ -1313,19 +1862,38 @@ export async function buildWorkspaceSummary(
       prevAll,
       adSpend,
       prevAdSpend,
+      curAdSpendKnownWorkspace,
+      prevAdSpendKnownWorkspace,
       deltaSuffix,
       money,
       fmtMoney,
     );
   }
 
-  const profitChart = await buildDailyProfitSeries(
-    wsId,
-    storeOids,
-    scoped ? currentSlice : chartSlice,
-    fmtMoney,
-    storeTz,
-  );
+  let profitChart: ProfitChartPoint[];
+  let profitChartSeries: ProfitChartSeries[] | undefined;
+
+  if (!scoped && stores.length > 1) {
+    const consolidated = await buildConsolidatedDailyProfitSeries(
+      wsId,
+      stores,
+      storeColorMap,
+      chartSlice,
+      fmtMoney,
+      storeTz,
+    );
+    profitChart = consolidated.points;
+    profitChartSeries = consolidated.series;
+  } else {
+    profitChart = await buildDailyProfitSeries(
+      wsId,
+      storeOids,
+      scoped ? currentSlice : chartSlice,
+      fmtMoney,
+      storeTz,
+      scoped ? scopedCogsMode : null,
+    );
+  }
 
   // Vista por loja: produtos por lucro + waterfall + payout + métricas diárias.
   let topProducts: TopProduct[] = [];
@@ -1337,16 +1905,26 @@ export async function buildWorkspaceSummary(
     const cur = await aggregateOrders(currentSlice, scoped._id);
     const curAdSpend = adSpend;
 
-    topProducts = await buildTopProductsByProfit(
-      scoped._id,
-      currentSlice,
-      fmtMoney,
-      5,
-      storeTz,
-    );
+    topProducts =
+      topProductsMode === "units"
+        ? await buildTopProductsByUnits(
+            scoped._id,
+            currentSlice,
+            fmtMoney,
+            5,
+            storeTz,
+          )
+        : await buildTopProductsByProfit(
+            scoped._id,
+            currentSlice,
+            fmtMoney,
+            5,
+            storeTz,
+          );
 
     const grossRevenue = cur.revenue + cur.refunds;
-    const netProfit = calcProfit(cur, curAdSpend);
+    const adSpendForWaterfall = scopedAdSpendKnown ? curAdSpend : 0;
+    const netProfit = calcProfit(cur, adSpendForWaterfall);
 
     const waterfall: WaterfallStep[] = [
       {
@@ -1377,13 +1955,17 @@ export async function buildWorkspaceSummary(
         display: fmtMoney(-cur.fees),
         type: "negative",
       },
-      {
-        key: "adspend",
-        label: "Ad Spend",
-        value: -curAdSpend,
-        display: fmtMoney(-curAdSpend),
-        type: "negative",
-      },
+      ...(scopedAdSpendKnown && curAdSpend > 0
+        ? [
+            {
+              key: "adspend",
+              label: "Ad Spend",
+              value: -curAdSpend,
+              display: fmtMoney(-curAdSpend),
+              type: "negative" as const,
+            },
+          ]
+        : []),
       ...(cur.refunds > 0
         ? [
             {
@@ -1435,6 +2017,7 @@ export async function buildWorkspaceSummary(
       scoped._id,
       currentSlice,
     );
+    profitChart = annotateProfitChartNotes(profitChart, dailyNotes);
 
     const storeImportFloorKey = scoped
       ? importDateKey(scoped.importStartDate, scoped.createdAt, storeTz)
@@ -1462,6 +2045,7 @@ export async function buildWorkspaceSummary(
         fmtMoney,
         scoped.analyticsSessionCountry,
         storeTz,
+        scopedCogsMode,
       ),
     ]);
     const noteByDate = new Map(dailyNotes.map((n) => [n.date, n]));
@@ -1488,6 +2072,8 @@ export async function buildWorkspaceSummary(
       prevForExtended,
       curAdSpend,
       prevAdSpend,
+      scopedAdSpendKnown,
+      scopedPrevAdSpendKnown,
       funnelCur,
       funnelPrev,
       deltaSuffix,
@@ -1517,6 +2103,9 @@ export async function buildWorkspaceSummary(
       sessionCountryLabel: funnelCur.countryLabel,
       lastSessionMetricsError: sessionErr,
     };
+  } else {
+    const wsNotes = await fetchWorkspaceDailyNotesForPeriod(wsId, currentSlice);
+    profitChart = annotateProfitChartNotes(profitChart, wsNotes);
   }
 
   return {
@@ -1525,12 +2114,14 @@ export async function buildWorkspaceSummary(
     scopeName,
     scopeDomain,
     topProducts,
+    topProductsMode,
     storeDashboard,
     dailyNotes,
     cogsIncomplete,
     missingCogsCount,
     missingAdSpendDays,
     profitChart,
+    profitChartSeries,
     dailyMetrics,
     extendedKpis,
     generatedAt: new Date().toISOString(),
@@ -1547,6 +2138,7 @@ export async function buildStoreProductRanking(
   products: TopProduct[];
   storeName: string;
   periodLabel: string;
+  mode: "profit" | "units";
 }> {
   await connectToDatabase();
   const wsId = new mongoose.Types.ObjectId(workspaceId);
@@ -1554,12 +2146,16 @@ export async function buildStoreProductRanking(
     _id: storeId,
     workspaceId: wsId,
     deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
   })
-    .select("name currency ianaTimezone")
+    .select("name currency ianaTimezone cogsMode")
     .lean();
   if (!store) {
-    return { products: [], storeName: "", periodLabel: "" };
+    return { products: [], storeName: "", periodLabel: "", mode: "profit" as const };
   }
+
+  const cogsMode = (store.cogsMode ?? "shopify") as CogsMode;
+  const byUnits = ranksProductsByUnits(cogsMode);
 
   const storeTz = normalizeStoreTimezone(store.ianaTimezone);
   const period = resolvePeriodForStore(periodInput, storeTz);
@@ -1574,18 +2170,27 @@ export async function buildStoreProductRanking(
     specificDates: period.specificDates,
   };
 
-  const products = await buildTopProductsByProfit(
-    store._id,
-    slice,
-    fmtMoney,
-    limit,
-    storeTz,
-  );
+  const products = byUnits
+    ? await buildTopProductsByUnits(
+        store._id,
+        slice,
+        fmtMoney,
+        limit,
+        storeTz,
+      )
+    : await buildTopProductsByProfit(
+        store._id,
+        slice,
+        fmtMoney,
+        limit,
+        storeTz,
+      );
 
   return {
     products,
     storeName: store.name,
     periodLabel: period.label,
+    mode: byUnits ? "units" : "profit",
   };
 }
 
@@ -1595,7 +2200,8 @@ export type StoreDayFinancials = {
   refunds: number;
   shipping: number;
   fees: number;
-  adSpend: number;
+  /** null = dia sem registo manual em Anúncios. */
+  adSpend: number | null;
   profit: number;
   missingCogs: number;
   sessions: number | null;
@@ -1621,10 +2227,13 @@ export async function fetchStoreDayFinancials(
     _id: storeId,
     workspaceId: wsId,
     deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
   })
-    .select("ianaTimezone analyticsSessionCountry")
+    .select("ianaTimezone analyticsSessionCountry cogsMode")
     .lean();
   if (!store) return null;
+
+  const cogsMode = (store.cogsMode ?? "shopify") as CogsMode;
 
   const day = parseDateInput(dateKey);
   if (!day) return null;
@@ -1639,7 +2248,7 @@ export async function fetchStoreDayFinancials(
   const storeOid = store._id;
   const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
     await Promise.all([
-      aggregateDailyOrders(wsId, [storeOid], slice, storeTz),
+      aggregateDailyOrders(wsId, [storeOid], slice, storeTz, cogsMode),
       aggregateDailyAdSpend([storeOid], slice, storeTz),
       loadDailySessionCountsForSlice(
         storeOid,
@@ -1647,7 +2256,9 @@ export async function fetchStoreDayFinancials(
         slice,
         storeTz,
       ),
-      countMissingCogsByDay([storeOid], slice, storeTz),
+      cogsMode === "order" || cogsMode === "day"
+        ? Promise.resolve(new Map<string, number>())
+        : countMissingCogsByDay([storeOid], slice, storeTz),
     ]);
 
   const o = orderByDay.get(dateKey) ?? {
@@ -1656,10 +2267,16 @@ export async function fetchStoreDayFinancials(
     shipping: 0,
     fees: 0,
     refunds: 0,
+    orders: 0,
   };
-  const ad = adByDay.get(dateKey) ?? 0;
-  const profit = calcProfit(o, ad);
-  const missingCogs = missingCogsByDay.get(dateKey) ?? 0;
+  const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
+  const profit = calcProfit(o, hasEntry ? ad : 0);
+  const missingCogs =
+    cogsMode === "day" && o.orders > 0 && o.cogs === 0
+      ? 1
+      : cogsMode === "order"
+        ? await countOrdersMissingManualCogs([storeOid], slice, storeTz)
+        : missingCogsByDay.get(dateKey) ?? 0;
   const sess = sessionsByDay.get(dateKey);
 
   return {
@@ -1668,7 +2285,7 @@ export async function fetchStoreDayFinancials(
     refunds: o.refunds,
     shipping: o.shipping,
     fees: o.fees,
-    adSpend: ad,
+    adSpend: hasEntry ? ad : null,
     profit,
     missingCogs,
     sessions: sess?.sessions ?? null,
