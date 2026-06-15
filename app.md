@@ -334,6 +334,7 @@ Net Profit =
 * **COGS por encomenda** — `manualCogs` na order, convertido para moeda base; lucro usa este valor em vez da soma das linhas.
 * **COGS por dia** — coleção `manualCogsDays` (espelho do ad spend manual); um valor por dia com vendas.
 * **COGS histórico** — coleção `cogsHistory` com versões por variante (`effectiveFrom` / `effectiveTo`). O lucro de encomendas antigas usa o custo da altura; alterações futuras não reescrevem linhas já registadas.
+* **Preço de venda histórico** — coleção `priceHistory` com o mesmo modelo de vigência. Cada linha de encomenda guarda `unitPrice` e `unitCost` no momento da importação; re-syncs não sobrescrevem snapshots já confirmados (>0). O backfill `backfillOrderLinePricesForStore` repõe preços antigos a partir do `originalUnitPriceSet` da Shopify (correção de dados importados antes desta regra).
 * **Página COGS** — painel conforme o modo: variantes em falta, tabela de encomendas, ou dias desde importação.
 * **Assimilação automática** — só nos modos `shopify` e `variant`; em `order`/`day` o utilizador preenche manualmente.
 * **Sync manual/cron** — só o modo `shopify` importa `InventoryItem.unitCost` da Shopify; em `day`/`order`/`variant` o sync salta essa fase (mais rápido).

@@ -3,6 +3,7 @@ import type { AnyBulkWriteOperation } from "mongoose";
 import { Types } from "mongoose";
 import { orderNetRevenue } from "@/lib/order-revenue";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
+import { backfillOrderLinePricesForStore } from "@/lib/order-price-backfill";
 import {
   dateKeyInTimezone,
   normalizeStoreTimezone,
@@ -22,10 +23,12 @@ import { Order } from "@/models/Order";
 import { ProductCost } from "@/models/ProductCost";
 import {
   applyLineUnitCost,
+  applyLineUnitPrice,
   assimilatePendingCogsForStore,
   loadCostResolverForStore,
   mergeAssimilateResults,
   recordShopifyCostChange,
+  recordShopifyPriceChange,
 } from "@/lib/cogs";
 import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { Payout } from "@/models/Payout";
@@ -147,10 +150,13 @@ export async function syncProductCosts(
   };
 
   const existing = await ProductCost.find({ storeId: store._id })
-    .select("variantId unitCost")
+    .select("variantId unitCost price")
     .lean();
   const prevCosts = new Map(
     existing.map((c) => [String(c.variantId), num(c.unitCost)]),
+  );
+  const prevPrices = new Map(
+    existing.map((c) => [String(c.variantId), num(c.price)]),
   );
 
   let cursor: string | null = null;
@@ -165,6 +171,7 @@ export async function syncProductCosts(
 
     const ops = conn.nodes.map((v) => {
       const newCost = num(v.inventoryItem?.unitCost?.amount);
+      const newPrice = num(v.price);
       return {
         updateOne: {
           filter: { storeId: store._id, variantId: v.id },
@@ -176,7 +183,7 @@ export async function syncProductCosts(
               title: v.product?.title
                 ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
                 : v.title,
-              price: num(v.price),
+              price: newPrice,
               unitCost: newCost,
               currency: store.currency,
             },
@@ -184,6 +191,7 @@ export async function syncProductCosts(
           upsert: true,
         },
         newCost,
+        newPrice,
         productId: v.product?.id,
       };
     });
@@ -196,18 +204,31 @@ export async function syncProductCosts(
       );
       for (const op of ops) {
         const variantId = String(op.updateOne.filter.variantId);
-        const prev = prevCosts.get(variantId);
-        const changed = prev === undefined || prev !== op.newCost;
-        if (changed) {
+        const prevCost = prevCosts.get(variantId);
+        const costChanged = prevCost === undefined || prevCost !== op.newCost;
+        if (costChanged) {
           await recordShopifyCostChange(
             store._id,
             variantId,
             op.newCost,
-            prev === undefined ? new Date(0) : effectiveFrom,
+            prevCost === undefined ? new Date(0) : effectiveFrom,
             op.productId,
           );
           prevCosts.set(variantId, op.newCost);
           changedVariantIds.push(variantId);
+        }
+
+        const prevPrice = prevPrices.get(variantId);
+        const priceChanged = prevPrice === undefined || prevPrice !== op.newPrice;
+        if (priceChanged) {
+          await recordShopifyPriceChange(
+            store._id,
+            variantId,
+            op.newPrice,
+            prevPrice === undefined ? new Date(0) : effectiveFrom,
+            op.productId,
+          );
+          prevPrices.set(variantId, op.newPrice);
         }
       }
       count += ops.length;
@@ -327,13 +348,19 @@ export async function syncOrdersPage(
         "shopifyId orderDate fees lineItems.variantId lineItems.unitCost manualCogs",
       )
       .lean();
-    const existingMap = new Map<string, Map<string, number>>();
+    const existingMap = new Map<
+      string,
+      Map<string, { unitCost: number; unitPrice: number }>
+    >();
     const existingFees = new Map<string, number>();
     const existingManualCogs = new Map<string, number | null>();
     for (const eo of existingOrders) {
-      const m = new Map<string, number>();
+      const m = new Map<string, { unitCost: number; unitPrice: number }>();
       for (const li of eo.lineItems ?? []) {
-        m.set(String(li.variantId), num(li.unitCost));
+        m.set(String(li.variantId), {
+          unitCost: num(li.unitCost),
+          unitPrice: num(li.unitPrice),
+        });
       }
       existingMap.set(String(eo.shopifyId), m);
       if (eo.fees != null) existingFees.set(String(eo.shopifyId), num(eo.fees));
@@ -350,19 +377,21 @@ export async function syncOrdersPage(
       const prevLine = existingMap.get(o.id);
       const lineItems = o.lineItems.nodes.map((li) => {
         const variantId = li.variant?.id ?? "";
-        const prev = prevLine?.get(variantId) ?? 0;
+        const prev = prevLine?.get(variantId);
         const unitCost = applyLineUnitCost(
           variantId,
           orderDate,
-          prev,
+          prev?.unitCost ?? 0,
           resolveCost,
         );
+        const apiPrice = num(li.originalUnitPriceSet?.shopMoney.amount);
+        const unitPrice = applyLineUnitPrice(prev?.unitPrice ?? 0, apiPrice);
         return {
           productId: li.product?.id,
           variantId,
           title: li.title,
           quantity: num(li.quantity),
-          unitPrice: num(li.originalUnitPriceSet?.shopMoney.amount),
+          unitPrice,
           unitCost,
         };
       });
@@ -458,6 +487,7 @@ async function syncOrders(
   }
 
   await backfillOrderNetRevenueForStore(store._id);
+  await backfillOrderLinePricesForStore(store._id, domain, token);
 
   return count;
 }
