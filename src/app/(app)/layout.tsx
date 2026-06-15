@@ -49,7 +49,7 @@ export default async function AppLayout({
         <ScopeRouteGuard />
       </Suspense>
       <div className="flex min-h-screen">
-        <AppSidebar stores={stores} />
+        <AppSidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar user={user} stores={stores} workspaces={workspaces} />
           <main className="flex-1 p-4 pb-24 md:p-6 md:pb-6">{children}</main>

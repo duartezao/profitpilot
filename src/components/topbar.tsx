@@ -70,7 +70,7 @@ export function Topbar({
   workspaces: UserWorkspace[];
 }) {
   return (
-    <header className="sticky top-0 z-50 shrink-0 overflow-visible border-b border-border bg-surface">
+    <header className="sticky top-0 z-50 shrink-0 overflow-visible border-b border-border bg-background">
       {/* Mobile — 2 linhas, altura automática */}
       <div className="flex flex-col gap-2 overflow-visible px-3 py-2 md:hidden">
         <div className="grid min-w-0 grid-cols-2 gap-2">

@@ -35,7 +35,7 @@ export function AppNavLinks({
               className={cn(
                 "whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
                 active
-                  ? "bg-muted text-accent"
+                  ? "bg-accent/10 text-accent dark:bg-muted"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
@@ -60,7 +60,7 @@ export function AppNavLinks({
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
               active
-                ? "bg-muted text-accent"
+                ? "bg-accent/10 text-accent dark:bg-muted"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >

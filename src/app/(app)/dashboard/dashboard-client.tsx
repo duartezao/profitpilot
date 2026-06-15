@@ -62,8 +62,6 @@ export function DashboardClient() {
             title={headerTitle}
             periodLabel={periodLabel}
             prevPeriodLabel={prevPeriodLabel}
-            isFetching={isFetching}
-            updatedAt={updatedAt}
           />
           {isError && (
             <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
@@ -180,10 +178,7 @@ export function DashboardClient() {
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex justify-end" data-sensitive-chart>
-                          <Sparkline
-                            data={s.trend}
-                            className={s.positive ? "text-positive" : "text-negative"}
-                          />
+                          <Sparkline data={s.trend} />
                         </div>
                       </td>
                     </tr>

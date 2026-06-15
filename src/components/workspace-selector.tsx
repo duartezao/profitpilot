@@ -119,7 +119,7 @@ export function WorkspaceSelector({
           />
           <div
             className={cn(
-              "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-md",
+              "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1",
               "max-md:fixed max-md:inset-x-3 max-md:top-[3.25rem]",
               menuPlacement === "top"
                 ? "md:absolute md:inset-x-auto md:bottom-full md:top-auto md:mb-1"
