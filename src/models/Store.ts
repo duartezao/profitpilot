@@ -20,6 +20,31 @@ const FeeScheduleEntrySchema = new Schema(
   { _id: false },
 );
 
+const SyncStateSchema = new Schema(
+  {
+    status: {
+      type: String,
+      enum: ["idle", "running", "done", "error"],
+      default: "idle",
+    },
+    phase: { type: String, default: null },
+    progress: { type: Number, default: 0 },
+    message: { type: String, default: "" },
+    orderCursor: { type: String, default: null },
+    orderPagesDone: { type: Number, default: 0 },
+    ordersImported: { type: Number, default: 0 },
+    productsImported: { type: Number, default: 0 },
+    payoutsImported: { type: Number, default: 0 },
+    balanceTransactionsImported: { type: Number, default: 0 },
+    sessionDaysSynced: { type: Number, default: 0 },
+    error: { type: String, default: null },
+    resultSummary: { type: String, default: null },
+    startedAt: { type: Date, default: null },
+    updatedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const StoreSchema = new Schema(
   {
     workspaceId: {
@@ -83,6 +108,8 @@ const StoreSchema = new Schema(
     lastSessionMetricsError: { type: String, default: null },
     // Fuso IANA da loja (ex. Europe/Brussels) — dias de revenue/orders alinhados com Shopify.
     ianaTimezone: { type: String, default: null },
+    /** Progresso do sync manual em passos (evita timeout em imports grandes). */
+    syncState: { type: SyncStateSchema, default: () => ({ status: "idle" }) },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true },

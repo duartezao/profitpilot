@@ -9,6 +9,9 @@ import {
   COGS_INPUT_CURRENCIES,
 } from "@/lib/cogs-modes";
 
+const DEFAULT_PROCESSING_PERCENT = 1.5;
+const DEFAULT_TRANSACTION_FEE_PERCENT = 2;
+
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
 const labelCls = "mb-1 block text-sm font-medium";
@@ -170,15 +173,78 @@ export function AddStoreForm({
           </p>
         </div>
 
-        <div>
-          <label className={labelCls}>
-            Importar dados desde{" "}
-            <span className="text-muted-foreground">(opcional)</span>
-          </label>
-          <input name="importStartDate" type="date" className={inputCls} />
+        <div className="rounded-lg border border-border bg-muted/30 p-4">
+          <p className="text-sm font-medium">Histórico e taxas</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Deixa vazio para importar o histórico disponível.
+            Define desde que dia queres dados e as taxas que se aplicam a todas
+            as encomendas desse período. Podes alterar taxas mais tarde em
+            Definições — dias anteriores a uma mudança mantêm a taxa gravada.
           </p>
+
+          <div className="mt-4">
+            <label className={labelCls}>Importar dados desde</label>
+            <input
+              name="importStartDate"
+              type="date"
+              required
+              max={new Date().toISOString().slice(0, 10)}
+              className={inputCls}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Ad spend em falta, COGS por dia e métricas contam a partir desta
+              data. Encomendas anteriores não são importadas.
+            </p>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <label className={labelCls}>Processamento (%)</label>
+              <input
+                name="processingPercent"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                defaultValue={DEFAULT_PROCESSING_PERCENT}
+                className={inputCls}
+                required
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Shopify Payments / gateway
+              </p>
+            </div>
+            <div>
+              <label className={labelCls}>Fixo por encomenda</label>
+              <input
+                name="processingFixed"
+                type="number"
+                step="0.01"
+                min="0"
+                defaultValue={0}
+                className={inputCls}
+                required
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Na moeda da loja (após ligar)
+              </p>
+            </div>
+            <div>
+              <label className={labelCls}>Taxa de transação (%)</label>
+              <input
+                name="transactionFeePercent"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                defaultValue={DEFAULT_TRANSACTION_FEE_PERCENT}
+                className={inputCls}
+                required
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Comissão Shopify sobre cada venda
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -1,10 +1,26 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
-import { RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { syncStoreAction, type SyncState } from "@/app/(app)/lojas/actions";
+import type { ChunkedSyncStatus } from "@/lib/store-sync-chunked";
 import { cn } from "@/lib/utils";
+
+const IDLE: ChunkedSyncStatus = {
+  status: "idle",
+  phase: null,
+  progress: 0,
+  message: "",
+  ordersImported: 0,
+  orderPagesDone: 0,
+  productsImported: 0,
+  payoutsImported: 0,
+  balanceTransactionsImported: 0,
+  sessionDaysSynced: 0,
+  error: null,
+  resultSummary: null,
+  continue: false,
+};
 
 export function StoreSyncButton({
   storeId,
@@ -16,36 +32,175 @@ export function StoreSyncButton({
   onDone?: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [state, action, pending] = useActionState<SyncState, FormData>(
-    syncStoreAction,
-    {},
-  );
+  const [state, setState] = useState<ChunkedSyncStatus>(IDLE);
+  const [pending, setPending] = useState(false);
+  const abortRef = useRef(false);
+  const runningRef = useRef(false);
 
-  useEffect(() => {
-    if (!state.ok && !state.error) return;
+  const invalidateMetrics = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["metrics-summary"] });
     void queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
     void queryClient.invalidateQueries({ queryKey: ["treasury"] });
-    onDone?.();
-  }, [state.ok, state.error, queryClient, onDone]);
+  }, [queryClient]);
+
+  const callSync = useCallback(
+    async (action: "start" | "step" | "cancel") => {
+      const res = await fetch(`/api/stores/${storeId}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json()) as ChunkedSyncStatus & { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error ?? "Falha na sincronização.");
+      }
+      return data;
+    },
+    [storeId],
+  );
+
+  const runLoop = useCallback(async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    abortRef.current = false;
+    setPending(true);
+
+    try {
+      let status = await callSync("start");
+      setState(status);
+
+      while (status.continue && !abortRef.current) {
+        status = await callSync("step");
+        setState(status);
+      }
+
+      if (status.status === "done") {
+        invalidateMetrics();
+        onDone?.();
+      }
+    } catch (e) {
+      setState((prev) => ({
+        ...prev,
+        status: "error",
+        error: e instanceof Error ? e.message : "Falha na sincronização.",
+        continue: false,
+      }));
+    } finally {
+      setPending(false);
+      runningRef.current = false;
+    }
+  }, [callSync, invalidateMetrics, onDone]);
+
+  const handleCancel = useCallback(async () => {
+    abortRef.current = true;
+    try {
+      const status = await callSync("cancel");
+      setState(status);
+    } catch {
+      setState(IDLE);
+    } finally {
+      setPending(false);
+      runningRef.current = false;
+    }
+  }, [callSync]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/stores/${storeId}/sync`, {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as ChunkedSyncStatus;
+        if (data.status === "running" && data.continue) {
+          setState(data);
+          setPending(true);
+          runningRef.current = true;
+          abortRef.current = false;
+
+          let status = data;
+          while (status.continue && !abortRef.current && !cancelled) {
+            status = await callSync("step");
+            if (cancelled) return;
+            setState(status);
+          }
+
+          if (status.status === "done") {
+            invalidateMetrics();
+            onDone?.();
+          }
+        }
+      } catch {
+        /* ignorar — utilizador pode iniciar manualmente */
+      } finally {
+        if (!cancelled) {
+          setPending(false);
+          runningRef.current = false;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      abortRef.current = true;
+    };
+  }, [storeId, callSync, invalidateMetrics, onDone]);
+
+  const syncing = pending || state.status === "running";
+  const progress = Math.min(100, Math.max(0, state.progress));
 
   return (
-    <form action={action} className={cn("flex flex-wrap items-center gap-2", className)}>
-      <input type="hidden" name="storeId" value={storeId} />
-      <button
-        type="submit"
-        disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-60"
-      >
-        <RefreshCw className={cn("h-3.5 w-3.5", pending && "animate-spin")} />
-        {pending ? "A sincronizar…" : "Sincronizar agora"}
-      </button>
-      {state.ok && state.message && (
-        <span className="text-xs text-positive">{state.message}</span>
+    <div className={cn("flex min-w-0 flex-col gap-2", className)}>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={syncing}
+          onClick={() => void runLoop()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-60"
+        >
+          <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+          {syncing ? "A sincronizar…" : "Sincronizar agora"}
+        </button>
+        {syncing && (
+          <button
+            type="button"
+            onClick={() => void handleCancel()}
+            className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+            Cancelar
+          </button>
+        )}
+      </div>
+
+      {syncing && (
+        <div className="w-full min-w-[12rem] max-w-sm space-y-1">
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span className="truncate">{state.message || "A sincronizar…"}</span>
+            <span className="shrink-0 tabular-nums">{Math.round(progress)}%</span>
+          </div>
+          <div
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
       )}
-      {state.error && (
+
+      {state.status === "done" && state.resultSummary && (
+        <span className="text-xs text-positive">{state.resultSummary}</span>
+      )}
+      {state.status === "error" && state.error && (
         <span className="text-xs text-negative">{state.error}</span>
       )}
-    </form>
+    </div>
   );
 }

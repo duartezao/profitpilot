@@ -26,12 +26,14 @@ import { listCashEntriesForWorkspace } from "@/lib/cash-entries";
 import { FeeSchedulePanel } from "./fee-schedule-panel";
 import { OwnedWorkspacesPanel } from "./owned-workspaces-panel";
 import { StoreSettingsBlock } from "./store-settings-block";
+import { StoreDataPanel } from "./store-data-panel";
 import { SettingsCollapsibleSection } from "@/components/settings-collapsible-section";
 import { SettingsNav } from "@/components/settings-nav";
 import {
   buildFeeScheduleViews,
   ensureFeeSchedule,
   formatFeeConfigLabel,
+  normalizeFeeConfig,
   resolveFeeConfigForDateKey,
   type FeeScheduleEntry,
 } from "@/lib/fee-schedule";
@@ -309,6 +311,13 @@ export default async function DefinicoesPage() {
                 | "paused"
                 | "archived";
 
+              const initialFeeEntry =
+                schedule.find((e) => e.effectiveFromKey === floorKey) ??
+                schedule[0]!;
+              const importStartDateStr = s.importStartDate
+                ? new Date(s.importStartDate).toISOString().slice(0, 10)
+                : floorKey;
+
               return (
                 <StoreSettingsBlock
                   key={String(s._id)}
@@ -346,6 +355,15 @@ export default async function DefinicoesPage() {
                     defaultProcessingPercent={latest.processingPercent}
                     defaultProcessingFixed={latest.processingFixed}
                     defaultTransactionFeePercent={latest.transactionFeePercent}
+                  />
+                  <StoreDataPanel
+                    storeId={String(s._id)}
+                    storeName={s.name}
+                    importStartDate={importStartDateStr}
+                    importFloorKey={floorKey}
+                    initialFees={normalizeFeeConfig(initialFeeEntry)}
+                    canEdit={canEditStores}
+                    canDelete={canEditWorkspace}
                   />
                 </StoreSettingsBlock>
               );
