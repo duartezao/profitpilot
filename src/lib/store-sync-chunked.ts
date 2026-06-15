@@ -1,5 +1,6 @@
 import "server-only";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
+import { backfillOrderLinePricesForStore } from "@/lib/order-price-backfill";
 import { assimilatePendingCogsForStore } from "@/lib/cogs";
 import {
   assimilatesCogsOnSync,
@@ -293,6 +294,11 @@ export async function runChunkedSyncStep(
 
     if (phase === "post_orders") {
       await backfillOrderNetRevenueForStore(freshStore._id);
+      await backfillOrderLinePricesForStore(
+        freshStore._id,
+        domain,
+        accessToken,
+      );
       if (assimilatesCogsOnSync(freshStore.cogsMode)) {
         await assimilatePendingCogsForStore(freshStore._id);
       }

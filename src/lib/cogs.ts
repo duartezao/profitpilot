@@ -4,11 +4,17 @@ import type { Types } from "mongoose";
 import { Order } from "@/models/Order";
 import { ProductCost } from "@/models/ProductCost";
 import { CogsHistory } from "@/models/CogsHistory";
+import { PriceHistory } from "@/models/PriceHistory";
 import { orderDateMatch } from "@/lib/period";
 import {
   orderDateMatchInTimezone,
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
+import {
+  applyLineUnitCost,
+  applyLineUnitPrice,
+  type CostResolver,
+} from "@/lib/line-snapshots";
 
 export type CogsPeriodSlice = {
   start: Date;
@@ -175,22 +181,8 @@ function pickCostAtDate(entries: HistoryEntry[], orderDate: Date): number | null
   return best?.cost ?? null;
 }
 
-export type CostResolver = (variantId: string, orderDate: Date) => number;
-
-/**
- * Custo por linha: snapshot confirmado (>0) não muda; caso contrário resolve
- * sempre pela data da venda (nova venda ou custo ainda em falta).
- */
-export function applyLineUnitCost(
-  variantId: string,
-  orderDate: Date,
-  previousSnapshot: number,
-  resolveCost: CostResolver,
-): number {
-  if (!variantId) return 0;
-  if (previousSnapshot > 0) return previousSnapshot;
-  return resolveCost(variantId, orderDate);
-}
+export type { CostResolver } from "@/lib/line-snapshots";
+export { applyLineUnitCost, applyLineUnitPrice } from "@/lib/line-snapshots";
 
 type LineItemRow = {
   productId?: string | null;
@@ -324,6 +316,37 @@ export async function recordShopifyCostChange(
     variantId,
     productId: productId ?? undefined,
     cost,
+    source: "shopify",
+    effectiveFrom,
+    effectiveTo: null,
+  });
+}
+
+async function closeOpenPriceHistory(
+  storeId: Types.ObjectId,
+  variantId: string,
+  effectiveTo: Date,
+) {
+  await PriceHistory.updateMany(
+    { storeId, variantId, effectiveTo: null },
+    { $set: { effectiveTo } },
+  );
+}
+
+/** Regista alteração de preço de venda vinda da Shopify. */
+export async function recordShopifyPriceChange(
+  storeId: Types.ObjectId,
+  variantId: string,
+  price: number,
+  effectiveFrom: Date,
+  productId?: string | null,
+) {
+  await closeOpenPriceHistory(storeId, variantId, effectiveFrom);
+  await PriceHistory.create({
+    storeId,
+    variantId,
+    productId: productId ?? undefined,
+    price,
     source: "shopify",
     effectiveFrom,
     effectiveTo: null,

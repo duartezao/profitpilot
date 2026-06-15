@@ -11,6 +11,7 @@ import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { SessionMetricsMonth } from "@/models/SessionMetricsMonth";
 import { ProductCost } from "@/models/ProductCost";
 import { CogsHistory } from "@/models/CogsHistory";
+import { PriceHistory } from "@/models/PriceHistory";
 import { Membership } from "@/models/Membership";
 import { Store } from "@/models/Store";
 
@@ -25,6 +26,7 @@ export type StorePurgeCounts = {
   sessionMetricsMonths: number;
   productCosts: number;
   cogsHistory: number;
+  priceHistory: number;
 };
 
 /** Apaga todos os dados associados a uma loja e o documento da loja. */
@@ -47,6 +49,7 @@ export async function purgeStoreCompletely(
     sessionMetricsMonths,
     productCosts,
     cogsHistory,
+    priceHistory,
   ] = await Promise.all([
     Order.deleteMany({ storeId: storeOid }),
     ManualAdSpend.deleteMany({ storeId: storeOid }),
@@ -58,6 +61,7 @@ export async function purgeStoreCompletely(
     SessionMetricsMonth.deleteMany({ storeId: storeOid }),
     ProductCost.deleteMany({ storeId: storeOid }),
     CogsHistory.deleteMany({ storeId: storeOid }),
+    PriceHistory.deleteMany({ storeId: storeOid }),
   ]);
 
   await Membership.updateMany(
@@ -81,5 +85,6 @@ export async function purgeStoreCompletely(
     sessionMetricsMonths: sessionMetricsMonths.deletedCount,
     productCosts: productCosts.deletedCount,
     cogsHistory: cogsHistory.deletedCount,
+    priceHistory: priceHistory.deletedCount,
   };
 }
