@@ -21,6 +21,7 @@ export type CostRowData = {
   manualCost: number | null;
   manualFrom: string | null;
   currency: string;
+  inputCurrency: string;
   unitsSold: number;
   orderCount: number;
 };
@@ -85,7 +86,7 @@ export function CostRow({ row }: { row: CostRowData }) {
             type="number"
             step="0.01"
             min="0"
-            placeholder="custo"
+            placeholder={`custo (${row.inputCurrency})`}
             defaultValue={row.manualCost ?? ""}
             className={inputCls}
             data-sensitive

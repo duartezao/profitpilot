@@ -6,8 +6,12 @@ import { Workspace } from "@/models/Workspace";
 import {
   buildStoreAdSpendSummaries,
 } from "@/lib/ad-spend";
-import { countSoldVariantsMissingCost } from "@/lib/cogs";
-import { storeQueryForUser } from "@/lib/store-scope";
+import {
+  countMissingCogsForStore,
+  cogsMissingLabel,
+} from "@/lib/manual-cogs";
+import { type CogsMode } from "@/lib/cogs-modes";
+import { activeStoreQueryForUser } from "@/lib/store-scope";
 import {
   canAccessStore,
   type StoreAccess,
@@ -50,12 +54,12 @@ export async function buildWorkspaceAlerts(
     return [];
   }
 
-  const storeQuery = storeQueryForUser(user);
+  const storeQuery = activeStoreQueryForUser(user);
   if (opts?.storeId) storeQuery._id = opts.storeId;
 
   const stores = await Store.find(storeQuery)
     .select(
-      "name lastSyncError lastSessionMetricsError payoutsError importStartDate createdAt ianaTimezone",
+      "name workspaceId cogsMode lastSyncError lastSessionMetricsError payoutsError importStartDate createdAt ianaTimezone",
     )
     .lean();
 
@@ -119,28 +123,26 @@ export async function buildWorkspaceAlerts(
     }
   }
 
-  const storeOids = stores.map((s) => s._id);
-  if (storeOids.length) {
-    const period = resolvePeriod({ period: "last_30_days" });
-    const missingCogs = await countSoldVariantsMissingCost(storeOids, {
+  const period = resolvePeriod({ period: "last_30_days" });
+  for (const store of stores) {
+    const sid = String(store._id);
+    const cogsMode = (store.cogsMode ?? "shopify") as CogsMode;
+    const missingCogs = await countMissingCogsForStore(store, {
       start: period.start,
       end: period.end,
       specificDates: period.specificDates,
     });
     if (missingCogs > 0) {
-      const scopeQs = opts?.storeId
-        ? scopeQueryFromInput({ store: opts.storeId })
-        : "";
+      const qs = scopeQueryFromInput({ store: sid });
+      const detail = cogsMissingLabel(cogsMode, missingCogs);
       alerts.push({
-        id: opts?.storeId ? `cogs-${opts.storeId}` : "cogs-workspace",
+        id: `cogs-${sid}`,
         severity: "warning",
         title: "COGS incompletos",
-        description: `${missingCogs} ${missingCogs === 1 ? "produto vendido sem custo" : "produtos vendidos sem custo"} nos últimos 30 dias — o lucro pode estar superestimado.`,
-        href: scopeQs ? `/cogs?${scopeQs}` : "/cogs",
-        storeId: opts?.storeId,
-        storeName: opts?.storeId
-          ? stores.find((s) => String(s._id) === opts.storeId)?.name
-          : undefined,
+        description: `${detail}${cogsMode === "shopify" || cogsMode === "variant" ? " nos últimos 30 dias" : ""} — o lucro pode estar superestimado.`,
+        href: `/cogs?${qs}`,
+        storeId: sid,
+        storeName: store.name,
       });
     }
   }

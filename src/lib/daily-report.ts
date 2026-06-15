@@ -1,12 +1,11 @@
 import "server-only";
-import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
-import { DailyNote } from "@/models/DailyNote";
 import { fetchStoreDayFinancials } from "@/lib/metrics";
+import { fetchStoreDailyNoteForDay } from "@/lib/daily-notes";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { parseDateInput } from "@/lib/period";
-import { assertStoreAccess } from "@/lib/store-scope";
+import { assertStoreAccess, NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import type { StoreAccess } from "@/lib/store-access";
 
 function fmtReportNumber(n: number): string {
@@ -24,6 +23,11 @@ function fmtReportPct(n: number | null): string {
 function fmtReportMoney(n: number, currency: string): string {
   if (currency === "EUR") return `${fmtReportNumber(n)}€`;
   return `${fmtReportNumber(n)} ${currency}`;
+}
+
+function fmtReportField(value: string | undefined | null): string {
+  const t = (value ?? "").trim();
+  return t || "—";
 }
 
 export type DailyReportResult = {
@@ -46,6 +50,7 @@ export async function buildDailyReportText(opts: {
     _id: opts.storeId,
     workspaceId: opts.workspaceId,
     deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
   })
     .select("name currency displayUrl shopDomain")
     .lean();
@@ -61,19 +66,11 @@ export async function buildDailyReportText(opts: {
   );
   if (!financials) return null;
 
-  const dayEnd = new Date(day);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-
-  const notes = await DailyNote.find({
-    workspaceId: opts.workspaceId,
-    date: { $gte: day, $lt: dayEnd },
-    $or: [{ storeId: store._id }, { storeId: null }],
-  }).lean();
-
-  const storeNote =
-    notes.find((n) => n.storeId && String(n.storeId) === String(store._id)) ??
-    notes.find((n) => !n.storeId) ??
-    null;
+  const storeNote = await fetchStoreDailyNoteForDay(
+    opts.workspaceId,
+    opts.storeId,
+    opts.dateKey,
+  );
 
   const displayUrl = getStoreDisplayUrl(store) ?? store.shopDomain ?? store.name;
   const dayLabel = day.toLocaleDateString("pt-PT");
@@ -81,18 +78,25 @@ export async function buildDailyReportText(opts: {
 
   const profitLine =
     financials.missingCogs > 0
-      ? `${fmtReportNumber(financials.profit)}   (COGS em falta em ${financials.missingCogs} ${financials.missingCogs === 1 ? "produto" : "produtos"} vendido${financials.missingCogs === 1 ? "" : "s"} neste dia)`
+      ? `${fmtReportNumber(financials.profit)}   (COGS em falta neste dia)`
       : fmtReportNumber(financials.profit);
 
-  const obs = storeNote?.text?.trim() || "—";
+function resolveObs(note: Awaited<ReturnType<typeof fetchStoreDailyNoteForDay>>): string {
+  if (!note) return "—";
+  const rfObs = note.reportFields.obs?.trim();
+  if (rfObs) return rfObs;
+  return fmtReportField(note.text);
+}
   const scaleNote = storeNote?.didScale ? "Sim" : "0";
+  const rf = storeNote?.reportFields;
+  const obs = resolveObs(storeNote);
 
   const lines = [
     `DIA: ${dayLabel}`,
     `LOJA: ${displayUrl}`,
     `REV: ${fmtReportNumber(financials.revenue)}`,
     `REFUNDS: ${fmtReportMoney(financials.refunds, currency)}`,
-    `ADSPEND: ${fmtReportNumber(financials.adSpend)}`,
+    `ADSPEND: ${financials.adSpend != null ? fmtReportNumber(financials.adSpend) : "—"}`,
     `PROFIT: ${profitLine}`,
     `ATC %: ${fmtReportPct(financials.atcPct)}`,
     `REACHED CHECKOUT %: ${fmtReportPct(financials.checkoutPct)}`,
@@ -100,14 +104,14 @@ export async function buildDailyReportText(opts: {
     `CPC: —`,
     `CTR: —`,
     `CPM: —`,
-    `Produtos testados: —`,
-    `Coleções testadas: —`,
-    `Quais coleções já testadas: —`,
-    `Qual a próxima coleção a testar: —`,
-    `Coleção best-seller: —`,
+    `Produtos testados: ${fmtReportField(rf?.productsTested)}`,
+    `Coleções testadas: ${fmtReportField(rf?.collectionsTested)}`,
+    `Quais coleções já testadas: ${fmtReportField(rf?.collectionsTestedList)}`,
+    `Qual a próxima coleção a testar: ${fmtReportField(rf?.nextCollection)}`,
+    `Coleção best-seller: ${fmtReportField(rf?.bestSellerCollection)}`,
     `OBS: ${obs}`,
     `Scale hoje: ${scaleNote}`,
-    `Principais dificuldades: —`,
+    `Principais dificuldades: ${fmtReportField(rf?.difficulties)}`,
   ];
 
   return {

@@ -93,7 +93,7 @@ export function PrivacyToggle() {
       title={
         enabled
           ? "Modo apresentação ativo — clicar para mostrar dados"
-          : "Modo apresentação — ocultar valores, lojas e produtos"
+          : "Modo apresentação — ocultar valores, lojas, países e credenciais"
       }
       aria-pressed={enabled}
       onClick={toggle}

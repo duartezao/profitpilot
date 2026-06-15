@@ -10,12 +10,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Tempo real: os dados ficam "stale" depressa e voltam a buscar
-            // ao focar o separador, ao reconectar a net e por polling.
-            staleTime: 10 * 1000,
-            refetchOnWindowFocus: true,
+            staleTime: 30 * 1000,
+            refetchOnWindowFocus: false,
             refetchOnReconnect: true,
-            retry: 2,
+            retry: 1,
           },
         },
       }),

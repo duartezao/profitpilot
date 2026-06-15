@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { startTransition, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   storeRequiredPaths,
@@ -19,11 +19,15 @@ export function ScopeRouteGuard() {
 
   useEffect(() => {
     if (storeId && workspaceOnlyPaths.has(pathname)) {
-      router.replace(hrefWithScope("/dashboard", searchParams));
+      startTransition(() => {
+        router.replace(hrefWithScope("/dashboard", searchParams));
+      });
       return;
     }
     if (!storeId && storeRequiredPaths.has(pathname)) {
-      router.replace(hrefWithScope("/dashboard", searchParams));
+      startTransition(() => {
+        router.replace(hrefWithScope("/dashboard", searchParams));
+      });
     }
   }, [pathname, router, searchParams, storeId]);
 

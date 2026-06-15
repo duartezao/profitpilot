@@ -8,6 +8,7 @@ import {
 } from "@/lib/metrics";
 import { buildWorkspaceTreasury, type WorkspaceTreasury } from "@/lib/treasury";
 import type { PeriodInput } from "@/lib/period";
+import type { StoreAccess } from "@/lib/store-access";
 
 export type DecisionStatus = "scale" | "maintain" | "kill";
 
@@ -149,11 +150,11 @@ function buildTodayActions(input: {
     });
   }
 
-  const projected = input.storeId
-    ? input.treasury?.stores.find((s) => s.storeId === input.storeId)?.projected
-    : input.treasury?.totals.projected;
+  const cashOnHand = input.storeId
+    ? input.treasury?.stores.find((s) => s.storeId === input.storeId)?.cashOnHand
+    : input.treasury?.totals.cashOnHand;
 
-  if (projected != null && projected < 0) {
+  if (cashOnHand != null && cashOnHand < 0) {
     actions.push({
       level: "negative",
       text: "Tesouraria apertada — evita aumentar budget até entrar payout.",
@@ -194,8 +195,8 @@ function treasuryCard(
     available: line?.availableFmt ?? treasury.totals.availableFmt,
     incoming: line?.incomingFmt ?? treasury.totals.incomingFmt,
     payable: line?.receivedFmt ?? treasury.totals.receivedFmt,
-    projected: line?.projectedFmt ?? treasury.totals.projectedFmt,
-    projectedTitle: line?.projectedTitle ?? treasury.totals.projectedTitle,
+    projected: line?.cashOnHandFmt ?? treasury.totals.cashOnHandFmt,
+    projectedTitle: line?.cashOnHandTitle ?? treasury.totals.cashOnHandTitle,
     currency: treasury.currency,
   };
 }
@@ -204,11 +205,12 @@ export async function buildDecisionSummary(
   workspaceId: string,
   storeId?: string,
   periodInput?: PeriodInput,
+  storeAccess: StoreAccess = "all",
 ): Promise<DecisionSummary> {
   const [summary, pnl, treasury] = await Promise.all([
-    buildWorkspaceSummary(workspaceId, storeId, periodInput),
-    buildWorkspacePnl(workspaceId, periodInput, storeId),
-    buildWorkspaceTreasury(workspaceId, storeId).catch(() => null),
+    buildWorkspaceSummary(workspaceId, storeId, periodInput, storeAccess),
+    buildWorkspacePnl(workspaceId, periodInput, storeId, storeAccess),
+    buildWorkspaceTreasury(workspaceId, storeId, storeAccess).catch(() => null),
   ]);
 
   let rows: DecisionRow[];

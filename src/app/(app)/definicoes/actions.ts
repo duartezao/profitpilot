@@ -13,6 +13,13 @@ import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { Membership } from "@/models/Membership";
 import { isValidSessionCountry, normalizeSessionCountry } from "@/lib/shopify-countries";
 import { isMyshopifyDomain, normalizeDisplayUrl } from "@/lib/store-display";
+import { assertStoreAccess, findStoreForUser } from "@/lib/store-scope";
+import {
+  COGS_MODES,
+  COGS_INPUT_CURRENCIES,
+  isCogsInputCurrency,
+  isCogsMode,
+} from "@/lib/cogs-modes";
 
 export type SettingsState = { ok?: boolean; error?: string };
 
@@ -81,9 +88,6 @@ const storeSchema = z.object({
   name: z.string().trim().min(1, "Dá um nome à loja."),
   status: z.enum(["active", "paused", "archived"]),
   autoSync: z.boolean(),
-  processingPercent: z.number().min(0).max(100),
-  processingFixed: z.number().min(0),
-  transactionFeePercent: z.number().min(0).max(100),
   startingBalance: z.number(),
   startingBalanceDate: z.string().trim(),
   analyticsSessionCountry: z.string().trim(),
@@ -95,6 +99,8 @@ const storeSchema = z.object({
       (v) => !isMyshopifyDomain(v),
       "Usa o domínio público (.com), não o .myshopify.com.",
     ),
+  cogsMode: z.enum(COGS_MODES).optional(),
+  cogsInputCurrency: z.enum(COGS_INPUT_CURRENCIES).optional(),
 });
 
 export async function updateStoreSettingsAction(
@@ -112,15 +118,14 @@ export async function updateStoreSettingsAction(
     name: formData.get("name"),
     status: formData.get("status"),
     autoSync: formData.get("autoSync") === "on",
-    processingPercent: numOpt(formData.get("processingPercent")),
-    processingFixed: numOpt(formData.get("processingFixed")),
-    transactionFeePercent: numOpt(formData.get("transactionFeePercent")),
     startingBalance: numOpt(formData.get("startingBalance")),
     startingBalanceDate: String(formData.get("startingBalanceDate") ?? ""),
     analyticsSessionCountry: String(
       formData.get("analyticsSessionCountry") ?? "",
     ),
     displayUrl: String(formData.get("displayUrl") ?? ""),
+    cogsMode: String(formData.get("cogsMode") ?? ""),
+    cogsInputCurrency: String(formData.get("cogsInputCurrency") ?? ""),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -132,25 +137,31 @@ export async function updateStoreSettingsAction(
   if (!isValidSessionCountry(d.analyticsSessionCountry || null)) {
     return { error: "País de sessões inválido." };
   }
+  const cogsMode = isCogsMode(d.cogsMode ?? "") ? d.cogsMode : undefined;
+  const cogsInputCurrency = isCogsInputCurrency(d.cogsInputCurrency ?? "")
+    ? d.cogsInputCurrency
+    : undefined;
   const startingBalanceDate = d.startingBalanceDate
     ? new Date(d.startingBalanceDate)
     : null;
 
   await connectToDatabase();
+  const store = await findStoreForUser(user, d.storeId, "_id");
+  if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
   const res = await Store.updateOne(
     { _id: d.storeId, workspaceId: user.workspaceId, deletedAt: null },
     {
       $set: {
         name: d.name,
         status: d.status,
-        autoSync: d.autoSync,
-        "feeConfig.processingPercent": d.processingPercent,
-        "feeConfig.processingFixed": d.processingFixed,
-        "feeConfig.transactionFeePercent": d.transactionFeePercent,
+        autoSync: d.status === "archived" ? false : d.autoSync,
         startingBalance: d.startingBalance,
         startingBalanceDate,
         analyticsSessionCountry,
         displayUrl: normalizeDisplayUrl(d.displayUrl),
+        ...(cogsMode ? { cogsMode } : {}),
+        ...(cogsInputCurrency ? { cogsInputCurrency } : {}),
       },
     },
   );
@@ -161,6 +172,66 @@ export async function updateStoreSettingsAction(
   revalidatePath("/definicoes");
   revalidatePath("/lojas");
   revalidatePath("/dashboard");
+  revalidatePath("/cogs");
+  revalidatePath("/financas");
+  revalidatePath("/tesouraria");
+  revalidatePath("/metricas");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+const removeBankrollSchema = z.object({
+  storeId: z.string().trim().min(1),
+  confirm: z.literal("yes", {
+    message: "Confirma a remoção da banca antes de continuar.",
+  }),
+});
+
+/** Remove o saldo inicial (banca) da loja — a tesouraria deixa de contar esse valor. */
+export async function removeStoreBankrollAction(
+  _prev: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão para editar lojas." };
+  }
+
+  const parsed = removeBankrollSchema.safeParse({
+    storeId: formData.get("storeId"),
+    confirm: formData.get("confirm") === "on" ? "yes" : undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  await connectToDatabase();
+  const store = await findStoreForUser(
+    user,
+    parsed.data.storeId,
+    "startingBalance startingBalanceDate",
+  );
+  if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
+  const balance = (store as { startingBalance?: number }).startingBalance ?? 0;
+  const balanceDate = (store as { startingBalanceDate?: Date | null })
+    .startingBalanceDate;
+  if (balance === 0 && !balanceDate) {
+    return { error: "Esta loja já não tem banca definida." };
+  }
+
+  await Store.updateOne(
+    { _id: parsed.data.storeId, workspaceId: user.workspaceId, deletedAt: null },
+    { $set: { startingBalance: 0, startingBalanceDate: null } },
+  );
+
+  revalidatePath("/definicoes");
+  revalidatePath("/financas");
+  revalidatePath("/tesouraria");
+  revalidatePath("/dashboard");
+  revalidatePath("/metricas");
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -191,8 +262,18 @@ export async function assignStoreWorkspaceAction(
 
   await connectToDatabase();
 
-  const store = await Store.findOne({ _id: storeId, deletedAt: null });
-  if (!store) return { error: "Loja não encontrada." };
+  try {
+    assertStoreAccess(user.storeAccess, storeId);
+  } catch {
+    return { error: "Sem acesso a esta loja." };
+  }
+
+  const store = await Store.findOne({
+    _id: storeId,
+    workspaceId: user.workspaceId,
+    deletedAt: null,
+  });
+  if (!store) return { error: "Loja não encontrada neste workspace." };
 
   const sourceWsId = String(store.workspaceId);
   if (targetWsId === sourceWsId) {

@@ -2,11 +2,21 @@ import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/auth";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
-import { storeQueryForUser } from "@/lib/store-scope";
+import { Workspace } from "@/models/Workspace";
+import { activeStoreQueryForUser } from "@/lib/store-scope";
 import { canAccessStore } from "@/lib/store-access";
 import { ProductCost } from "@/models/ProductCost";
 import { listSoldVariantsMissingCost } from "@/lib/cogs";
+import {
+  buildCogsDayRows,
+  getBaseCurrency,
+  listOrdersForCogsPanel,
+} from "@/lib/manual-cogs";
+import { COGS_MODE_LABELS, type CogsMode } from "@/lib/cogs-modes";
 import { CostRow, type CostRowData } from "./cost-row";
+import { CogsCsvImport } from "./cogs-csv-import";
+import { OrderCogsPanel } from "./order-cogs-panel";
+import { DayCogsPanel } from "./day-cogs-panel";
 
 export const metadata: Metadata = { title: "Custos (COGS)" };
 
@@ -22,19 +32,51 @@ export default async function CogsPage({
 
   if (!user) return null;
 
-  const stores = await Store.find(storeQueryForUser(user))
-    .select("name currency")
+  const stores = await Store.find(activeStoreQueryForUser(user))
+    .select("name currency cogsMode cogsInputCurrency workspaceId importStartDate createdAt ianaTimezone")
     .lean();
   const scoped =
     storeId && canAccessStore(user.storeAccess, storeId)
       ? stores.find((s) => String(s._id) === storeId)
       : null;
   const storeMap = new Map(
-    stores.map((s) => [String(s._id), { name: s.name, currency: s.currency ?? "EUR" }]),
+    stores.map((s) => [
+      String(s._id),
+      {
+        name: s.name,
+        currency: s.currency ?? "EUR",
+        cogsMode: (s.cogsMode ?? "shopify") as CogsMode,
+        cogsInputCurrency: s.cogsInputCurrency ?? "EUR",
+      },
+    ]),
   );
   const storeIds = scoped ? [scoped._id] : stores.map((s) => s._id);
+  const activeMode = scoped
+    ? ((scoped.cogsMode ?? "shopify") as CogsMode)
+    : null;
 
-  const soldMissing = await listSoldVariantsMissingCost(storeIds);
+  const baseCurrency = scoped
+    ? await getBaseCurrency(scoped.workspaceId)
+    : (
+        await Workspace.findById(user.workspaceId).select("baseCurrency").lean()
+      )?.baseCurrency ?? "EUR";
+
+  let orderRows: Awaited<ReturnType<typeof listOrdersForCogsPanel>> = [];
+  let dayRows: Awaited<ReturnType<typeof buildCogsDayRows>> = [];
+
+  if (scoped && activeMode === "order") {
+    orderRows = await listOrdersForCogsPanel(scoped._id);
+  }
+  if (scoped && activeMode === "day") {
+    dayRows = await buildCogsDayRows(scoped, baseCurrency);
+  }
+
+  const showVariantTable =
+    !activeMode || activeMode === "shopify" || activeMode === "variant";
+
+  const soldMissing = showVariantTable
+    ? await listSoldVariantsMissingCost(storeIds)
+    : [];
 
   const costDocs =
     soldMissing.length > 0
@@ -61,6 +103,7 @@ export default async function CogsPage({
         ? new Date(cost.manualCostFrom).toISOString()
         : null,
       currency: store?.currency ?? "EUR",
+      inputCurrency: store?.cogsInputCurrency ?? "EUR",
       unitsSold: s.unitsSold,
       orderCount: s.orderCount,
     };
@@ -78,47 +121,85 @@ export default async function CogsPage({
             "Custos (COGS)"
           )}
         </h1>
+        {scoped && activeMode && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Modo: {COGS_MODE_LABELS[activeMode]}
+            {scoped.cogsInputCurrency && activeMode !== "shopify"
+              ? ` · entrada em ${scoped.cogsInputCurrency}`
+              : ""}
+            {baseCurrency !== (scoped.currency ?? "EUR")
+              ? ` · dashboard em ${baseCurrency}`
+              : ""}
+          </p>
+        )}
         <p className="mt-1 text-sm text-muted-foreground">
-          {scoped
-            ? "Produtos vendidos nesta loja sem custo definido."
-            : "Produtos vendidos sem custo definido. Só aparecem variantes com encomendas em falta de COGS."}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Cada venda guarda o custo da altura. Se o fornecedor mudar o preço,
-          actualiza aqui ou na Shopify — o histórico usa o valor válido por dia
-          e vendas antigas não mudam. Enquanto o fornecedor não tiver dado
-          update, o custo antigo continua nas encomendas já registadas.
+          {activeMode === "order"
+            ? "Preenche o custo total de cada encomenda. O lucro usa estes valores."
+            : activeMode === "day"
+              ? "Preenche o COGS total por dia civil (fuso da loja)."
+              : scoped
+                ? "Produtos vendidos nesta loja sem custo definido."
+                : "Produtos vendidos sem custo definido."}
         </p>
       </div>
 
-      <div className="rounded-lg border border-border bg-surface">
-        {rows.length === 0 ? (
-          <div className="p-12 text-center text-sm text-muted-foreground">
-            {storeIds.length === 0
-              ? "Liga uma loja e sincroniza para ver produtos vendidos."
-              : "Não há vendas sem custo. O lucro usa o COGS registado — confirma que os preços do fornecedor estão actualizados."}
+      {scoped && activeMode === "order" && (
+        <OrderCogsPanel
+          storeId={String(scoped._id)}
+          storeName={scoped.name}
+          baseCurrency={baseCurrency}
+          inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+          rows={orderRows}
+        />
+      )}
+
+      {scoped && activeMode === "day" && (
+        <DayCogsPanel
+          storeId={String(scoped._id)}
+          storeName={scoped.name}
+          baseCurrency={baseCurrency}
+          inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+          rows={dayRows}
+        />
+      )}
+
+      {showVariantTable && (
+        <>
+          <CogsCsvImport
+            stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
+            defaultStoreId={scoped ? String(scoped._id) : undefined}
+          />
+
+          <div className="rounded-lg border border-border bg-surface">
+            {rows.length === 0 ? (
+              <div className="p-12 text-center text-sm text-muted-foreground">
+                {storeIds.length === 0
+                  ? "Liga uma loja e sincroniza para ver produtos vendidos."
+                  : "Não há vendas sem custo. O lucro usa o COGS registado."}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead>
+                    <tr className="text-left text-xs font-medium text-muted-foreground">
+                      <th className="px-4 py-3">Produto</th>
+                      <th className="px-4 py-3 text-right">Vendidos</th>
+                      <th className="px-4 py-3 text-right">Custo</th>
+                      <th className="px-4 py-3">Origem</th>
+                      <th className="px-4 py-3">Definir custo manual</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <CostRow key={`${r.storeId}:${r.variantId}`} row={r} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead>
-                <tr className="text-left text-xs font-medium text-muted-foreground">
-                  <th className="px-4 py-3">Produto</th>
-                  <th className="px-4 py-3 text-right">Vendidos</th>
-                  <th className="px-4 py-3 text-right">Custo</th>
-                  <th className="px-4 py-3">Origem</th>
-                  <th className="px-4 py-3">Definir custo manual</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <CostRow key={`${r.storeId}:${r.variantId}`} row={r} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

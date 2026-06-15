@@ -10,11 +10,26 @@ import {
 } from "@/lib/auth";
 import { Workspace } from "@/models/Workspace";
 import { Membership } from "@/models/Membership";
+import {
+  deleteOwnedWorkspace,
+  renameOwnedWorkspace,
+} from "@/lib/workspaces";
 
 export type WorkspaceActionState = { ok?: boolean; error?: string };
 
 const createSchema = z.object({
   name: z.string().trim().min(1, "Dá um nome ao workspace."),
+});
+
+const renameSchema = z.object({
+  workspaceId: z.string().trim().min(1),
+  name: z.string().trim().min(1, "Dá um nome ao workspace."),
+});
+
+const deleteSchema = z.object({
+  workspaceId: z.string().trim().min(1),
+  confirmName: z.string().optional(),
+  acknowledgeDataLoss: z.string().optional(),
 });
 
 export async function switchWorkspaceAction(
@@ -66,4 +81,67 @@ export async function createWorkspaceAction(
 
   revalidatePath("/", "layout");
   redirect("/dashboard");
+}
+
+export async function renameWorkspaceAction(
+  _prev: WorkspaceActionState,
+  formData: FormData,
+): Promise<WorkspaceActionState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
+  const parsed = renameSchema.safeParse({
+    workspaceId: formData.get("workspaceId"),
+    name: formData.get("name"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  try {
+    await renameOwnedWorkspace(
+      user.id,
+      parsed.data.workspaceId,
+      parsed.data.name,
+    );
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Não foi possível guardar." };
+  }
+
+  revalidatePath("/", "layout");
+  revalidatePath("/definicoes");
+  return { ok: true };
+}
+
+export async function deleteWorkspaceAction(
+  _prev: WorkspaceActionState,
+  formData: FormData,
+): Promise<WorkspaceActionState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
+  const parsed = deleteSchema.safeParse({
+    workspaceId: formData.get("workspaceId"),
+    confirmName: formData.get("confirmName") ?? undefined,
+    acknowledgeDataLoss: formData.get("acknowledgeDataLoss") ?? undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Pedido inválido." };
+  }
+
+  const deletedId = parsed.data.workspaceId;
+
+  try {
+    await deleteOwnedWorkspace(user.id, deletedId, {
+      confirmName: parsed.data.confirmName,
+      acknowledgeDataLoss: parsed.data.acknowledgeDataLoss === "true",
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Não foi possível apagar." };
+  }
+
+  revalidatePath("/", "layout");
+  revalidatePath("/definicoes");
+
+  redirect("/definicoes#meus-workspaces");
 }

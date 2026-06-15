@@ -2,11 +2,13 @@ import { periodQueryFromSearchParams, type PeriodInput } from "@/lib/period";
 
 const STORE_SESSION_PREFIX = "pp-active-store:";
 
-/** Query string com período + loja (para links e APIs). */
+/** Query string com período, loja e portfolio (para links e APIs). */
 export function scopeQueryFromSearchParams(params: URLSearchParams): string {
   const q = new URLSearchParams(periodQueryFromSearchParams(params));
   const store = params.get("store");
   if (store) q.set("store", store);
+  const portfolio = params.get("portfolio");
+  if (portfolio) q.set("portfolio", portfolio);
   return q.toString();
 }
 

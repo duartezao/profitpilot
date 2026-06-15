@@ -47,6 +47,23 @@ const OrderSchema = new Schema(
     cogs: { type: Number, default: 0 },
     fees: { type: Number, default: 0 },
 
+    /** COGS manual por encomenda (modo «order»), na moeda base do workspace. */
+    manualCogs: { type: Number, default: null },
+    manualCogsInputAmount: { type: Number, default: null },
+    manualCogsInputCurrency: { type: String, default: null },
+    manualCogsFxRate: { type: Number, default: null },
+
+    /** Valores convertidos para a moeda base do workspace (dashboard). */
+    amountsBase: {
+      netRevenue: { type: Number, default: null },
+      cogs: { type: Number, default: null },
+      shipping: { type: Number, default: null },
+      fees: { type: Number, default: null },
+      refunded: { type: Number, default: null },
+      fxRate: { type: Number, default: null },
+      baseCurrency: { type: String, default: null },
+    },
+
     lineItems: { type: [LineItemSchema], default: [] },
   },
   { timestamps: true },

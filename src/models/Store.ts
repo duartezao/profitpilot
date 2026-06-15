@@ -9,6 +9,17 @@ const FeeConfigSchema = new Schema(
   { _id: false },
 );
 
+const FeeScheduleEntrySchema = new Schema(
+  {
+    /** Dia civil YYYY-MM-DD (fuso da loja) — taxa aplica-se desde este dia. */
+    effectiveFromKey: { type: String, required: true },
+    processingPercent: { type: Number, default: 0 },
+    processingFixed: { type: Number, default: 0 },
+    transactionFeePercent: { type: Number, default: 0 },
+  },
+  { _id: false },
+);
+
 const StoreSchema = new Schema(
   {
     workspaceId: {
@@ -32,12 +43,26 @@ const StoreSchema = new Schema(
       default: "active",
     },
     currency: { type: String, default: "EUR" },
+    /** Como o COGS é preenchido nesta loja. */
+    cogsMode: {
+      type: String,
+      enum: ["shopify", "variant", "order", "day"],
+      default: "shopify",
+    },
+    /** Moeda usada na entrada manual de COGS (USD ou EUR). */
+    cogsInputCurrency: {
+      type: String,
+      enum: ["EUR", "USD"],
+      default: "EUR",
+    },
     groupTags: { type: [String], default: [] },
     // Blob encriptado (AES-256-GCM) com { clientId, clientSecret, accessToken }
     credentials: { type: String },
     scopes: { type: [String], default: [] },
     importStartDate: { type: Date },
     feeConfig: { type: FeeConfigSchema, default: () => ({}) },
+    /** Histórico de taxas — cada entrada vale a partir de `effectiveFromKey`. */
+    feeSchedule: { type: [FeeScheduleEntrySchema], default: [] },
     // Tesouraria (por loja): saldo inicial conhecido numa data, ponto de partida
     // para o "tenho € ou não?" desta loja.
     startingBalance: { type: Number, default: 0 },

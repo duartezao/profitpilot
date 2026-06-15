@@ -90,6 +90,7 @@ export function InviteMemberForm({
               autoComplete="off"
               placeholder="colega@exemplo.com ou nome.utilizador"
               className={inputCls}
+              data-sensitive
             />
             <p className="mt-1 text-xs text-muted-foreground">
               Utilizador — a conta tem de existir. Sem conta, usa o email.

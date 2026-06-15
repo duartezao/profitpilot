@@ -6,6 +6,7 @@ import { Store as StoreIcon, ChevronDown, Check } from "lucide-react";
 import { useWorkspace } from "@/components/workspace-context";
 import { Sensitive } from "@/components/privacy-mode";
 import { persistActiveStore } from "@/lib/scope-query";
+import { parsePortfolioParam } from "@/lib/portfolio-scope";
 import { cn } from "@/lib/utils";
 
 export type StoreOption = { id: string; name: string };
@@ -25,6 +26,7 @@ export function StoreSelector({
   const params = useSearchParams();
   const { workspaceId } = useWorkspace();
   const current = params.get("store");
+  const portfolioActive = parsePortfolioParam(params.get("portfolio")) !== null;
   const [open, setOpen] = useState(false);
 
   const validStore =
@@ -53,9 +55,25 @@ export function StoreSelector({
     }
   }, [current, validStore, workspaceId, params, pathname, router]);
 
-  const currentName = validStore
-    ? (stores.find((s) => s.id === validStore)?.name ?? "Loja")
-    : "Todas as lojas";
+  const currentName = portfolioActive
+    ? "Multi-workspace"
+    : validStore
+      ? (stores.find((s) => s.id === validStore)?.name ?? "Loja")
+      : "Todas as lojas";
+
+  if (portfolioActive) {
+    return (
+      <div
+        className={cn("relative", className)}
+        title="Métricas de vários workspaces — filtro por loja indisponível"
+      >
+        <div className="flex w-full min-w-0 cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-sm text-muted-foreground sm:gap-2 sm:px-3 sm:py-2">
+          <StoreIcon className="h-4 w-4 shrink-0 opacity-60" />
+          <span className="min-w-0 flex-1 truncate text-left">{currentName}</span>
+        </div>
+      </div>
+    );
+  }
 
   function select(id: string | null) {
     const next = new URLSearchParams(params.toString());

@@ -3,10 +3,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Megaphone, Boxes } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
+import { canAccessStore } from "@/lib/store-access";
 import { buildWorkspacePnl } from "@/lib/metrics";
+import { buildWorkspaceTreasury } from "@/lib/treasury";
 import { scopeQueryFromInput } from "@/lib/scope-query";
 import { formatCurrency, formatPercent } from "@/lib/utils";
+import { formatProfitBreakdown } from "@/lib/profit";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
+import { StoreCashFlowSection } from "@/components/financas/store-cash-flow";
 
 export const metadata: Metadata = { title: "Lucro & Finanças" };
 export const dynamic = "force-dynamic";
@@ -23,12 +27,21 @@ export default async function FinancasPage({
   }>;
 }) {
   const user = await getCurrentUser();
+  if (!user) redirect("/login");
   const { store: storeId, period, from, to, dates } = await searchParams;
+  if (storeId && !canAccessStore(user.storeAccess, storeId)) {
+    redirect("/financas");
+  }
   const pnl = await buildWorkspacePnl(
-    user?.workspaceId ?? "",
+    user.workspaceId,
     { period, from, to, dates },
     storeId,
+    user.storeAccess,
   );
+  const treasury = storeId
+    ? await buildWorkspaceTreasury(user.workspaceId, storeId, user.storeAccess)
+    : null;
+  const storeCash = treasury?.stores[0] ?? null;
   const { totals, stores, currency } = pnl;
   const scopeName =
     storeId && stores.length > 0 ? stores[0].name : null;
@@ -36,18 +49,37 @@ export default async function FinancasPage({
   const money = (v: number) => formatCurrency(v, currency);
   const pct = (v: number) => (totals.revenue > 0 ? formatPercent((v / totals.revenue) * 100) : "—");
   const profitDisplay = money(totals.netProfit);
-  const profitTitle = pnl.cogsIncomplete
-    ? `${profitDisplay} — COGS em falta em ${pnl.missingCogsCount} ${pnl.missingCogsCount === 1 ? "produto" : "produtos"} neste período (lucro pode estar superestimado)`
-    : undefined;
+  const profitTitle = formatProfitBreakdown(
+    totals,
+    totals.adSpend,
+    money,
+    pnl.cogsIncomplete
+      ? {
+          note: `COGS em falta em ${pnl.missingCogsCount} ${pnl.missingCogsCount === 1 ? "produto" : "produtos"}`,
+        }
+      : undefined,
+  );
 
-  const lines = [
-    { label: "Receita", value: totals.revenue, tone: "" },
+  const lines: Array<{
+    label: string;
+    value: number;
+    tone: string;
+    share?: number;
+  }> = [
+    { label: "Receita líquida", value: totals.revenue, tone: "" },
     { label: "COGS", value: -totals.cogs, tone: "text-negative", share: totals.cogs },
     { label: "Envio", value: -totals.shipping, tone: "text-negative", share: totals.shipping },
     { label: "Taxas de transação", value: -totals.fees, tone: "text-negative", share: totals.fees },
     { label: "Ad Spend", value: -totals.adSpend, tone: "text-negative", share: totals.adSpend },
-    { label: "Reembolsos", value: -totals.refunds, tone: "text-negative", share: totals.refunds },
   ];
+  if (totals.refunds > 0) {
+    lines.push({
+      label: "Reembolsos (já na receita)",
+      value: totals.refunds,
+      tone: "text-muted-foreground",
+      share: totals.refunds,
+    });
+  }
 
   const scopeQs = scopeQueryFromInput({ period, from, to, dates, store: storeId });
   const cogsHref = scopeQs ? `/cogs?${scopeQs}` : "/cogs";
@@ -68,7 +100,7 @@ export default async function FinancasPage({
         </h1>
         <p className="text-sm text-muted-foreground">
           {scopeName
-            ? `P&L da loja · ${pnl.periodLabel}.`
+            ? `Caixa acumulada e P&L do período · ${pnl.periodLabel}.`
             : `P&L real · ${pnl.periodLabel}.`}
         </p>
         </div>
@@ -98,6 +130,18 @@ export default async function FinancasPage({
         adsHref={adsHref}
       />
 
+      {storeCash && <StoreCashFlowSection cash={storeCash} />}
+
+      <div>
+        <h2 className="text-lg font-semibold">
+          {scopeName ? "Lucro do período" : "Resumo do período"}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Métricas do intervalo seleccionado na topbar — independente do saldo
+          acumulado acima.
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="rounded-lg border border-border bg-surface p-5">
           <p className="text-[13px] font-medium text-muted-foreground">Receita</p>
@@ -108,7 +152,7 @@ export default async function FinancasPage({
         <div className="rounded-lg border border-border bg-surface p-5">
           <p className="text-[13px] font-medium text-muted-foreground">Custos totais</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums" data-sensitive>
-            {money(totals.cogs + totals.shipping + totals.fees + totals.refunds + totals.adSpend)}
+            {money(totals.cogs + totals.shipping + totals.fees + totals.adSpend)}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-5">

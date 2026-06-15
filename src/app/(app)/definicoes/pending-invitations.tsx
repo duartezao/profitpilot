@@ -83,14 +83,18 @@ function InviteCard({ invite }: { invite: PendingInvitationView }) {
 
 export function PendingInvitations({
   invitations,
+  embedded = false,
 }: {
   invitations: PendingInvitationView[];
+  embedded?: boolean;
 }) {
   if (!invitations.length) return null;
 
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Convites pendentes</h2>
+      {!embedded && (
+        <h2 className="text-lg font-semibold">Convites pendentes</h2>
+      )}
       <div className="space-y-3">
         {invitations.map((inv) => (
           <InviteCard key={inv.id} invite={inv} />

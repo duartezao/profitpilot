@@ -4,11 +4,14 @@ import { cn } from "@/lib/utils";
 export function Sparkline({
   data,
   className,
+  color,
   width = 96,
   height = 28,
 }: {
   data: number[];
   className?: string;
+  /** Cor da linha (hex). Por defeito accent. */
+  color?: string;
   width?: number;
   height?: number;
 }) {
@@ -33,12 +36,12 @@ export function Sparkline({
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       fill="none"
-      className={cn("text-accent", className)}
+      className={cn(!color && "text-accent", className)}
       preserveAspectRatio="none"
     >
       <polyline
         points={points}
-        stroke="currentColor"
+        stroke={color ?? "currentColor"}
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"

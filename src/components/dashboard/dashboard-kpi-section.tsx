@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Sensitive } from "@/components/privacy-mode";
 import type { SummaryKpi } from "@/lib/metrics";
 import { DashboardKpiCard } from "@/components/dashboard/dashboard-kpi-card";
 
@@ -13,16 +12,20 @@ export function DashboardKpiSection({
   funnelError,
   sessionCountryLabel,
   variant = "store",
+  showExtended,
 }: {
   kpis: SummaryKpi[];
   extendedKpis?: SummaryKpi[];
   funnelError?: string | null;
   sessionCountryLabel?: string | null;
   variant?: "store" | "workspace";
+  /** Mostrar painel «Ver mais métricas» (ex. página /metricas) */
+  showExtended?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isStore = variant === "store";
-  const hasMore = !isStore && extendedKpis.length > 0;
+  const hasMore =
+    extendedKpis.length > 0 && (showExtended ?? !isStore);
 
   const primaryCols = isStore
     ? "grid-cols-2 lg:grid-cols-4"
@@ -33,7 +36,7 @@ export function DashboardKpiSection({
 
   return (
     <div className="space-y-4">
-      {!isStore && (
+      {!isStore ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
             KPIs principais do período
@@ -58,7 +61,27 @@ export function DashboardKpiSection({
             </button>
           )}
         </div>
-      )}
+      ) : hasMore ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          >
+            {open ? (
+              <>
+                <ChevronUp className="h-4 w-4" />
+                Ver menos
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-4 w-4" />
+                Ver mais métricas
+              </>
+            )}
+          </button>
+        </div>
+      ) : null}
 
       <div className={cn("grid gap-3 sm:gap-4", primaryCols)}>
         {kpis.map((k) => (
@@ -80,9 +103,12 @@ export function DashboardKpiSection({
               </p>
             </div>
             {sessionCountryLabel && (
-              <div className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-muted-foreground">
-                <Globe className="h-3.5 w-3.5" />
-                <Sensitive>Sessões: {sessionCountryLabel}</Sensitive>
+              <div
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-muted-foreground"
+                data-sensitive
+              >
+                <Globe className="h-3.5 w-3.5 shrink-0" />
+                Sessões: {sessionCountryLabel}
               </div>
             )}
           </div>

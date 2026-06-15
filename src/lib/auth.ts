@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import mongoose from "mongoose";
 import { cookies } from "next/headers";
 import { createHash, randomBytes } from "node:crypto";
@@ -228,7 +229,7 @@ export type CurrentUser = {
 };
 
 /** Devolve o utilizador da sessão atual, ou null. */
-export async function getCurrentUser(): Promise<CurrentUser | null> {
+export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -271,6 +272,8 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     ? await Workspace.findById(membership.workspaceId)
     : null;
 
+  if (!membership || !workspace) return null;
+
   return {
     id: String(user._id),
     name: user.name,
@@ -281,7 +284,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     role: membership?.role ?? "viewer",
     storeAccess: normalizeStoreAccess(membership?.storeAccess ?? "all"),
   };
-}
+});
 
 export async function logout() {
   const cookieStore = await cookies();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { Briefcase, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
 import {
@@ -28,6 +29,7 @@ export function WorkspaceSelector({
 }) {
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
@@ -40,6 +42,10 @@ export function WorkspaceSelector({
   const current = workspaces.find((w) => w.id === currentId);
   const itemCls =
     "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted disabled:opacity-60";
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -89,8 +95,84 @@ export function WorkspaceSelector({
     void pickWorkspace(workspaceId);
   }
 
+  const menuBody = (
+    <>
+      <p className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+        Workspaces
+      </p>
+      {switchError && (
+        <p className="px-2.5 py-1 text-xs text-negative">{switchError}</p>
+      )}
+      {workspaces.map((w) => (
+        <button
+          key={w.id}
+          type="button"
+          disabled={switchingId !== null}
+          className={itemCls}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => selectWorkspace(w.id)}
+        >
+          <Sensitive className="min-w-0 truncate">
+            {w.name}
+            {w.role !== "owner" && (
+              <span className="text-xs text-muted-foreground">
+                {" "}
+                · partilhado
+              </span>
+            )}
+          </Sensitive>
+          {w.id === currentId && (
+            <Check className="h-4 w-4 shrink-0 text-accent" />
+          )}
+        </button>
+      ))}
+
+      <div className="my-1 border-t border-border" />
+
+      <a
+        href="/definicoes#meus-workspaces"
+        className={`${itemCls} text-muted-foreground`}
+        onClick={() => setOpen(false)}
+      >
+        Gerir workspaces…
+      </a>
+
+      {!showCreate ? (
+        <button
+          type="button"
+          className={`${itemCls} text-accent`}
+          onClick={() => setShowCreate(true)}
+        >
+          <span className="flex items-center gap-2">
+            <Plus className="h-4 w-4" />
+            Novo workspace
+          </span>
+        </button>
+      ) : (
+        <form action={createAction} className="space-y-2 p-2">
+          {createState.error && (
+            <p className="text-xs text-negative">{createState.error}</p>
+          )}
+          <input
+            name="name"
+            placeholder="Nome do workspace"
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
+            required
+          />
+          <button
+            type="submit"
+            disabled={creating}
+            className="w-full rounded-md bg-accent px-2 py-1.5 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
+          >
+            {creating ? "A criar…" : "Criar"}
+          </button>
+        </form>
+      )}
+    </>
+  );
+
   return (
-    <div className={cn("relative z-50", className)}>
+    <div className={cn("relative", className)}>
       <button
         type="button"
         onClick={() => {
@@ -112,85 +194,40 @@ export function WorkspaceSelector({
 
       {open && (
         <>
+          {mounted &&
+            createPortal(
+              <>
+                <div
+                  className="fixed inset-0 z-[9998] bg-background md:hidden"
+                  onClick={() => setOpen(false)}
+                  aria-hidden
+                />
+                <div
+                  className="fixed inset-x-3 top-[3.25rem] z-[9999] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-none md:hidden"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {menuBody}
+                </div>
+              </>,
+              document.body,
+            )}
+
           <div
-            className="fixed inset-0 z-[200] bg-background/80 backdrop-blur-[1px] md:bg-black/20 md:dark:bg-black/40"
+            className="fixed inset-0 z-[200] hidden bg-black/20 dark:bg-black/40 md:block"
             onClick={() => setOpen(false)}
             aria-hidden
           />
           <div
             className={cn(
-              "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1",
-              "max-md:fixed max-md:inset-x-3 max-md:top-[3.25rem]",
+              "z-[210] hidden max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 md:block",
               menuPlacement === "top"
-                ? "md:absolute md:inset-x-auto md:bottom-full md:top-auto md:mb-1"
-                : "md:absolute md:inset-x-auto md:top-full md:mt-1",
-              "md:left-0 md:w-full md:min-w-[16rem]",
+                ? "absolute inset-x-auto bottom-full top-auto mb-1"
+                : "absolute inset-x-auto top-full mt-1",
+              "left-0 w-full min-w-[16rem]",
             )}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <p className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
-              Workspaces
-            </p>
-            {switchError && (
-              <p className="px-2.5 py-1 text-xs text-negative">{switchError}</p>
-            )}
-            {workspaces.map((w) => (
-              <button
-                key={w.id}
-                type="button"
-                disabled={switchingId !== null}
-                className={itemCls}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => selectWorkspace(w.id)}
-              >
-                <Sensitive className="min-w-0 truncate">
-                  {w.name}
-                  {w.role !== "owner" && (
-                    <span className="text-xs text-muted-foreground">
-                      {" "}
-                      · partilhado
-                    </span>
-                  )}
-                </Sensitive>
-                {w.id === currentId && (
-                  <Check className="h-4 w-4 shrink-0 text-accent" />
-                )}
-              </button>
-            ))}
-
-            <div className="my-1 border-t border-border" />
-
-            {!showCreate ? (
-              <button
-                type="button"
-                className={`${itemCls} text-accent`}
-                onClick={() => setShowCreate(true)}
-              >
-                <span className="flex items-center gap-2">
-                  <Plus className="h-4 w-4" />
-                  Novo workspace
-                </span>
-              </button>
-            ) : (
-              <form action={createAction} className="space-y-2 p-2">
-                {createState.error && (
-                  <p className="text-xs text-negative">{createState.error}</p>
-                )}
-                <input
-                  name="name"
-                  placeholder="Nome do workspace"
-                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
-                  required
-                />
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="w-full rounded-md bg-accent px-2 py-1.5 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
-                >
-                  {creating ? "A criar…" : "Criar"}
-                </button>
-              </form>
-            )}
+            {menuBody}
           </div>
         </>
       )}

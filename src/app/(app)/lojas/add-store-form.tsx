@@ -3,6 +3,11 @@
 import { useActionState, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { addStoreAction, type AddStoreState } from "./actions";
+import {
+  COGS_MODES,
+  COGS_MODE_LABELS,
+  COGS_INPUT_CURRENCIES,
+} from "@/lib/cogs-modes";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
@@ -88,6 +93,7 @@ export function AddStoreForm({
               name="workspaceId"
               defaultValue={defaultWorkspaceId}
               className={inputCls}
+              data-sensitive
             >
               {workspaces.map((w) => (
                 <option key={w.id} value={w.id}>{w.name}</option>
@@ -143,6 +149,7 @@ export function AddStoreForm({
             autoComplete="off"
             className={inputCls}
             placeholder="64fe8f4a30c5b875e4af396c21cba81b"
+            data-sensitive
           />
         </div>
 
@@ -155,6 +162,7 @@ export function AddStoreForm({
             autoComplete="off"
             className={inputCls}
             placeholder="shpss_…"
+            data-sensitive
           />
           <p className="mt-1 text-xs text-muted-foreground">
             Geramos um token de acesso automaticamente (válido ~24h, renovado em
@@ -171,6 +179,41 @@ export function AddStoreForm({
           <p className="mt-1 text-xs text-muted-foreground">
             Deixa vazio para importar o histórico disponível.
           </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>Como vais preencher o COGS?</label>
+            <select name="cogsMode" defaultValue="shopify" className={inputCls}>
+              {COGS_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {COGS_MODE_LABELS[m]}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Por encomenda ou por dia: o top produtos na dashboard passa a ser por
+              unidades vendidas.
+            </p>
+          </div>
+          <div>
+            <label className={labelCls}>Moeda de entrada do COGS</label>
+            <select
+              name="cogsInputCurrency"
+              defaultValue="EUR"
+              className={inputCls}
+            >
+              {COGS_INPUT_CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Se USD, converte para EUR na dashboard. Lojas não-EUR também são
+              convertidas automaticamente.
+            </p>
+          </div>
         </div>
 
         <button

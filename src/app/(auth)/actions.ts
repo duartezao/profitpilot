@@ -9,12 +9,20 @@ import {
 
 export type AuthState = { error?: string };
 
+function safeRedirectPath(next: string | null | undefined): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//")) {
+    return "/dashboard";
+  }
+  return next;
+}
+
 export async function loginAction(
   _prev: AuthState,
   formData: FormData,
 ): Promise<AuthState> {
   const identifier = String(formData.get("identifier") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const next = safeRedirectPath(String(formData.get("next") ?? ""));
 
   const idError = validateLoginIdentifier(identifier);
   if (idError) return { error: idError };
@@ -28,7 +36,7 @@ export async function loginAction(
     return { error: e instanceof Error ? e.message : "Não foi possível entrar." };
   }
 
-  redirect("/dashboard");
+  redirect(next);
 }
 
 export async function registerAction(
