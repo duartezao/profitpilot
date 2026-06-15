@@ -1013,6 +1013,7 @@ function emptySummary(currency = "EUR"): DashboardSummary {
     missingAdSpendDays: 0,
     profitChart: [],
     dailyMetrics: [],
+    extendedKpis: [],
   };
 }
 
@@ -1324,6 +1325,17 @@ export async function buildWorkspaceSummary(
             : "—",
       },
     ];
+    const curAll = await aggregateOrders(currentSlice);
+    const prevAll = await aggregateOrders(prevSlice);
+    extendedKpis = buildExtendedWorkspaceKpis(
+      curAll,
+      prevAll,
+      adSpend,
+      prevAdSpend,
+      deltaSuffix,
+      money,
+      fmtMoney,
+    );
   }
 
   const profitChart = await buildDailyProfitSeries(
@@ -1475,6 +1487,19 @@ export async function buildWorkspaceSummary(
       funnelError = `${funnelCur.error} (${sessionErr})`;
     }
 
+    const prevForExtended = await aggregateOrders(prevSlice, scoped._id);
+    extendedKpis = buildExtendedStoreKpis(
+      cur,
+      prevForExtended,
+      curAdSpend,
+      prevAdSpend,
+      funnelCur,
+      funnelPrev,
+      deltaSuffix,
+      money,
+      fmtMoney,
+    );
+
     storeDashboard = {
       waterfall,
       payout: {
@@ -1512,6 +1537,7 @@ export async function buildWorkspaceSummary(
     missingAdSpendDays,
     profitChart,
     dailyMetrics,
+    extendedKpis,
     generatedAt: new Date().toISOString(),
   };
 }

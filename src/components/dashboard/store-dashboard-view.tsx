@@ -2,7 +2,7 @@ import { Calendar, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import type { DashboardSummary } from "@/lib/metrics";
-import { StoreKpiCard } from "@/components/dashboard/store-kpi-card";
+import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
 import { WaterfallChart } from "@/components/dashboard/waterfall-chart";
 import { PayoutPreviewCard } from "@/components/dashboard/payout-preview-card";
 import { StoreDailyNotes } from "@/components/dashboard/store-daily-notes";
@@ -13,11 +13,13 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
-        {data.kpis.map((k) => (
-          <StoreKpiCard key={k.label} {...k} />
-        ))}
-      </div>
+      <DashboardKpiSection
+        kpis={data.kpis}
+        extendedKpis={data.extendedKpis}
+        funnelError={dashboard?.funnelError}
+        sessionCountryLabel={dashboard?.sessionCountryLabel}
+        variant="store"
+      />
 
       {dashboard && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
