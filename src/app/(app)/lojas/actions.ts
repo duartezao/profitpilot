@@ -26,6 +26,9 @@ import {
   isCogsInputCurrency,
   isCogsMode,
 } from "@/lib/cogs-modes";
+import { normalizeFeeConfig, type FeeScheduleEntry } from "@/lib/fee-schedule";
+import { dateKeyInTimezone, normalizeStoreTimezone } from "@/lib/store-timezone";
+import { parseDateInput } from "@/lib/period";
 
 export type AddStoreState = { error?: string };
 export type SyncState = { ok?: boolean; message?: string; error?: string };
@@ -49,7 +52,13 @@ const schema = z.object({
     ),
   clientId: z.string().trim().min(1, "Cola o ID de cliente (Client ID)."),
   clientSecret: z.string().trim().min(1, "Cola a Chave secreta (Client secret)."),
-  importStartDate: z.string().trim().optional(),
+  importStartDate: z
+    .string()
+    .trim()
+    .min(1, "Indica desde que dia queres importar dados."),
+  processingPercent: z.coerce.number().min(0).max(100),
+  processingFixed: z.coerce.number().min(0),
+  transactionFeePercent: z.coerce.number().min(0).max(100),
   workspaceId: z.string().trim().optional(),
   cogsMode: z.enum(COGS_MODES).optional(),
   cogsInputCurrency: z.enum(["EUR", "USD"]).optional(),
@@ -72,6 +81,9 @@ export async function addStoreAction(
     clientId: formData.get("clientId"),
     clientSecret: formData.get("clientSecret"),
     importStartDate: formData.get("importStartDate") ?? "",
+    processingPercent: formData.get("processingPercent"),
+    processingFixed: formData.get("processingFixed"),
+    transactionFeePercent: formData.get("transactionFeePercent"),
     workspaceId: formData.get("workspaceId") ?? "",
     cogsMode: String(formData.get("cogsMode") ?? ""),
     cogsInputCurrency: String(formData.get("cogsInputCurrency") ?? ""),
@@ -81,8 +93,17 @@ export async function addStoreAction(
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
 
-  const { name, shopDomain, displayUrl, clientId, clientSecret, importStartDate } =
-    parsed.data;
+  const {
+    name,
+    shopDomain,
+    displayUrl,
+    clientId,
+    clientSecret,
+    importStartDate,
+    processingPercent,
+    processingFixed,
+    transactionFeePercent,
+  } = parsed.data;
   const cogsMode = isCogsMode(parsed.data.cogsMode ?? "")
     ? parsed.data.cogsMode
     : defaultCogsMode();
@@ -91,6 +112,16 @@ export async function addStoreAction(
   )
     ? parsed.data.cogsInputCurrency
     : defaultCogsInputCurrency();
+
+  const importDay = parseDateInput(importStartDate);
+  if (!importDay) {
+    return { error: "Data de importação inválida." };
+  }
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  if (importDay > today) {
+    return { error: "A data de importação não pode ser no futuro." };
+  }
 
   // Obtém um token (client credentials) e testa a ligação antes de guardar.
   let shop;
@@ -133,6 +164,17 @@ export async function addStoreAction(
     return { error: "Sem permissão para adicionar lojas a este workspace." };
   }
 
+  const tz = normalizeStoreTimezone(shop.ianaTimezone);
+  const floorKey = dateKeyInTimezone(importDay, tz);
+  const feeConfig = normalizeFeeConfig({
+    processingPercent,
+    processingFixed,
+    transactionFeePercent,
+  });
+  const feeSchedule: FeeScheduleEntry[] = [
+    { effectiveFromKey: floorKey, ...feeConfig },
+  ];
+
   await Store.create({
     workspaceId: targetWorkspaceId,
     name,
@@ -143,8 +185,10 @@ export async function addStoreAction(
     cogsMode,
     cogsInputCurrency,
     credentials,
-    importStartDate: importStartDate ? new Date(importStartDate) : undefined,
+    importStartDate: importDay,
     ianaTimezone: shop.ianaTimezone || undefined,
+    feeConfig,
+    feeSchedule,
     status: "active",
   });
 

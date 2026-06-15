@@ -154,6 +154,8 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * Desativar loja (mantém dados, pausa sincronização)
 * Reativar loja
 * **Arquivar loja** (remove do seletor e das métricas consolidadas; histórico mantém-se — reativa em Definições → Lojas para voltar a contar)
+* **Reconfigurar importação** (Definições → Lojas): altera data de início e taxas iniciais, recalcula taxas nas encomendas já importadas, opcionalmente remove orders anteriores à nova data — **sem apagar a loja**
+* **Apagar loja permanentemente** (owner/admin): remove loja e todos os dados na BD (orders, ad spend, COGS, notas, payouts, etc.) — confirmação com nome da loja
 * **Agrupar lojas** por marca/nicho/país (ex.: "Lojas PT", "Lojas Pet")
 * **Definir moeda base** por workspace para consolidar tudo numa única moeda
 
@@ -174,6 +176,7 @@ Futuro:
 * **Webhooks** para eventos em tempo real (`orders/create`, `orders/updated`, `refunds/create`, `products/update`)
 * **Sincronização inicial histórica** ao adicionar uma loja — com opção de escolher o **dia de início** (importar tudo o disponível **ou** apenas a partir de uma data X, ex.: "só desde 01/01/2026")
 * **Sincronização incremental** agendada — **um único pedido Vercel Cron de 4 em 4 horas** (`/api/cron/sync`) sincroniza em lote todas as lojas ativas de todos os workspaces (orders, payouts, **sessões/funil Shopify**). Dias históricos de sessões ficam na BD (gzip); só dias em falta ou o dia atual voltam a ser pedidos à Shopify. Em dev local, `instrumentation.ts` só corre fora da Vercel.
+* **Sync manual** (`Sincronizar agora` em `/lojas`) — em passos via `POST /api/stores/[storeId]/sync` (50 encomendas por pedido) com **barra de progresso** e cancelar; evita timeout/crash em imports grandes. Estado intermédio em `store.syncState`.
 * Estado de sincronização visível por loja (última sync, erros, atraso)
 
 ### Ligação à Shopify — Client ID + Chave secreta (Client Credentials Grant)
@@ -233,7 +236,7 @@ Futuro:
 
 **Na app:**
 
-* Campos: **Domínio**, **Client ID (ID de cliente)**, **Chave secreta (Client secret)**.
+* Campos: **Domínio**, **Client ID**, **Chave secreta**, **Data de importação** (obrigatória — desde que dia queres orders/métricas), **Taxas** (% processamento, fixo/encomenda, % taxa de transação — aplicam-se a todas as encomendas desde essa data; calendário `feeSchedule` criado no setup).
 * Botão **"Testar ligação"** antes de guardar (feedback verde/vermelho com o motivo do erro).
 * Após ligar: barra de progresso do **import histórico** e estado de cada permissão (verde = ok, vermelho = scope em falta com instrução de como corrigir).
 
@@ -1226,7 +1229,7 @@ Lucro após taxas =
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
 * `paymentsBalance` / `paymentsBalanceUpdatedAt` (saldo Shopify Payments ainda por pagar)
 * `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — intervalo automático **global** 4 h (`GLOBAL_SYNC_INTERVAL_MINUTES`, `vercel.json` cron); `syncIntervalMinutes` legado na BD
-* `lastSyncAt`
+* `syncState` — progresso do sync manual em passos (`status`, `phase`, `progress`, `orderCursor`, contagens, `message`)
 * `createdAt`
 * `deletedAt`
 

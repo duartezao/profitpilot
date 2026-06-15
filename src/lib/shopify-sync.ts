@@ -1,5 +1,6 @@
 import "server-only";
 import type { AnyBulkWriteOperation } from "mongoose";
+import type { HydratedDocument } from "mongoose";
 import { orderNetRevenue } from "@/lib/order-revenue";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
 import {
@@ -92,7 +93,7 @@ function normPayoutStatus(s?: string | null) {
 }
 
 /** Importa/atualiza o custo por variante (COGS) de todas as variantes. */
-async function syncProductCosts(
+export async function syncProductCosts(
   store: StoreDoc,
   domain: string,
   token: string,
@@ -203,12 +204,19 @@ async function syncProductCosts(
   return { count, changedVariantIds };
 }
 
-/** Importa orders (com COGS por linha e taxas estimadas pelo calendário de taxas). */
-async function syncOrders(
+export type OrdersPageResult = {
+  imported: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+/** Uma página de encomendas (50) — para sync em passos sem timeout. */
+export async function syncOrdersPage(
   store: StoreDoc,
   domain: string,
   token: string,
-): Promise<number> {
+  cursor: string | null,
+): Promise<OrdersPageResult> {
   const resolveCost = await loadCostResolverForStore(store._id);
   const workspace = await Workspace.findById(store.workspaceId)
     .select("baseCurrency")
@@ -289,16 +297,11 @@ async function syncOrders(
     };
   };
 
-  let cursor: string | null = null;
-  let count = 0;
-
-  // Até 40 páginas (2000 orders) por execução.
-  for (let page = 0; page < 40; page++) {
-    const data: Resp = await shopifyGraphQL<Resp>(domain, token, query, {
-      cursor,
-      q: searchQuery,
-    });
-    const conn = data.orders;
+  const data: Resp = await shopifyGraphQL<Resp>(domain, token, query, {
+    cursor,
+    q: searchQuery,
+  });
+  const conn = data.orders;
 
     // Custos já registados nestas encomendas (snapshot imutável do passado).
     const ids = conn.nodes.map((o) => o.id);
@@ -424,13 +427,33 @@ async function syncOrders(
       });
     }
 
-    if (ops.length) {
-      await Order.bulkWrite(ops as AnyBulkWriteOperation[], { ordered: false });
-      count += ops.length;
-    }
+  let imported = 0;
+  if (ops.length) {
+    await Order.bulkWrite(ops as AnyBulkWriteOperation[], { ordered: false });
+    imported = ops.length;
+  }
 
-    if (!conn.pageInfo.hasNextPage) break;
-    cursor = conn.pageInfo.endCursor;
+  return {
+    imported,
+    nextCursor: conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null,
+    hasMore: conn.pageInfo.hasNextPage,
+  };
+}
+
+/** Importa orders (com COGS por linha e taxas estimadas pelo calendário de taxas). */
+async function syncOrders(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+): Promise<number> {
+  let cursor: string | null = null;
+  let count = 0;
+
+  for (let page = 0; page < 200; page++) {
+    const result = await syncOrdersPage(store, domain, token, cursor);
+    count += result.imported;
+    if (!result.hasMore) break;
+    cursor = result.nextCursor;
   }
 
   await backfillOrderNetRevenueForStore(store._id);
@@ -443,7 +466,7 @@ async function syncOrders(
  * Tolerante a falhas: se a loja não usar Shopify Payments ou faltar o scope,
  * devolve 0 sem quebrar o resto da sincronização.
  */
-async function syncPayouts(
+export async function syncPayouts(
   store: StoreDoc,
   domain: string,
   token: string,
@@ -585,7 +608,7 @@ const INCOMING_BT_STATUSES = new Set(["pending"]);
  * Importa balance transactions ainda não pagas (pending, scheduled, in transit)
  * para agregar "a caminho" por dia na tesouraria.
  */
-async function syncIncomingBalanceTransactions(
+export async function syncIncomingBalanceTransactions(
   store: StoreDoc,
   domain: string,
   token: string,
@@ -706,8 +729,12 @@ export type SyncResult = {
   sessionMetricsError?: string;
 };
 
-/** Sincroniza uma loja: custos de produtos + orders. */
-export async function syncStore(storeId: string): Promise<SyncResult> {
+/** Token Shopify fresco + domínio normalizado para uma loja. */
+export async function prepareShopifySyncContext(storeId: string): Promise<{
+  store: HydratedDocument<StoreDoc>;
+  domain: string;
+  accessToken: string;
+}> {
   await connectToDatabase();
   const store = await Store.findById(storeId);
   if (!store) throw new Error("Loja não encontrada.");
@@ -718,7 +745,6 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   const creds = getStoreCredentials(store);
   const domain = normalizeShopDomain(store.shopDomain ?? "");
 
-  // Token fresco (client credentials) — válido ~24h, pedido a cada sync.
   const { accessToken, scope: tokenScope } = await getClientCredentialsToken(
     domain,
     creds.clientId,
@@ -737,6 +763,13 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   } catch {
     /* sync continua se o ping da shop falhar */
   }
+
+  return { store, domain, accessToken };
+}
+
+/** Sincroniza uma loja: custos de produtos + orders. */
+export async function syncStore(storeId: string): Promise<SyncResult> {
+  const { store, domain, accessToken } = await prepareShopifySyncContext(storeId);
 
   const { count: products } = await syncProductCosts(store, domain, accessToken);
   const cogsMode = store.cogsMode ?? "shopify";
