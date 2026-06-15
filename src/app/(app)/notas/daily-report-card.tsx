@@ -8,10 +8,13 @@ export function DailyReportCard({
   reportText,
   storeName,
   dateLabel,
+  compact = false,
 }: {
   reportText: string;
   storeName: string;
   dateLabel: string;
+  /** Sem cabeçalho duplicado — usado dentro do painel colapsável */
+  compact?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -26,20 +29,35 @@ export function DailyReportCard({
   }
 
   return (
-    <div className="space-y-3 rounded-lg border border-border bg-surface p-5">
+    <div
+      className={
+        compact
+          ? "space-y-3"
+          : "space-y-3 rounded-lg border border-border bg-surface p-5"
+      }
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            Relatório diário
-          </h2>
+        {!compact && (
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              Relatório diário
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              <Sensitive>
+                {storeName} · {dateLabel}
+              </Sensitive>{" "}
+              — pronto a copiar.
+            </p>
+          </div>
+        )}
+        {compact && (
           <p className="text-sm text-muted-foreground">
             <Sensitive>
               {storeName} · {dateLabel}
-            </Sensitive>{" "}
-            — pronto a copiar.
+            </Sensitive>
           </p>
-        </div>
+        )}
         <button
           type="button"
           onClick={copy}

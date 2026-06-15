@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { getCurrentUser } from "@/lib/auth";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { DailyNote } from "@/models/DailyNote";
 import { storeQueryForUser } from "@/lib/store-scope";
 import { canAccessStore } from "@/lib/store-access";
-import { buildDailyReportText } from "@/lib/daily-report";
-import { formatDateInput, addDays, startOfDay } from "@/lib/period";
+import { formatDateInput } from "@/lib/period";
 import { DailyNoteForm } from "./daily-note-form";
-import { DailyReportCard } from "./daily-report-card";
+import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
 
 export const metadata: Metadata = { title: "Notas & Relatórios" };
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ export default async function NotasPage({
 }) {
   const user = await getCurrentUser();
   if (!user) return null;
-  const { store: storeId, date: dateParam } = await searchParams;
+  const { store: storeId } = await searchParams;
   await connectToDatabase();
 
   const stores = await Store.find(storeQueryForUser(user))
@@ -40,20 +40,6 @@ export default async function NotasPage({
       ? stores.find((s) => String(s._id) === storeId)
       : null;
   const scopeName = scoped?.name ?? null;
-
-  const reportDateKey =
-    dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
-      ? dateParam
-      : formatDateInput(addDays(startOfDay(new Date()), -1));
-
-  const dailyReport =
-    scoped &&
-    (await buildDailyReportText({
-      workspaceId: user.workspaceId,
-      storeId: String(scoped._id),
-      dateKey: reportDateKey,
-      storeAccess: user.storeAccess,
-    }));
 
   const noteQuery: Record<string, unknown> = {
     workspaceId: user.workspaceId,
@@ -76,11 +62,6 @@ export default async function NotasPage({
 
   const today = formatDateInput(new Date());
   const canEdit = ["owner", "admin", "editor"].includes(user.role);
-
-  const reportDateLabel = reportDateKey
-    .split("-")
-    .reverse()
-    .join("/");
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -117,12 +98,10 @@ export default async function NotasPage({
         </div>
       )}
 
-      {dailyReport && (
-        <DailyReportCard
-          reportText={dailyReport.text}
-          storeName={dailyReport.storeName}
-          dateLabel={reportDateLabel}
-        />
+      {scoped && (
+        <Suspense fallback={<div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />}>
+          <DailyReportPanel storeId={String(scoped._id)} />
+        </Suspense>
       )}
 
       <DailyNoteForm

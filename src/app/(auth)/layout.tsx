@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { AppLogo } from "@/components/app-logo";
 
 export default async function AuthLayout({
   children,
@@ -13,12 +14,8 @@ export default async function AuthLayout({
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted p-4">
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center justify-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/icon.svg" alt="" className="h-7 w-7 rounded" />
-          <span className="text-lg font-semibold tracking-tight">
-            Profit<span className="text-accent">Pilot</span>
-          </span>
+        <div className="mb-6 flex items-center justify-center">
+          <AppLogo className="text-lg" />
         </div>
         <div className="rounded-lg border border-border bg-surface p-6">
           {children}

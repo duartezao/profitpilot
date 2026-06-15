@@ -18,6 +18,11 @@ export const metadata: Metadata = {
     "Gestão e análise de lucro real de múltiplas lojas de dropshipping.",
   applicationName: "ProfitPilot",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: ["/icon.svg"],
+  },
   appleWebApp: {
     capable: true,
     title: "ProfitPilot",

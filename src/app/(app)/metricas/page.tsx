@@ -10,11 +10,9 @@ export const dynamic = "force-dynamic";
 
 function ReportSection({ storeId }: { storeId: string }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-5">
-      <Suspense fallback={<div className="h-32 animate-pulse rounded-lg bg-muted" />}>
-        <DailyReportPanel storeId={storeId} />
-      </Suspense>
-    </div>
+    <Suspense fallback={<div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />}>
+      <DailyReportPanel storeId={storeId} />
+    </Suspense>
   );
 }
 

@@ -27,7 +27,8 @@ export function blobToBuffer(blob: unknown): Buffer {
       value?: (encoding?: string) => Buffer;
     };
     if (o._bsontype === "Binary" && o.buffer) {
-      return Buffer.from(o.buffer);
+      const b = o.buffer;
+      return Buffer.from(b instanceof ArrayBuffer ? new Uint8Array(b) : b);
     }
     if (typeof o.value === "function") {
       try {
@@ -37,7 +38,8 @@ export function blobToBuffer(blob: unknown): Buffer {
       }
     }
     if (o.buffer) {
-      return Buffer.from(o.buffer);
+      const b = o.buffer;
+      return Buffer.from(b instanceof ArrayBuffer ? new Uint8Array(b) : b);
     }
   }
   return Buffer.from(blob as ArrayBuffer);
