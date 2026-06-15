@@ -48,3 +48,37 @@ export function validateInviteIdentifier(identifier: string): string | null {
   if (isEmailLike(raw)) return validateEmail(raw);
   return validateUsername(raw);
 }
+
+export type RegistrationContact = {
+  username?: string;
+  email?: string;
+};
+
+/** Registo: pelo menos um de email ou utilizador. */
+export function parseRegistrationContact(
+  username: string,
+  email: string,
+): { ok: true; contact: RegistrationContact } | { ok: false; error: string } {
+  const uRaw = username.trim();
+  const eRaw = email.trim().toLowerCase();
+
+  if (!uRaw && !eRaw) {
+    return { ok: false, error: "Preenche o email ou o utilizador." };
+  }
+
+  const contact: RegistrationContact = {};
+
+  if (uRaw) {
+    const usernameError = validateUsername(uRaw);
+    if (usernameError) return { ok: false, error: usernameError };
+    contact.username = normalizeUsername(uRaw);
+  }
+
+  if (eRaw) {
+    const emailError = validateEmail(eRaw);
+    if (emailError) return { ok: false, error: emailError };
+    contact.email = eRaw;
+  }
+
+  return { ok: true, contact };
+}

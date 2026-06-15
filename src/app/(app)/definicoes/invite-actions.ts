@@ -76,7 +76,11 @@ export async function acceptInvitationAction(
   const invitationId = String(formData.get("invitationId") ?? "").trim();
   if (!invitationId) return { error: "Convite inválido." };
 
-  const result = await acceptInvitation(invitationId, user.id, user.email);
+  const result = await acceptInvitation(
+    invitationId,
+    user.id,
+    user.email ?? "",
+  );
   if (!result.ok) return { error: result.error };
 
   await switchWorkspace(result.workspaceId);
@@ -95,7 +99,7 @@ export async function declineInvitationAction(
   const invitationId = String(formData.get("invitationId") ?? "").trim();
   if (!invitationId) return { error: "Convite inválido." };
 
-  const result = await declineInvitation(invitationId, user.email);
+  const result = await declineInvitation(invitationId, user.email ?? "");
   if (!result.ok) return { error: result.error };
 
   revalidatePath("/definicoes");

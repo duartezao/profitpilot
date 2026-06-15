@@ -33,7 +33,13 @@ function TopbarActions({
       <PrivacyToggle />
       {showAvatar && (
         <div
-          title={`${user.name} · ${user.email}`}
+          title={
+            user.email
+              ? `${user.name} · ${user.email}`
+              : user.username
+                ? `${user.name} · @${user.username}`
+                : user.name
+          }
           className="hidden h-9 w-9 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground md:flex"
         >
           {initials(user.name)}

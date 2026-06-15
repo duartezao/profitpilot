@@ -65,6 +65,13 @@ export async function resolveInviteIdentifier(
         "Utilizador não encontrado. Para convidar alguém sem conta, usa o email.",
     };
   }
+  if (!user.email) {
+    return {
+      ok: false,
+      error:
+        "Esta conta só tem utilizador — convida por email ou pede-lhe para adicionar email.",
+    };
+  }
 
   return { ok: true, email: user.email };
 }
@@ -241,7 +248,12 @@ export async function acceptInvitation(
     return { ok: false, error: "Este convite expirou." };
   }
   if (inv.email !== userEmail.toLowerCase().trim()) {
-    return { ok: false, error: "Este convite não é para a tua conta." };
+    return {
+      ok: false,
+      error: userEmail
+        ? "Este convite não é para a tua conta."
+        : "Esta conta não tem email — não podes aceitar convites por email.",
+    };
   }
 
   const userOid = new mongoose.Types.ObjectId(userId);

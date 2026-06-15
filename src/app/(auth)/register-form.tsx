@@ -24,35 +24,41 @@ export function RegisterForm() {
         <input name="name" type="text" autoComplete="name" required className={inputCls} />
       </div>
       <div>
-        <label className="mb-1 block text-sm font-medium">Utilizador</label>
+        <label className="mb-1 block text-sm font-medium">
+          Utilizador{" "}
+          <span className="font-normal text-muted-foreground">(opcional)</span>
+        </label>
         <input
           name="username"
           type="text"
           autoComplete="username"
-          required
           placeholder="nome.unico"
           className={inputCls}
         />
         <p className="mt-1 text-xs text-muted-foreground">
-          Único na plataforma — usas para entrar e para te convidarem. 3–30
-          caracteres (a-z, 0-9, . _ -).
+          Único na plataforma — 3–30 caracteres (a-z, 0-9, . _ -).
         </p>
       </div>
       <div>
-        <label className="mb-1 block text-sm font-medium">Email</label>
-        <input name="email" type="email" autoComplete="email" required className={inputCls} />
+        <label className="mb-1 block text-sm font-medium">
+          Email{" "}
+          <span className="font-normal text-muted-foreground">(opcional)</span>
+        </label>
+        <input name="email" type="email" autoComplete="email" className={inputCls} />
       </div>
+      <p className="text-xs text-muted-foreground">
+        Preenche <strong className="font-medium text-foreground">email ou utilizador</strong>{" "}
+        (pelo menos um) para entrar e receber convites.
+      </p>
       <div>
         <label className="mb-1 block text-sm font-medium">Password</label>
         <input
           name="password"
           type="password"
           autoComplete="new-password"
-          minLength={8}
           required
           className={inputCls}
         />
-        <p className="mt-1 text-xs text-muted-foreground">Mínimo 8 caracteres.</p>
       </div>
       <div>
         <label className="mb-1 block text-sm font-medium">
