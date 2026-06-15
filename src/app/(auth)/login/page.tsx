@@ -9,7 +9,7 @@ export default function LoginPage() {
     <div>
       <h1 className="text-xl font-semibold">Entrar</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Acede ao teu ProfitPilot.
+        Acede à tua conta.
       </p>
       <LoginForm />
       <p className="mt-4 text-center text-sm text-muted-foreground">
