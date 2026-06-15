@@ -27,23 +27,25 @@
 
 | Token | Hex | Uso |
 |---|---|---|
-| `background` | `#FFFFFF` | Fundo da app |
+| `background` | `#F8FAFC` | Fundo da área principal |
+| `sidebar` | `#FFFFFF` | Sidebar (branco sobre fundo cinza) |
 | `surface` / card | `#FFFFFF` | Cartões (distinguidos por borda) |
-| `muted` | `#F9FAFB` | Fundos subtis, hover de linha |
-| `border` | `#E5E7EB` | Bordas de cartões, tabelas, inputs |
+| `muted` | `#F1F5F9` | Fundos subtis, hover de linha, item ativo |
+| `border` | `#E2E8F0` | Bordas de cartões, tabelas, inputs |
 | `foreground` | `#111827` | Texto principal |
-| `muted-foreground` | `#6B7280` | Texto secundário, labels |
+| `muted-foreground` | `#64748B` | Texto secundário, labels |
 
 ### Dark mode
 
 | Token | Hex | Uso |
 |---|---|---|
-| `background` | `#0F172A` | Fundo da app |
-| `surface` / card | `#1E293B` | Cartões |
-| `muted` | `#172033` | Fundos subtis, hover |
-| `border` | `#334155` | Bordas |
-| `foreground` | `#F1F5F9` | Texto principal |
-| `muted-foreground` | `#94A3B8` | Texto secundário |
+| `background` | `#1C242C` | Fundo da área principal |
+| `sidebar` | `#181F28` | Sidebar (ligeiramente mais escura) |
+| `surface` / card | `#22282E` | Cartões |
+| `muted` | `#283448` | Fundos subtis, item ativo (tom azulado) |
+| `border` | `#2E3844` | Bordas |
+| `foreground` | `#E8EDF2` | Texto principal |
+| `muted-foreground` | `#8898A8` | Texto secundário |
 
 ### Accent e semânticas (iguais em light/dark)
 
@@ -54,6 +56,8 @@
 | `positive` (verde) | `#16A34A` | Lucro, crescimento, status "Scale" |
 | `negative` (vermelho) | `#DC2626` | Prejuízo, queda, status "Kill" |
 | `warning` (âmbar) | `#D97706` | Avisos, status intermédio |
+| `chart-positive` | `#609060` | Barra final do waterfall (lucro) |
+| `chart-neutral` | `#8898A8` | Barras neutras do waterfall |
 
 > Verde/vermelho/âmbar **só** em valores e estados — nunca como decoração ou fundo grande.
 
@@ -103,7 +107,7 @@
 * **Ghost**: sem fundo, texto `foreground`, hover `muted`.
 
 ### Navegação
-* **Desktop**: sidebar fixa à esquerda, ~240px, fundo `surface`/`background`, item ativo com fundo `muted` + texto `accent` + ícone `accent`.
+* **Desktop**: sidebar fixa à esquerda, ~240px, fundo `sidebar`, item ativo com fundo `accent/10` (light) ou `muted` (dark) + texto `accent`.
 * **Mobile**: barra inferior com 4 itens (ícone + label 11–12px), item ativo a `accent`.
 * Top bar: seletor de loja, seletor de período, avatar.
 
@@ -112,7 +116,7 @@
 ## 6. Gráficos (Recharts / Tremor)
 
 * Linhas/áreas: cor `accent` (`#2563EB`); área com opacidade baixa, sem gradiente forte.
-* Waterfall: barras neutras (cinza) e barra final de lucro a `positive`; passos negativos podem usar tom neutro com label vermelho.
+* Waterfall: barras neutras a `chart-neutral` e barra final de lucro a `chart-positive`; passos negativos com tom neutro mais claro.
 * Eixos e grelha: cinza muito subtil; sem fundos coloridos.
 * Sparklines: 1px, sem pontos, sem eixos.
 
@@ -127,26 +131,32 @@
 
 ```css
 :root {
-  --background: #FFFFFF;
+  --background: #F8FAFC;
+  --sidebar: #FFFFFF;
   --surface: #FFFFFF;
-  --muted: #F9FAFB;
-  --border: #E5E7EB;
+  --muted: #F1F5F9;
+  --border: #E2E8F0;
   --foreground: #111827;
-  --muted-foreground: #6B7280;
+  --muted-foreground: #64748B;
   --accent: #2563EB;
   --positive: #16A34A;
   --negative: #DC2626;
   --warning: #D97706;
+  --chart-positive: #609060;
+  --chart-neutral: #8898A8;
   --radius: 0.5rem; /* 8px */
 }
 
 .dark {
-  --background: #0F172A;
-  --surface: #1E293B;
-  --muted: #172033;
-  --border: #334155;
-  --foreground: #F1F5F9;
-  --muted-foreground: #94A3B8;
+  --background: #1C242C;
+  --sidebar: #181F28;
+  --surface: #22282E;
+  --muted: #283448;
+  --border: #2E3844;
+  --foreground: #E8EDF2;
+  --muted-foreground: #8898A8;
+  --chart-positive: #609060;
+  --chart-neutral: #8898A8;
 }
 ```
 

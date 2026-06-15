@@ -1,11 +1,9 @@
 import { Calendar, Store } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import type { DashboardSummary } from "@/lib/metrics";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
 import { WaterfallChart } from "@/components/dashboard/waterfall-chart";
 import { PayoutPreviewCard } from "@/components/dashboard/payout-preview-card";
-import { StoreDailyNotes } from "@/components/dashboard/store-daily-notes";
 import { ProductsProfitTable } from "@/components/dashboard/products-profit-table";
 
 export function StoreDashboardView({ data }: { data: DashboardSummary }) {
@@ -13,13 +11,7 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
 
   return (
     <div className="space-y-6">
-      <DashboardKpiSection
-        kpis={data.kpis}
-        extendedKpis={data.extendedKpis}
-        funnelError={dashboard?.funnelError}
-        sessionCountryLabel={dashboard?.sessionCountryLabel}
-        variant="store"
-      />
+      <DashboardKpiSection kpis={data.kpis} variant="store" />
 
       {dashboard && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -31,14 +23,6 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
         </div>
       )}
 
-      {dashboard && (
-        <StoreDailyNotes
-          notes={dashboard.dailyNotes}
-          periodIsSingleDay={dashboard.periodIsSingleDay}
-          periodLabel={dashboard.periodLabel}
-        />
-      )}
-
       <ProductsProfitTable products={data.topProducts} />
     </div>
   );
@@ -48,14 +32,10 @@ export function StoreDashboardHeader({
   title,
   periodLabel,
   prevPeriodLabel,
-  isFetching,
-  updatedAt,
 }: {
   title: string;
   periodLabel?: string;
   prevPeriodLabel?: string;
-  isFetching: boolean;
-  updatedAt: string | null;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4">
@@ -66,31 +46,15 @@ export function StoreDashboardHeader({
         </Sensitive>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        {periodLabel && (
-          <div
-            className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm"
-            title={prevPeriodLabel ? `Comparado com ${prevPeriodLabel}` : undefined}
-          >
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-            <span className="tabular-nums">{periodLabel}</span>
-          </div>
-        )}
-        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="relative flex h-2 w-2">
-            <span
-              className={cn(
-                "absolute inline-flex h-full w-full rounded-full bg-positive opacity-75",
-                isFetching ? "animate-ping" : "hidden",
-              )}
-            />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-positive" />
-          </span>
-          <span className="tabular-nums">
-            {updatedAt ? `Ao vivo · ${updatedAt}` : "A ligar…"}
-          </span>
-        </span>
-      </div>
+      {periodLabel && (
+        <div
+          className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm"
+          title={prevPeriodLabel ? `Comparado com ${prevPeriodLabel}` : undefined}
+        >
+          <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="tabular-nums">{periodLabel}</span>
+        </div>
+      )}
     </div>
   );
 }

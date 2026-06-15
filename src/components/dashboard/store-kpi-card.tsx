@@ -46,9 +46,9 @@ export function StoreKpiCard({
         </div>
         {Icon && (
           <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-muted"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/10"
           >
-            <Icon className="h-5 w-5 text-muted-foreground" />
+            <Icon className="h-5 w-5 text-accent" />
           </div>
         )}
       </div>

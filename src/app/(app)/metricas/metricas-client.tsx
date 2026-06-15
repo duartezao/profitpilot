@@ -32,7 +32,7 @@ export function MetricasClient() {
   const storeId = searchParams.get("store");
   const period = periodFromSearchParams(searchParams);
 
-  const { data, isError, isFetching, dataUpdatedAt } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ["metrics-summary", workspaceId, storeId, period.key],
     queryFn: () => fetchSummary(searchParams),
     enabled: Boolean(storeId),
@@ -42,10 +42,6 @@ export function MetricasClient() {
   const periodLabel = data?.storeDashboard?.periodLabel ?? period.label;
   const prevPeriodLabel = data?.storeDashboard?.prevPeriodLabel;
   const headerTitle = data?.scopeDomain ?? data?.scopeName ?? "Métricas";
-
-  const updatedAt = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString("pt-PT")
-    : null;
 
   if (!storeId) {
     return (
@@ -63,8 +59,6 @@ export function MetricasClient() {
         title={headerTitle}
         periodLabel={periodLabel}
         prevPeriodLabel={prevPeriodLabel}
-        isFetching={isFetching}
-        updatedAt={updatedAt}
       />
 
       {isError && (

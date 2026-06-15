@@ -62,6 +62,8 @@ export type SummaryKpi = {
   deltaIsPoints?: boolean;
   trend?: number[];
   icon?: KpiIcon;
+  /** BER: queda no valor é positiva para o negócio */
+  deltaInverted?: boolean;
 };
 
 export type SummaryStore = {
@@ -1233,14 +1235,6 @@ export async function buildWorkspaceSummary(
 
     kpis = [
       {
-        label: "REV",
-        value: money(cur.revenue),
-        title: `Vendas líquidas · ${fmtMoney(cur.revenue)}`,
-        delta: deltaPct(cur.revenue, prev.revenue),
-        deltaLabel: deltaSuffix,
-        icon: "euro",
-      },
-      {
         label: "Net Profit",
         value: money(curProfit),
         title: cogsIncomplete
@@ -1280,7 +1274,8 @@ export async function buildWorkspaceSummary(
             ? deltaPct(curBer, prevBer)
             : undefined,
         deltaLabel: curBer != null ? deltaSuffix : undefined,
-        icon: "target",
+        deltaInverted: true,
+        icon: "trending",
       },
     ];
   } else {
@@ -1350,12 +1345,15 @@ export async function buildWorkspaceSummary(
       storeTz,
     );
 
+    const grossRevenue = cur.revenue + cur.refunds;
+    const netProfit = calcProfit(cur, curAdSpend);
+
     const waterfall: WaterfallStep[] = [
       {
         key: "revenue",
-        label: "REV (líquida)",
-        value: cur.revenue,
-        display: fmtMoney(cur.revenue),
+        label: "Revenue",
+        value: grossRevenue,
+        display: fmtMoney(grossRevenue),
         type: "start",
       },
       {
@@ -1386,11 +1384,22 @@ export async function buildWorkspaceSummary(
         display: fmtMoney(-curAdSpend),
         type: "negative",
       },
+      ...(cur.refunds > 0
+        ? [
+            {
+              key: "refunds",
+              label: "Refunds",
+              value: -cur.refunds,
+              display: fmtMoney(-cur.refunds),
+              type: "negative" as const,
+            },
+          ]
+        : []),
       {
         key: "net",
         label: "Net Profit",
-        value: calcProfit(cur, curAdSpend),
-        display: fmtMoney(calcProfit(cur, curAdSpend)),
+        value: netProfit,
+        display: fmtMoney(netProfit),
         type: "total",
       },
     ];

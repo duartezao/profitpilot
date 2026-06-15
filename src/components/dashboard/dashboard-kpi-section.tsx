@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Globe } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import type { SummaryKpi } from "@/lib/metrics";
-import { StoreKpiCard } from "@/components/dashboard/store-kpi-card";
-import { KpiCard } from "@/components/ui/kpi-card";
+import { DashboardKpiCard } from "@/components/dashboard/dashboard-kpi-card";
 
 export function DashboardKpiSection({
   kpis,
@@ -18,53 +18,55 @@ export function DashboardKpiSection({
   extendedKpis?: SummaryKpi[];
   funnelError?: string | null;
   sessionCountryLabel?: string | null;
-  /** store = cards com ícones; workspace = cards consolidados */
   variant?: "store" | "workspace";
 }) {
   const [open, setOpen] = useState(false);
-  const hasMore = extendedKpis.length > 0;
-  const Card = variant === "store" ? StoreKpiCard : KpiCard;
+  const isStore = variant === "store";
+  const hasMore = !isStore && extendedKpis.length > 0;
 
-  const primaryCols =
-    variant === "store"
-      ? "grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
-      : "grid-cols-2 lg:grid-cols-3 xl:grid-cols-6";
+  const primaryCols = isStore
+    ? "grid-cols-2 lg:grid-cols-4"
+    : "grid-cols-2 md:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6";
 
   const extendedCols =
-    variant === "store"
-      ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
-      : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5";
+    "grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5";
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          KPIs principais do período
-        </p>
-        {hasMore && (
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
-          >
-            {open ? (
-              <>
-                <ChevronUp className="h-4 w-4" />
-                Ver menos
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-4 w-4" />
-                Ver mais métricas
-              </>
-            )}
-          </button>
-        )}
-      </div>
+      {!isStore && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            KPIs principais do período
+          </p>
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+            >
+              {open ? (
+                <>
+                  <ChevronUp className="h-4 w-4" />
+                  Ver menos
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4" />
+                  Ver mais métricas
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
 
-      <div className={`grid gap-4 ${primaryCols}`}>
+      <div className={cn("grid gap-3 sm:gap-4", primaryCols)}>
         {kpis.map((k) => (
-          <Card key={k.label} {...k} />
+          <DashboardKpiCard
+            key={k.label}
+            {...k}
+            layout={isStore ? "store" : "workspace"}
+          />
         ))}
       </div>
 
@@ -91,9 +93,9 @@ export function DashboardKpiSection({
             </p>
           )}
 
-          <div className={`grid gap-4 ${extendedCols}`}>
+          <div className={cn("grid gap-3 sm:gap-4", extendedCols)}>
             {extendedKpis.map((k) => (
-              <Card key={k.label} {...k} />
+              <DashboardKpiCard key={k.label} {...k} layout="workspace" />
             ))}
           </div>
 

@@ -24,9 +24,9 @@ export function WaterfallChart({ steps }: { steps: WaterfallStep[] }) {
               <div
                 className={cn(
                   "w-full max-w-14 rounded-sm sm:max-w-16",
-                  step.type === "total" && "bg-positive",
-                  step.type === "start" && "bg-muted-foreground/35",
-                  step.type === "negative" && "bg-muted-foreground/20",
+                  step.type === "total" && "bg-chart-positive",
+                  step.type === "start" && "bg-chart-neutral/45",
+                  step.type === "negative" && "bg-chart-neutral/25",
                 )}
                 style={{ height: h }}
               />

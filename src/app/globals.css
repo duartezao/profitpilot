@@ -5,34 +5,42 @@
 
 /*
   Design tokens — ProfitPilot (ver design-system.md).
+  Valores extraídos dos mockups em assets/ (cinza neutro, não slate azulado).
   Sem gradientes, sem neon. Borda em vez de sombra.
 */
 :root {
-  --background: #ffffff;
+  --background: #f8fafc;
+  --sidebar: #ffffff;
   --surface: #ffffff;
-  --muted: #f9fafb;
-  --border: #e5e7eb;
+  --muted: #f1f5f9;
+  --border: #e2e8f0;
   --foreground: #111827;
-  --muted-foreground: #6b7280;
+  --muted-foreground: #64748b;
   --accent: #2563eb;
   --accent-foreground: #ffffff;
   --positive: #16a34a;
   --negative: #dc2626;
   --warning: #d97706;
+  --chart-positive: #609060;
+  --chart-neutral: #8898a8;
   --radius: 0.5rem;
 }
 
 .dark {
-  --background: #0f172a;
-  --surface: #1e293b;
-  --muted: #172033;
-  --border: #334155;
-  --foreground: #f1f5f9;
-  --muted-foreground: #94a3b8;
+  --background: #1c242c;
+  --sidebar: #181f28;
+  --surface: #22282e;
+  --muted: #283448;
+  --border: #2e3844;
+  --foreground: #e8edf2;
+  --muted-foreground: #8898a8;
+  --chart-positive: #609060;
+  --chart-neutral: #8898a8;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-sidebar: var(--sidebar);
   --color-surface: var(--surface);
   --color-muted: var(--muted);
   --color-border: var(--border);
@@ -43,6 +51,8 @@
   --color-positive: var(--positive);
   --color-negative: var(--negative);
   --color-warning: var(--warning);
+  --color-chart-positive: var(--chart-positive);
+  --color-chart-neutral: var(--chart-neutral);
 
   --radius-lg: var(--radius);
   --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;

@@ -224,7 +224,7 @@ export function PeriodSelector({
           />
           <div
             className={cn(
-              "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-md",
+              "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1",
               fullWidth
                 ? "max-md:fixed max-md:inset-x-3 max-md:top-[5.75rem] md:absolute md:left-0 md:right-0 md:top-full md:mt-1 md:w-auto"
                 : "max-md:fixed max-md:inset-x-3 max-md:top-[5.75rem] md:absolute md:right-0 md:top-full md:mt-1 md:w-80",

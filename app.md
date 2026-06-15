@@ -121,8 +121,8 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 > Resumo abaixo. A **fonte completa e canónica** (cores hex, tipografia, componentes, Tailwind config e variáveis CSS) está em **`design-system.md`** — seguir esse ficheiro a 100%.
 
 * **Tipografia**: Inter (ou Geist). Números **tabulares** (`font-variant-numeric: tabular-nums`). Títulos semibold, corpo regular.
-* **Cores (light)**: fundo `#FFFFFF`, superfície/cartão `#FFFFFF` com borda `#E5E7EB`, texto principal `#111827`, texto secundário `#6B7280`.
-* **Cores (dark)**: fundo `#0F172A`/`#111827`, cartão `#1E293B`, borda `#334155`, texto `#F1F5F9`.
+* **Cores (light)**: fundo principal `#F8FAFC`, sidebar/cartões `#FFFFFF` com borda `#E2E8F0`, texto principal `#111827`, texto secundário `#64748B`.
+* **Cores (dark)**: fundo `#1C242C`, sidebar `#181F28`, cartão `#22282E`, borda `#2E3844`, texto `#E8EDF2`.
 * **Accent** (discreto): azul `#2563EB` (apenas para item ativo, links e seleção).
 * **Semânticas**: lucro/positivo verde `#16A34A`; prejuízo/negativo vermelho `#DC2626`; aviso âmbar `#D97706`. Usadas **só** em valores e estados, nunca como decoração.
 * **Cantos**: `rounded-lg` (~8px) em cartões e botões.
