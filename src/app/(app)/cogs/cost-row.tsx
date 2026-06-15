@@ -8,6 +8,7 @@ import {
   clearManualCostAction,
   type CostState,
 } from "./actions";
+import { DecimalInput } from "@/components/decimal-input";
 
 const inputCls =
   "w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent";
@@ -81,11 +82,8 @@ export function CostRow({ row }: { row: CostRowData }) {
         <form action={doSet} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="storeId" value={row.storeId} />
           <input type="hidden" name="variantId" value={row.variantId} />
-          <input
+          <DecimalInput
             name="manualCost"
-            type="number"
-            step="0.01"
-            min="0"
             placeholder={`custo (${row.inputCurrency})`}
             defaultValue={row.manualCost ?? ""}
             className={inputCls}

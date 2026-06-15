@@ -225,6 +225,7 @@ export async function buildPortfolioSummary(
   };
   let cogsIncomplete = false;
   let missingCogsCount = 0;
+  let missingCogsMessage = "";
   let missingAdSpendDays = 0;
 
   for (const workspaceId of workspaceIds) {
@@ -301,6 +302,11 @@ export async function buildPortfolioSummary(
 
     if (pnl.cogsIncomplete) cogsIncomplete = true;
     missingCogsCount += pnl.missingCogsCount;
+    if (pnl.missingCogsMessage) {
+      missingCogsMessage = missingCogsMessage
+        ? `${missingCogsMessage} ${pnl.missingCogsMessage}`
+        : pnl.missingCogsMessage;
+    }
     missingAdSpendDays += pnl.missingAdSpendDays;
   }
 
@@ -376,6 +382,7 @@ export async function buildPortfolioSummary(
     dailyNotes: [],
     cogsIncomplete,
     missingCogsCount,
+    missingCogsMessage,
     missingAdSpendDays,
     profitChart,
     dailyMetrics: [],

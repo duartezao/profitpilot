@@ -5,6 +5,22 @@ export type FeeConfig = {
   transactionFeePercent: number;
 };
 
+/** Shopify cobra +2% quando a moeda da venda ≠ moeda de payout. */
+export const SHOPIFY_CURRENCY_CONVERSION_PERCENT = 2;
+
+/** % extra de conversão (0 se moedas iguais). */
+export function shopifyCurrencyConversionPercent(
+  storeCurrency: string,
+  payoutCurrency: string,
+): number {
+  if (
+    storeCurrency.trim().toUpperCase() === payoutCurrency.trim().toUpperCase()
+  ) {
+    return 0;
+  }
+  return SHOPIFY_CURRENCY_CONVERSION_PERCENT;
+}
+
 export type FeeScheduleEntry = FeeConfig & {
   /** Dia civil YYYY-MM-DD (fuso da loja) a partir do qual esta taxa vale. */
   effectiveFromKey: string;
@@ -92,9 +108,13 @@ export function shouldPreserveStoredOrderFees(
 export function computeOrderFees(
   totalPrice: number,
   config: FeeConfig,
+  currencyConversionPercent = 0,
 ): number {
   const feePercent =
-    (config.processingPercent + config.transactionFeePercent) / 100;
+    (config.processingPercent +
+      config.transactionFeePercent +
+      currencyConversionPercent) /
+    100;
   const feeFixed = config.processingFixed;
   return totalPrice * feePercent + (totalPrice > 0 ? feeFixed : 0);
 }
@@ -102,10 +122,19 @@ export function computeOrderFees(
 export function formatFeeConfigLabel(
   config: FeeConfig,
   currency: string,
+  currencyConversionPercent = 0,
 ): string {
   const parts: string[] = [];
-  const pct = config.processingPercent + config.transactionFeePercent;
+  const pct =
+    config.processingPercent +
+    config.transactionFeePercent +
+    currencyConversionPercent;
   if (pct > 0) parts.push(`${pct.toFixed(2).replace(".", ",")}%`);
+  if (currencyConversionPercent > 0) {
+    parts.push(
+      `incl. ${currencyConversionPercent.toFixed(2).replace(".", ",")}% conversão`,
+    );
+  }
   if (config.processingFixed > 0) {
     try {
       const fixed = new Intl.NumberFormat("pt-PT", {
@@ -136,13 +165,18 @@ export type FeeScheduleEntryView = {
 export function buildFeeScheduleViews(
   schedule: FeeScheduleEntry[],
   currency: string,
+  currencyConversionPercent = 0,
 ): FeeScheduleEntryView[] {
   const sorted = sortFeeSchedule(schedule);
   const latestKey = sorted[sorted.length - 1]?.effectiveFromKey;
   return sorted.map((e) => ({
     effectiveFromKey: e.effectiveFromKey,
     effectiveFromLabel: formatDateKeyLabel(e.effectiveFromKey),
-    label: formatFeeConfigLabel(normalizeFeeConfig(e), currency),
+    label: formatFeeConfigLabel(
+      normalizeFeeConfig(e),
+      currency,
+      currencyConversionPercent,
+    ),
     isLatest: e.effectiveFromKey === latestKey,
   }));
 }

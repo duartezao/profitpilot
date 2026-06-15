@@ -22,6 +22,30 @@ const IDLE: ChunkedSyncStatus = {
   continue: false,
 };
 
+async function parseSyncResponse(
+  res: Response,
+): Promise<ChunkedSyncStatus & { error?: string }> {
+  const text = await res.text();
+  let data: ChunkedSyncStatus & { error?: string };
+  try {
+    data = JSON.parse(text) as ChunkedSyncStatus & { error?: string };
+  } catch {
+    const preview = text.replace(/\s+/g, " ").trim().slice(0, 100);
+    throw new Error(
+      preview && !preview.startsWith("{")
+        ? preview
+        : `Resposta inválida do servidor (${res.status}).`,
+    );
+  }
+  if (!res.ok) {
+    throw new Error(data.error ?? `Erro ${res.status}`);
+  }
+  if (data.status === "error" && data.error) {
+    throw new Error(data.error);
+  }
+  return data;
+}
+
 export function StoreSyncButton({
   storeId,
   className,
@@ -50,11 +74,7 @@ export function StoreSyncButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      const data = (await res.json()) as ChunkedSyncStatus & { error?: string };
-      if (!res.ok) {
-        throw new Error(data.error ?? "Falha na sincronização.");
-      }
-      return data;
+      return parseSyncResponse(res);
     },
     [storeId],
   );
@@ -111,8 +131,13 @@ export function StoreSyncButton({
         const res = await fetch(`/api/stores/${storeId}/sync`, {
           cache: "no-store",
         });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as ChunkedSyncStatus;
+        if (cancelled) return;
+        let data: ChunkedSyncStatus;
+        try {
+          data = await parseSyncResponse(res);
+        } catch {
+          return;
+        }
         if (data.status === "running" && data.continue) {
           setState(data);
           setPending(true);

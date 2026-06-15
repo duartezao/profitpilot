@@ -8,6 +8,13 @@ import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { Order } from "@/models/Order";
 import { sumAdSpendForPeriod } from "@/lib/ad-spend";
+import { moneyToBase } from "@/lib/fx";
+import {
+  cogsSumBaseExpr,
+  orderModeCogsSumExpr,
+  shippingSumBaseExpr,
+} from "@/lib/order-money";
+import type { CogsMode } from "@/lib/cogs-modes";
 import { endOfDay, formatRangeLabel } from "@/lib/period";
 import {
   normalizeStoreTimezone,
@@ -165,17 +172,24 @@ function countsTowardReceived(
   return at >= sinceFallback;
 }
 
-function buildReceivedByDay(
+async function buildReceivedByDay(
   payouts: Array<{
     status?: string | null;
     paidAt?: Date | null;
     issuedAt?: Date | null;
     net?: number | null;
+    currency?: string | null;
   }>,
   startDate: Date | null,
   sinceFallback: Date,
   fmt: (v: number) => string,
-): IncomingDayLine[] {
+  convertNet: (p: {
+    net?: number | null;
+    currency?: string | null;
+    paidAt?: Date | null;
+    issuedAt?: Date | null;
+  }) => Promise<number>,
+): Promise<IncomingDayLine[]> {
   const map = new Map<string, number>();
 
   for (const p of payouts) {
@@ -183,7 +197,8 @@ function buildReceivedByDay(
     const at = payoutReceivedAt(p)!;
     const day = dayKey(at);
     if (!day) continue;
-    map.set(day, (map.get(day) ?? 0) + (p.net ?? 0));
+    const amount = await convertNet(p);
+    map.set(day, (map.get(day) ?? 0) + amount);
   }
 
   return [...map.entries()]
@@ -198,16 +213,32 @@ function buildReceivedByDay(
     }));
 }
 
-function buildIncomingByDay(
+async function buildIncomingByDay(
   payouts: Array<{
     status?: string | null;
     issuedAt?: Date | null;
     createdAt?: Date;
     net?: number | null;
+    currency?: string | null;
   }>,
-  pendingTx: Array<{ transactionDate: Date; net?: number | null }>,
+  pendingTx: Array<{
+    transactionDate: Date;
+    net?: number | null;
+    currency?: string | null;
+  }>,
   fmt: (v: number) => string,
-): IncomingDayLine[] {
+  convertPayoutNet: (p: {
+    net?: number | null;
+    currency?: string | null;
+    issuedAt?: Date | null;
+    createdAt?: Date;
+  }) => Promise<number>,
+  convertTxNet: (bt: {
+    transactionDate: Date;
+    net?: number | null;
+    currency?: string | null;
+  }) => Promise<number>,
+): Promise<IncomingDayLine[]> {
   const map = new Map<string, { payout: number; pending: number }>();
 
   for (const p of payouts) {
@@ -216,7 +247,7 @@ function buildIncomingByDay(
     const day = dayKey(p.issuedAt ?? p.createdAt);
     if (!day) continue;
     const row = map.get(day) ?? { payout: 0, pending: 0 };
-    row.payout += p.net ?? 0;
+    row.payout += await convertPayoutNet(p);
     map.set(day, row);
   }
 
@@ -224,7 +255,7 @@ function buildIncomingByDay(
     const day = dayKey(bt.transactionDate);
     if (!day) continue;
     const row = map.get(day) ?? { payout: 0, pending: 0 };
-    row.pending += bt.net ?? 0;
+    row.pending += await convertTxNet(bt);
     map.set(day, row);
   }
 
@@ -284,6 +315,7 @@ function mergeIncomingByDay(
 async function sumOrderOutflowsSince(
   storeId: mongoose.Types.ObjectId,
   since: Date,
+  cogsMode: CogsMode,
   timeZone?: string | null,
 ): Promise<{ cogs: number; shipping: number }> {
   const slice = { start: since, end: endOfDay(new Date()) };
@@ -291,13 +323,18 @@ async function sumOrderOutflowsSince(
     ? orderDateMatchInTimezone(slice, normalizeStoreTimezone(timeZone))
     : orderDateMatch(slice);
 
+  const cogsExpr =
+    cogsMode === "order" || cogsMode === "day"
+      ? orderModeCogsSumExpr
+      : cogsSumBaseExpr;
+
   const rows = await Order.aggregate<{ cogs: number; shipping: number }>([
     { $match: { storeId, ...dateMatch } },
     {
       $group: {
         _id: null,
-        cogs: { $sum: "$cogs" },
-        shipping: { $sum: "$shipping" },
+        cogs: cogsExpr,
+        shipping: shippingSumBaseExpr,
       },
     },
   ]);
@@ -375,7 +412,7 @@ export async function buildWorkspaceTreasury(
 
   let stores = await Store.find(storeQuery)
     .select(
-      "name currency startingBalance startingBalanceDate importStartDate createdAt ianaTimezone paymentsBalance payoutsError",
+      "name currency cogsMode startingBalance startingBalanceDate importStartDate createdAt ianaTimezone paymentsBalance payoutsError",
     )
     .lean();
 
@@ -440,8 +477,9 @@ export async function buildWorkspaceTreasury(
         s.createdAt,
       );
       const slice = { start: since, end: endOfDay(new Date()) };
+      const cogsMode = (s.cogsMode ?? "shopify") as CogsMode;
       const [orderOut, adSpend] = await Promise.all([
-        sumOrderOutflowsSince(s._id, since, s.ianaTimezone),
+        sumOrderOutflowsSince(s._id, since, cogsMode, s.ianaTimezone),
         sumAdSpendForPeriod(
           [s._id],
           slice,
@@ -462,35 +500,88 @@ export async function buildWorkspaceTreasury(
   const sinceByStore = new Map(
     outflowByStore.map((o) => [o.storeId, o.since]),
   );
+  const storeCurrencyByStore = new Map(
+    stores.map((s) => [String(s._id), (s.currency ?? currency).toUpperCase()]),
+  );
   const manualCashMap = await sumManualCashByStores(
     workspaceId,
     storeIds,
     sinceByStore,
+    currency,
+    storeCurrencyByStore,
   );
 
-  const lines: StoreTreasuryLine[] = stores.map((s) => {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const fmtBase = (v: number) => fmt(v, currency);
+
+  const lines: StoreTreasuryLine[] = await Promise.all(
+    stores.map(async (s) => {
     const sid = String(s._id);
-    const cur = s.currency ?? currency;
-    const fmtCur = (v: number) => fmt(v, cur);
-    const available = s.paymentsBalance ?? 0;
-    const startingBalance = s.startingBalance ?? 0;
+    const storeCurrency = storeCurrencyByStore.get(sid) ?? currency;
+    const availableRaw = s.paymentsBalance ?? 0;
+    const startingBalanceRaw = s.startingBalance ?? 0;
     const startDate = s.startingBalanceDate
       ? new Date(s.startingBalanceDate)
       : null;
     const out = outflowMap.get(sid)!;
     const since = out.since;
     const sinceLabel = formatRangeLabel(since, endOfDay(new Date()));
+    const startKey =
+      (startDate ? dayKey(startDate) : null) ??
+      since.toISOString().slice(0, 10);
+
+    const payoutToBase = async (p: {
+      net?: number | null;
+      currency?: string | null;
+      issuedAt?: Date | null;
+      createdAt?: Date;
+      paidAt?: Date | null;
+    }) => {
+      const date =
+        dayKey(p.paidAt ?? p.issuedAt ?? p.createdAt) ?? todayKey;
+      const cur = (p.currency ?? storeCurrency).toUpperCase();
+      return moneyToBase(p.net ?? 0, cur, currency, date);
+    };
+
+    const txToBase = async (bt: {
+      transactionDate: Date;
+      net?: number | null;
+      currency?: string | null;
+    }) => {
+      const date = dayKey(bt.transactionDate) ?? todayKey;
+      const cur = (bt.currency ?? storeCurrency).toUpperCase();
+      return moneyToBase(bt.net ?? 0, cur, currency, date);
+    };
 
     const storePayouts = payouts.filter((p) => String(p.storeId) === sid);
     const storePendingTx = pendingTx.filter((bt) => String(bt.storeId) === sid);
 
-    const incoming = storePayouts
-      .filter((p) => INCOMING_PAYOUT_STATUSES.has(normStatus(p.status)))
-      .reduce((sum, p) => sum + (p.net ?? 0), 0);
+    const incomingPayouts = storePayouts.filter((p) =>
+      INCOMING_PAYOUT_STATUSES.has(normStatus(p.status)),
+    );
+    let incoming = 0;
+    for (const p of incomingPayouts) {
+      incoming += await payoutToBase(p);
+    }
 
-    const received = storePayouts
-      .filter((p) => countsTowardReceived(p, startDate, since90))
-      .reduce((sum, p) => sum + (p.net ?? 0), 0);
+    let received = 0;
+    for (const p of storePayouts) {
+      if (!countsTowardReceived(p, startDate, since90)) continue;
+      received += await payoutToBase(p);
+    }
+
+    const available = await moneyToBase(
+      availableRaw,
+      storeCurrency,
+      currency,
+      todayKey,
+    );
+    const startingBalance = await moneyToBase(
+      startingBalanceRaw,
+      storeCurrency,
+      currency,
+      startKey,
+    );
 
     const outflowsTotal = out.cogs + out.shipping + out.adSpend;
     const manual = manualCashMap.get(sid) ?? { manualIn: 0, manualOut: 0 };
@@ -504,65 +595,69 @@ export async function buildWorkspaceTreasury(
     const projectedCash = cashOnHand + shopifyPending;
     const projected = projectedCash;
 
-    const incomingByDay = buildIncomingByDay(
+    const incomingByDay = await buildIncomingByDay(
       storePayouts,
       storePendingTx,
-      fmtCur,
+      fmtBase,
+      payoutToBase,
+      txToBase,
     );
 
-    const receivedByDay = buildReceivedByDay(
+    const receivedByDay = await buildReceivedByDay(
       storePayouts,
       startDate,
       since90,
-      fmtCur,
+      fmtBase,
+      payoutToBase,
     );
 
     return {
       storeId: sid,
       storeName: s.name,
-      currency: cur,
+      currency,
       sinceDate: since.toISOString().slice(0, 10),
       sinceLabel,
       available,
-      availableFmt: fmtCur(available),
+      availableFmt: fmtBase(available),
       incoming,
-      incomingFmt: fmtCur(incoming),
+      incomingFmt: fmtBase(incoming),
       received,
-      receivedFmt: fmtCur(received),
+      receivedFmt: fmtBase(received),
       startingBalance,
-      startingBalanceFmt: fmtCur(startingBalance),
+      startingBalanceFmt: fmtBase(startingBalance),
       startingBalanceDate: startDate
         ? startDate.toISOString().slice(0, 10)
         : null,
       outflowsCogs: out.cogs,
-      outflowsCogsFmt: fmtCur(out.cogs),
+      outflowsCogsFmt: fmtBase(out.cogs),
       outflowsShipping: out.shipping,
-      outflowsShippingFmt: fmtCur(out.shipping),
+      outflowsShippingFmt: fmtBase(out.shipping),
       outflowsAdSpend: out.adSpend,
-      outflowsAdSpendFmt: fmtCur(out.adSpend),
+      outflowsAdSpendFmt: fmtBase(out.adSpend),
       outflowsTotal,
-      outflowsTotalFmt: fmtCur(outflowsTotal),
+      outflowsTotalFmt: fmtBase(outflowsTotal),
       manualIn: manual.manualIn,
-      manualInFmt: fmtCur(manual.manualIn),
+      manualInFmt: fmtBase(manual.manualIn),
       manualOut: manual.manualOut,
-      manualOutFmt: fmtCur(manual.manualOut),
+      manualOutFmt: fmtBase(manual.manualOut),
       shopifyPending,
-      shopifyPendingFmt: fmtCur(shopifyPending),
-      shopifyPendingTitle: fmtCur(shopifyPending),
+      shopifyPendingFmt: fmtBase(shopifyPending),
+      shopifyPendingTitle: fmtBase(shopifyPending),
       cashOnHand,
-      cashOnHandFmt: formatCurrencyCompact(cashOnHand, cur),
-      cashOnHandTitle: fmtCur(cashOnHand),
+      cashOnHandFmt: formatCurrencyCompact(cashOnHand, currency),
+      cashOnHandTitle: fmtBase(cashOnHand),
       projectedCash,
-      projectedCashFmt: formatCurrencyCompact(projectedCash, cur),
-      projectedCashTitle: fmtCur(projectedCash),
+      projectedCashFmt: formatCurrencyCompact(projectedCash, currency),
+      projectedCashTitle: fmtBase(projectedCash),
       projected,
-      projectedFmt: formatCurrencyCompact(projected, cur),
-      projectedTitle: fmtCur(projected),
+      projectedFmt: formatCurrencyCompact(projected, currency),
+      projectedTitle: fmtBase(projected),
       incomingByDay,
       receivedByDay,
       payoutsError: s.payoutsError ?? null,
     };
-  });
+  }),
+  );
 
   const sum = (key: keyof StoreTreasuryLine) =>
     lines.reduce((a, l) => a + (l[key] as number), 0);

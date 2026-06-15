@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Store as StoreIcon, ChevronDown, Check } from "lucide-react";
 import { useWorkspace } from "@/components/workspace-context";
@@ -12,7 +13,29 @@ import { cn } from "@/lib/utils";
 export type StoreOption = { id: string; name: string };
 
 const menuPanelCls =
-  "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 max-md:fixed max-md:inset-x-3 max-md:top-[5.75rem] md:absolute md:top-full md:mt-1 md:max-h-80";
+  "overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-none";
+
+function menuPositionFromTrigger(rect: DOMRect): CSSProperties {
+  const gap = 4;
+  const minWidth = 224;
+  const width = Math.max(rect.width, minWidth);
+  let left = rect.left;
+  if (left + width > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - width - 8);
+  }
+  const maxHeight = Math.min(
+    512,
+    Math.max(120, window.innerHeight - rect.bottom - gap - 12),
+  );
+  return {
+    position: "fixed",
+    top: rect.bottom + gap,
+    left,
+    width,
+    maxHeight,
+    zIndex: 9999,
+  };
+}
 
 export function StoreSelector({
   stores,
@@ -28,9 +51,34 @@ export function StoreSelector({
   const current = params.get("store");
   const portfolioActive = parsePortfolioParam(params.get("portfolio")) !== null;
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const validStore =
     current && stores.some((s) => s.id === current) ? current : null;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function updatePosition() {
+      const el = triggerRef.current;
+      if (!el) return;
+      setMenuStyle(menuPositionFromTrigger(el.getBoundingClientRect()));
+    }
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -98,9 +146,35 @@ export function StoreSelector({
   const itemCls =
     "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted";
 
+  const menuBody = (
+    <>
+      <button type="button" className={itemCls} onClick={() => select(null)}>
+        <span>Todas as lojas</span>
+        {!validStore && <Check className="h-4 w-4 text-accent" />}
+      </button>
+      {stores.length === 0 && (
+        <p className="px-2.5 py-2 text-xs text-muted-foreground">
+          Sem lojas ligadas.
+        </p>
+      )}
+      {stores.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          className={itemCls}
+          onClick={() => select(s.id)}
+        >
+          <Sensitive className="truncate">{s.name}</Sensitive>
+          {validStore === s.id && <Check className="h-4 w-4 text-accent" />}
+        </button>
+      ))}
+    </>
+  );
+
   return (
-    <div className={cn("relative z-50 min-w-0", className)}>
+    <div className={cn("relative min-w-0", className)}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className="flex w-full min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-foreground hover:bg-muted sm:gap-2 sm:px-3"
@@ -112,35 +186,25 @@ export function StoreSelector({
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
       </button>
 
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-[200] bg-background/80 backdrop-blur-[1px] md:bg-black/20 md:dark:bg-black/40"
-            onClick={() => setOpen(false)}
-            aria-hidden
-          />
-          <div
-            className={cn(menuPanelCls, "md:left-auto md:right-0 md:w-56")}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <button className={itemCls} onClick={() => select(null)}>
-              <span>Todas as lojas</span>
-              {!validStore && <Check className="h-4 w-4 text-accent" />}
-            </button>
-            {stores.length === 0 && (
-              <p className="px-2.5 py-2 text-xs text-muted-foreground">
-                Sem lojas ligadas.
-              </p>
-            )}
-            {stores.map((s) => (
-              <button key={s.id} className={itemCls} onClick={() => select(s.id)}>
-                <Sensitive className="truncate">{s.name}</Sensitive>
-                {validStore === s.id && <Check className="h-4 w-4 text-accent" />}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      {open &&
+        mounted &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[9998] bg-background/80 backdrop-blur-[1px] dark:bg-black/40"
+              onClick={() => setOpen(false)}
+              aria-hidden
+            />
+            <div
+              className={menuPanelCls}
+              style={menuStyle}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {menuBody}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }

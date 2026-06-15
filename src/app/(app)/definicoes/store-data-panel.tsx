@@ -9,6 +9,7 @@ import {
   type StoreDataState,
 } from "./store-data-actions";
 import type { FeeConfig } from "@/lib/fee-schedule";
+import { DecimalInput } from "@/components/decimal-input";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -99,12 +100,8 @@ export function StoreDataPanel({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className={labelCls}>Processamento (%)</label>
-                <input
+                <DecimalInput
                   name="processingPercent"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
                   defaultValue={initialFees.processingPercent}
                   required
                   disabled={reconfigPending}
@@ -113,11 +110,8 @@ export function StoreDataPanel({
               </div>
               <div>
                 <label className={labelCls}>Fixo / encomenda</label>
-                <input
+                <DecimalInput
                   name="processingFixed"
-                  type="number"
-                  step="0.01"
-                  min="0"
                   defaultValue={initialFees.processingFixed}
                   required
                   disabled={reconfigPending}
@@ -126,12 +120,8 @@ export function StoreDataPanel({
               </div>
               <div>
                 <label className={labelCls}>Taxa transação (%)</label>
-                <input
+                <DecimalInput
                   name="transactionFeePercent"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
                   defaultValue={initialFees.transactionFeePercent}
                   required
                   disabled={reconfigPending}

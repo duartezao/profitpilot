@@ -1,22 +1,15 @@
 import "server-only";
-import type { AnyBulkWriteOperation } from "mongoose";
-import type { HydratedDocument } from "mongoose";
+import type { AnyBulkWriteOperation, HydratedDocument } from "mongoose";
+import { Types } from "mongoose";
 import { orderNetRevenue } from "@/lib/order-revenue";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
 import {
-  computeOrderFees,
-  ensureFeeSchedule,
-  resolveFeeConfigForDateKey,
-  shouldPreserveStoredOrderFees,
-  type FeeScheduleEntry,
-} from "@/lib/fee-schedule";
-import {
   dateKeyInTimezone,
-  importDateKey,
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
 import { connectToDatabase } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
+import { enhancePayoutsError } from "@/lib/shopify-scopes";
 import {
   normalizeShopDomain,
   SHOPIFY_API_VERSION,
@@ -38,6 +31,35 @@ import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { buildOrderAmountsBase } from "@/lib/order-money";
+import {
+  assimilatesCogsOnSync,
+  syncsShopifyProductCosts,
+} from "@/lib/cogs-modes";
+import { applyOrderFeesFromShopify } from "@/lib/order-fees-from-shopify";
+
+/** Campos da loja atualizados durante o sync — persistidos com updateOne (sem __v). */
+export type StoreSyncPersist = {
+  scopes?: string[];
+  ianaTimezone?: string | null;
+  lastSyncAt?: Date;
+  lastSyncError?: string | null;
+  payoutsError?: string | null;
+  paymentsBalance?: number;
+  paymentsBalanceUpdatedAt?: Date;
+  lastSessionMetricsError?: string | null;
+};
+
+export async function persistStoreSyncFields(
+  storeId: string | Types.ObjectId,
+  fields: StoreSyncPersist,
+): Promise<void> {
+  const $set: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) $set[key] = value;
+  }
+  if (!Object.keys($set).length) return;
+  await Store.updateOne({ _id: storeId }, { $set });
+}
 
 type GraphQLResult<T> = { data?: T; errors?: Array<{ message: string }> };
 
@@ -210,7 +232,7 @@ export type OrdersPageResult = {
   hasMore: boolean;
 };
 
-/** Uma página de encomendas (50) — para sync em passos sem timeout. */
+/** Uma página de encomendas (50) — taxas aplicadas depois via balance transactions. */
 export async function syncOrdersPage(
   store: StoreDoc,
   domain: string,
@@ -225,14 +247,6 @@ export async function syncOrdersPage(
   const storeCurrency = (store.currency ?? "EUR").toUpperCase();
 
   const tz = normalizeStoreTimezone(store.ianaTimezone);
-  const floorKey =
-    importDateKey(store.importStartDate, store.createdAt, tz) ??
-    dateKeyInTimezone(new Date(store.createdAt ?? Date.now()), tz);
-  const feeSchedule = ensureFeeSchedule(
-    store.feeSchedule as FeeScheduleEntry[] | undefined,
-    store.feeConfig,
-    floorKey,
-  );
 
   // Desde quando importar: data definida na loja, última sync, ou 90 dias.
   const since =
@@ -362,20 +376,7 @@ export async function syncOrdersPage(
       const refunded = num(o.totalRefundedSet?.shopMoney.amount);
       const shipping = num(o.totalShippingPriceSet?.shopMoney.amount);
       const netRevenue = orderNetRevenue({ subtotal, totalPrice, refunded });
-      const orderDateKey = dateKeyInTimezone(orderDate, tz);
-      const feeConfig = resolveFeeConfigForDateKey(
-        feeSchedule,
-        store.feeConfig,
-        orderDateKey,
-        floorKey,
-      );
-      let fees = computeOrderFees(totalPrice, feeConfig);
-      const prevFees = existingFees.get(o.id);
-      if (
-        shouldPreserveStoredOrderFees(prevFees, orderDateKey, feeSchedule)
-      ) {
-        fees = prevFees!;
-      }
+      const feesForBase = existingFees.get(o.id) ?? 0;
 
       const manualCogs = existingManualCogs.get(o.id) ?? null;
       const cogsForBase = manualCogs != null ? manualCogs : cogs;
@@ -387,7 +388,7 @@ export async function syncOrdersPage(
           netRevenue,
           cogs: cogsForBase,
           shipping,
-          fees,
+          fees: feesForBase,
         },
         storeCurrency,
         baseCurrency,
@@ -417,10 +418,10 @@ export async function syncOrdersPage(
               tax: num(o.totalTaxSet?.shopMoney.amount),
               refunded,
               cogs,
-              fees,
               lineItems,
               amountsBase,
             },
+            $setOnInsert: { fees: 0, feesSource: null },
           },
           upsert: true,
         },
@@ -440,7 +441,7 @@ export async function syncOrdersPage(
   };
 }
 
-/** Importa orders (com COGS por linha e taxas estimadas pelo calendário de taxas). */
+/** Importa orders (COGS por linha; taxas na fase applyOrderFeesFromShopify). */
 async function syncOrders(
   store: StoreDoc,
   domain: string,
@@ -520,7 +521,7 @@ export async function syncPayouts(
   let balanceSaved = false;
 
   // Até 6 páginas (300 payouts) por execução.
-  // Nota: erros (ex.: falta de scope read_shopify_payments_accounts) propagam
+  // Nota: erros (ex.: falta de scope read_shopify_payments_payouts) propagam
   // para serem registados em store.payoutsError, em vez de desaparecerem.
   for (let page = 0; page < 6; page++) {
     const data: Resp = await shopifyGraphQL<Resp>(domain, token, query, {
@@ -725,6 +726,8 @@ export type SyncResult = {
   cogsOrdersUpdated: number;
   cogsLinesFilled: number;
   sessionMetricsDays: number;
+  orderFeesReal: number;
+  orderFeesEstimated: number;
   payoutsError?: string;
   sessionMetricsError?: string;
 };
@@ -750,19 +753,27 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
     creds.clientId,
     creds.clientSecret,
   );
-  store.scopes = tokenScope
+  const scopes = tokenScope
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  store.scopes = scopes;
 
+  let ianaTimezone: string | undefined;
   try {
     const shop = await testShopifyConnection(domain, accessToken);
     if (shop.ianaTimezone) {
+      ianaTimezone = shop.ianaTimezone;
       store.ianaTimezone = shop.ianaTimezone;
     }
   } catch {
     /* sync continua se o ping da shop falhar */
   }
+
+  await persistStoreSyncFields(store._id, {
+    scopes,
+    ...(ianaTimezone ? { ianaTimezone } : {}),
+  });
 
   return { store, domain, accessToken };
 }
@@ -771,9 +782,12 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
 export async function syncStore(storeId: string): Promise<SyncResult> {
   const { store, domain, accessToken } = await prepareShopifySyncContext(storeId);
 
-  const { count: products } = await syncProductCosts(store, domain, accessToken);
-  const cogsMode = store.cogsMode ?? "shopify";
-  const assimilateCogs = cogsMode === "shopify" || cogsMode === "variant";
+  let products = 0;
+  if (syncsShopifyProductCosts(store.cogsMode)) {
+    const result = await syncProductCosts(store, domain, accessToken);
+    products = result.count;
+  }
+  const assimilateCogs = assimilatesCogsOnSync(store.cogsMode);
   const assimilatedBefore = assimilateCogs
     ? await assimilatePendingCogsForStore(store._id)
     : { ordersUpdated: 0, linesFilled: 0 };
@@ -782,6 +796,16 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
     ? await assimilatePendingCogsForStore(store._id)
     : { ordersUpdated: 0, linesFilled: 0 };
   const assimilated = mergeAssimilateResults(assimilatedBefore, assimilatedAfter);
+
+  let orderFeesReal = 0;
+  let orderFeesEstimated = 0;
+  try {
+    const fees = await applyOrderFeesFromShopify(store, domain, accessToken);
+    orderFeesReal = fees.real;
+    orderFeesEstimated = fees.estimated;
+  } catch (e) {
+    console.error("[sync] order fees", e);
+  }
 
   // Payouts são opcionais: um erro aqui (ex.: scope em falta) não deve
   // impedir a sync de orders/produtos. Registamos o erro na loja.
@@ -795,10 +819,12 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
       domain,
       accessToken,
     );
+    store.payoutsError = null;
   } catch (e) {
-    payoutsError = e instanceof Error ? e.message : "Falha a obter payouts.";
+    const raw = e instanceof Error ? e.message : "Falha a obter payouts.";
+    payoutsError = enhancePayoutsError(raw);
+    store.payoutsError = payoutsError;
   }
-    store.payoutsError = payoutsError ?? null;
 
   let sessionMetricsDays = 0;
   let sessionMetricsError: string | undefined;
@@ -812,8 +838,18 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
     store.lastSessionMetricsError = sessionMetricsError;
   }
 
-  store.lastSyncAt = new Date();
-  await store.save();
+  await persistStoreSyncFields(store._id, {
+    lastSyncAt: new Date(),
+    lastSyncError: null,
+    payoutsError: store.payoutsError ?? null,
+    lastSessionMetricsError: store.lastSessionMetricsError ?? null,
+    ...(store.paymentsBalanceUpdatedAt
+      ? {
+          paymentsBalance: store.paymentsBalance,
+          paymentsBalanceUpdatedAt: store.paymentsBalanceUpdatedAt,
+        }
+      : {}),
+  });
 
   return {
     products,
@@ -823,6 +859,8 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
     cogsOrdersUpdated: assimilated.ordersUpdated,
     cogsLinesFilled: assimilated.linesFilled,
     sessionMetricsDays,
+    orderFeesReal,
+    orderFeesEstimated,
     payoutsError,
     sessionMetricsError,
   };

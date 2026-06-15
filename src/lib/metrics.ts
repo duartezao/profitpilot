@@ -20,6 +20,8 @@ import {
   sumManualCogsByDay,
   countOrdersMissingManualCogs,
   countMissingCogsDays,
+  countMissingCogsForStores,
+  formatMissingCogsWarning,
 } from "@/lib/manual-cogs";
 import {
   ranksProductsByUnits,
@@ -227,6 +229,8 @@ export type DashboardSummary = {
   /** Produtos vendidos sem COGS — lucro pode estar incompleto. */
   cogsIncomplete: boolean;
   missingCogsCount: number;
+  /** Texto do aviso de COGS (respeita modo por loja). */
+  missingCogsMessage: string;
   /** Dias de ad spend em falta (desde importação até ontem). */
   missingAdSpendDays: number;
   /** Série diária de lucro (vista consolidada). */
@@ -249,6 +253,137 @@ type StoreAgg = {
   refunds: number;
   orders: number;
 };
+
+type StoreCogsCtx = {
+  _id: mongoose.Types.ObjectId;
+  cogsMode?: string | null;
+  ianaTimezone?: string | null;
+};
+
+function emptyStoreAgg(): StoreAgg {
+  return {
+    revenue: 0,
+    cogs: 0,
+    shipping: 0,
+    fees: 0,
+    refunds: 0,
+    orders: 0,
+  };
+}
+
+function storeCogsMode(store: StoreCogsCtx): CogsMode {
+  return (store.cogsMode ?? "shopify") as CogsMode;
+}
+
+/** Agrega métricas por loja com COGS conforme o modo (shopify/variant/order/day). */
+async function aggregateStoreAggs(
+  wsId: mongoose.Types.ObjectId,
+  stores: StoreCogsCtx[],
+  slice: PeriodSlice,
+  sharedTimeZone?: string | null,
+): Promise<Map<string, StoreAgg>> {
+  const result = new Map<string, StoreAgg>();
+  if (!stores.length) return result;
+
+  const storeOids = stores.map((s) => s._id);
+  const dateMatch = sharedTimeZone
+    ? orderDateMatchInTimezone(slice, sharedTimeZone)
+    : orderDateMatch(slice);
+
+  const baseRows = await Order.aggregate<
+    { _id: mongoose.Types.ObjectId } & StoreAgg
+  >([
+    {
+      $match: {
+        workspaceId: wsId,
+        storeId: { $in: storeOids },
+        ...dateMatch,
+      },
+    },
+    {
+      $group: {
+        _id: "$storeId",
+        revenue: netRevenueSumBaseExpr,
+        cogs: { $sum: 0 },
+        shipping: shippingSumBaseExpr,
+        fees: feesSumBaseExpr,
+        refunds: refundsSumBaseExpr,
+        orders: { $sum: 1 },
+      },
+    },
+  ]);
+
+  for (const r of baseRows) {
+    const { _id, ...agg } = r;
+    result.set(String(_id), agg);
+  }
+  for (const s of stores) {
+    if (!result.has(String(s._id))) result.set(String(s._id), emptyStoreAgg());
+  }
+
+  const shopifyVariantOids = stores
+    .filter((s) => {
+      const m = storeCogsMode(s);
+      return m === "shopify" || m === "variant";
+    })
+    .map((s) => s._id);
+  const orderOids = stores
+    .filter((s) => storeCogsMode(s) === "order")
+    .map((s) => s._id);
+  const dayStores = stores.filter((s) => storeCogsMode(s) === "day");
+
+  if (shopifyVariantOids.length) {
+    const cogsRows = await Order.aggregate<{
+      _id: mongoose.Types.ObjectId;
+      cogs: number;
+    }>([
+      {
+        $match: {
+          workspaceId: wsId,
+          storeId: { $in: shopifyVariantOids },
+          ...dateMatch,
+        },
+      },
+      { $group: { _id: "$storeId", cogs: cogsSumBaseExpr } },
+    ]);
+    for (const r of cogsRows) {
+      result.get(String(r._id))!.cogs = r.cogs;
+    }
+  }
+
+  if (orderOids.length) {
+    const cogsRows = await Order.aggregate<{
+      _id: mongoose.Types.ObjectId;
+      cogs: number;
+    }>([
+      {
+        $match: {
+          workspaceId: wsId,
+          storeId: { $in: orderOids },
+          ...dateMatch,
+        },
+      },
+      { $group: { _id: "$storeId", cogs: orderModeCogsSumExpr } },
+    ]);
+    for (const r of cogsRows) {
+      result.get(String(r._id))!.cogs = r.cogs;
+    }
+  }
+
+  await Promise.all(
+    dayStores.map(async (s) => {
+      const tz = normalizeStoreTimezone(s.ianaTimezone);
+      const cogs = await sumManualCogsForPeriod(
+        [s._id],
+        slice,
+        sharedTimeZone ?? tz,
+      );
+      result.get(String(s._id))!.cogs = cogs;
+    }),
+  );
+
+  return result;
+}
 
 function calcProfit(
   a: Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees">,
@@ -604,7 +739,19 @@ function normPayoutStatus(s?: string | null) {
 
 type PeriodSlice = Pick<ResolvedPeriod, "start" | "end" | "specificDates">;
 
-function missingCogsNote(count: number): string {
+function missingCogsNote(count: number, mode?: CogsMode | null): string {
+  if (count <= 0) return "";
+  if (mode == null) {
+    return `COGS em falta (${count}) neste período — lucro pode estar superestimado`;
+  }
+  if (mode === "day") {
+    const n = count === 1 ? "dia com vendas" : "dias com vendas";
+    return `COGS em falta em ${count} ${n} neste período — lucro pode estar superestimado; confirma custos diários`;
+  }
+  if (mode === "order") {
+    const n = count === 1 ? "encomenda" : "encomendas";
+    return `COGS em falta em ${count} ${n} neste período — lucro pode estar superestimado`;
+  }
   const n = count === 1 ? "produto" : "produtos";
   return `COGS em falta em ${count} ${n} neste período — lucro pode estar superestimado; confirma custos do fornecedor`;
 }
@@ -756,66 +903,95 @@ function storeDayKey(dateKey: string, storeId: string) {
 
 async function aggregateDailyOrdersByStore(
   wsId: mongoose.Types.ObjectId,
-  storeOids: mongoose.Types.ObjectId[],
+  stores: StoreCogsCtx[],
   slice: PeriodSlice,
-  storeTimeZone?: string | null,
+  sharedTimeZone?: string | null,
 ): Promise<
   Map<string, Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">>
 > {
-  if (!storeOids.length) return new Map();
-
-  const dateExpr = storeTimeZone
-    ? {
-        $dateToString: {
-          format: "%Y-%m-%d",
-          date: "$orderDate",
-          timezone: normalizeStoreTimezone(storeTimeZone),
-        },
-      }
-    : { $dateToString: { format: "%Y-%m-%d", date: "$orderDate" } };
-
-  const rows = await Order.aggregate<{
-    _id: { dateKey: string; storeId: mongoose.Types.ObjectId };
-    revenue: number;
-    cogs: number;
-    shipping: number;
-    fees: number;
-    refunds: number;
-  }>([
-    {
-      $match: {
-        workspaceId: wsId,
-        storeId: { $in: storeOids },
-        ...(storeTimeZone
-          ? orderDateMatchInTimezone(slice, storeTimeZone)
-          : orderDateMatch(slice)),
-      },
-    },
-    {
-      $group: {
-        _id: { dateKey: dateExpr, storeId: "$storeId" },
-        revenue: netRevenueSumBaseExpr,
-        cogs: cogsSumBaseExpr,
-        shipping: shippingSumBaseExpr,
-        fees: feesSumBaseExpr,
-        refunds: refundsSumBaseExpr,
-      },
-    },
-  ]);
-
   const map = new Map<
     string,
     Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
   >();
-  for (const r of rows) {
-    map.set(storeDayKey(r._id.dateKey, String(r._id.storeId)), {
-      revenue: r.revenue,
-      cogs: r.cogs,
-      shipping: r.shipping,
-      fees: r.fees,
-      refunds: r.refunds,
-    });
-  }
+  if (!stores.length) return map;
+
+  const zeroRow = () => ({
+    revenue: 0,
+    cogs: 0,
+    shipping: 0,
+    fees: 0,
+    refunds: 0,
+  });
+
+  await Promise.all(
+    stores.map(async (store) => {
+      const sid = String(store._id);
+      const tz = sharedTimeZone ?? normalizeStoreTimezone(store.ianaTimezone);
+      const mode = storeCogsMode(store);
+      const dateExpr = {
+        $dateToString: {
+          format: "%Y-%m-%d",
+          date: "$orderDate",
+          timezone: tz,
+        },
+      };
+      const cogsExpr =
+        mode === "order"
+          ? orderModeCogsSumExpr
+          : mode === "day"
+            ? { $sum: 0 }
+            : cogsSumBaseExpr;
+
+      const rows = await Order.aggregate<{
+        _id: string;
+        revenue: number;
+        cogs: number;
+        shipping: number;
+        fees: number;
+        refunds: number;
+      }>([
+        {
+          $match: {
+            workspaceId: wsId,
+            storeId: store._id,
+            ...orderDateMatchInTimezone(slice, tz),
+          },
+        },
+        {
+          $group: {
+            _id: dateExpr,
+            revenue: netRevenueSumBaseExpr,
+            cogs: cogsExpr,
+            shipping: shippingSumBaseExpr,
+            fees: feesSumBaseExpr,
+            refunds: refundsSumBaseExpr,
+          },
+        },
+      ]);
+
+      for (const r of rows) {
+        map.set(storeDayKey(r._id, sid), {
+          revenue: r.revenue,
+          cogs: r.cogs,
+          shipping: r.shipping,
+          fees: r.fees,
+          refunds: r.refunds,
+        });
+      }
+
+      if (mode === "day") {
+        const dayKeys = dayKeysInSlice(slice, tz);
+        const dayCogs = await sumManualCogsByDay(store._id, dayKeys);
+        for (const dateKey of dayKeys) {
+          const key = storeDayKey(dateKey, sid);
+          const row = map.get(key) ?? zeroRow();
+          row.cogs = dayCogs.get(dateKey) ?? 0;
+          map.set(key, row);
+        }
+      }
+    }),
+  );
+
   return map;
 }
 
@@ -855,13 +1031,17 @@ async function aggregateDailyAdSpendByStore(
 
 async function buildConsolidatedDailyProfitSeries(
   wsId: mongoose.Types.ObjectId,
-  stores: Array<{ _id: mongoose.Types.ObjectId; name: string }>,
+  stores: Array<{
+    _id: mongoose.Types.ObjectId;
+    name: string;
+    cogsMode?: string | null;
+    ianaTimezone?: string | null;
+  }>,
   colorByStoreId: Map<string, string>,
   slice: PeriodSlice,
   fmtMoney: (v: number) => string,
   storeTimeZone?: string | null,
 ): Promise<{ points: ProfitChartPoint[]; series: ProfitChartSeries[] }> {
-  const storeOids = stores.map((s) => s._id);
   const series: ProfitChartSeries[] = stores.map((s) => {
     const sid = String(s._id);
     return {
@@ -872,8 +1052,9 @@ async function buildConsolidatedDailyProfitSeries(
     };
   });
 
+  const storeOids = stores.map((s) => s._id);
   const [ordersByStoreDay, adByStoreDay] = await Promise.all([
-    aggregateDailyOrdersByStore(wsId, storeOids, slice, storeTimeZone),
+    aggregateDailyOrdersByStore(wsId, stores, slice, storeTimeZone),
     aggregateDailyAdSpendByStore(storeOids, slice, storeTimeZone),
   ]);
 
@@ -1132,6 +1313,66 @@ async function sumMissingAdSpendDays(
   return summaries.reduce((s, x) => s + x.missingCount, 0);
 }
 
+type OrderForProductRanking = {
+  lineItems?: Array<{
+    title?: string | null;
+    quantity?: number | null;
+    unitPrice?: number | null;
+    unitCost?: number | null;
+  }>;
+  netRevenue?: number | null;
+  subtotal?: number | null;
+  totalPrice?: number | null;
+  refunded?: number | null;
+  shipping?: number | null;
+  fees?: number | null;
+  amountsBase?: {
+    netRevenue?: number | null;
+    cogs?: number | null;
+    shipping?: number | null;
+    fees?: number | null;
+    fxRate?: number | null;
+  } | null;
+};
+
+function lineStoreRevenue(li: {
+  unitPrice?: number | null;
+  quantity?: number | null;
+}): number {
+  return (li.unitPrice ?? 0) * (li.quantity ?? 0);
+}
+
+function orderLineRevenueBasis(order: OrderForProductRanking): number {
+  let total = 0;
+  for (const li of order.lineItems ?? []) {
+    total += lineStoreRevenue(li);
+  }
+  return total;
+}
+
+function orderFxRate(order: OrderForProductRanking): number {
+  const base = order.amountsBase?.netRevenue;
+  const store = order.netRevenue ?? orderNetRevenue(order);
+  if (base != null && store > 0) return base / store;
+  const fx = order.amountsBase?.fxRate;
+  return fx != null && fx > 0 ? fx : 1;
+}
+
+/** Reparte um total em moeda base pelas linhas (proporção do preço na loja). */
+function allocateBaseFromOrder(
+  order: OrderForProductRanking,
+  lineStoreAmount: number,
+  orderBaseTotal: number | null | undefined,
+  storeBasis: number,
+): number {
+  if (orderBaseTotal != null) {
+    if (storeBasis > 0) return orderBaseTotal * (lineStoreAmount / storeBasis);
+    const n = order.lineItems?.length ?? 1;
+    return orderBaseTotal / Math.max(n, 1);
+  }
+  return lineStoreAmount * orderFxRate(order);
+}
+
 async function buildTopProductsByUnits(
   storeOid: mongoose.Types.ObjectId,
   slice: PeriodSlice,
@@ -1145,16 +1386,29 @@ async function buildTopProductsByUnits(
       ? orderDateMatchInTimezone(slice, storeTimeZone)
       : orderDateMatch(slice)),
   })
-    .select("lineItems amountsBase.netRevenue netRevenue")
+    .select(
+      "lineItems netRevenue subtotal totalPrice refunded amountsBase.netRevenue amountsBase.fxRate",
+    )
     .lean();
 
   const map = new Map<string, { units: number; revenue: number }>();
 
   for (const order of orders) {
+    const storeBasis =
+      orderLineRevenueBasis(order) ||
+      order.netRevenue ||
+      orderNetRevenue(order);
+    const netRevBase = order.amountsBase?.netRevenue;
+
     for (const li of order.lineItems ?? []) {
       const title = li.title || "(sem nome)";
-      const rev =
-        (li.unitPrice ?? 0) * (li.quantity ?? 0);
+      const lineRevStore = lineStoreRevenue(li);
+      const rev = allocateBaseFromOrder(
+        order,
+        lineRevStore,
+        netRevBase,
+        storeBasis,
+      );
       const row = map.get(title) ?? { units: 0, revenue: 0 };
       row.units += li.quantity ?? 0;
       row.revenue += rev;
@@ -1189,26 +1443,50 @@ async function buildTopProductsByProfit(
       ? orderDateMatchInTimezone(slice, storeTimeZone)
       : orderDateMatch(slice)),
   })
-    .select("lineItems shipping fees refunded totalPrice subtotal")
+    .select(
+      "lineItems shipping fees refunded totalPrice subtotal netRevenue amountsBase",
+    )
     .lean();
 
   const map = new Map<string, { units: number; revenue: number; profit: number }>();
 
   for (const order of orders) {
     const lines = order.lineItems ?? [];
-    let lineRev = 0;
+    const storeBasis =
+      orderLineRevenueBasis(order) ||
+      order.netRevenue ||
+      orderNetRevenue(order);
+    const netRevBase =
+      order.amountsBase?.netRevenue ??
+      (order.netRevenue ?? 0) * orderFxRate(order);
+    const shippingBase =
+      order.amountsBase?.shipping ??
+      (order.shipping ?? 0) * orderFxRate(order);
+    const feesBase =
+      order.amountsBase?.fees ?? (order.fees ?? 0) * orderFxRate(order);
+    const overheadBase = shippingBase + feesBase;
+
+    let orderCogsStore = 0;
     for (const li of lines) {
-      lineRev += (li.unitPrice ?? 0) * (li.quantity ?? 0);
+      orderCogsStore += (li.unitCost ?? 0) * (li.quantity ?? 0);
     }
-    const netRev = orderNetRevenue(order);
-    const basis = lineRev > 0 ? lineRev : netRev;
-    const overhead = (order.shipping ?? 0) + (order.fees ?? 0);
+    const cogsBaseTotal = order.amountsBase?.cogs;
 
     for (const li of lines) {
-      const rev = (li.unitPrice ?? 0) * (li.quantity ?? 0);
-      const cost = (li.unitCost ?? 0) * (li.quantity ?? 0);
-      const share = basis > 0 ? rev / basis : 0;
-      const profit = rev - cost - overhead * share;
+      const lineRevStore = lineStoreRevenue(li);
+      const rev = allocateBaseFromOrder(
+        order,
+        lineRevStore,
+        netRevBase,
+        storeBasis,
+      );
+      const costStore = (li.unitCost ?? 0) * (li.quantity ?? 0);
+      const cost =
+        cogsBaseTotal != null && orderCogsStore > 0
+          ? cogsBaseTotal * (costStore / orderCogsStore)
+          : costStore * orderFxRate(order);
+      const share = storeBasis > 0 ? lineRevStore / storeBasis : 0;
+      const profit = rev - cost - overheadBase * share;
       const title = li.title || "(sem nome)";
       const row = map.get(title) ?? { units: 0, revenue: 0, profit: 0 };
       row.units += li.quantity ?? 0;
@@ -1256,6 +1534,8 @@ export type WorkspacePnl = {
   stores: PnlLine[];
   cogsIncomplete: boolean;
   missingCogsCount: number;
+  /** Texto do aviso de COGS (respeita modo por loja). */
+  missingCogsMessage: string;
   missingAdSpendDays: number;
 };
 
@@ -1289,9 +1569,9 @@ export async function buildWorkspacePnl(
     stores: [],
     cogsIncomplete: false,
     missingCogsCount: 0,
+    missingCogsMessage: "",
     missingAdSpendDays: 0,
   };
-  if (!workspaceId) return empty;
 
   const wsId = new mongoose.Types.ObjectId(workspaceId);
   const workspace = await Workspace.findById(wsId).lean();
@@ -1302,7 +1582,7 @@ export async function buildWorkspacePnl(
     deletedAt: null,
     ...NON_ARCHIVED_STORE_FILTER,
   })
-    .select("name importStartDate createdAt ianaTimezone")
+    .select("name importStartDate createdAt ianaTimezone cogsMode workspaceId")
     .lean();
   if (stores.length === 0) return { ...empty, currency };
 
@@ -1332,29 +1612,7 @@ export async function buildWorkspacePnl(
   empty.periodLabel = period.label;
   const storeList = scoped ? [scoped] : accessibleStores;
 
-  const orderMatch: Record<string, unknown> = {
-    workspaceId: wsId,
-    ...(storeTz
-      ? orderDateMatchInTimezone(period, storeTz)
-      : orderDateMatch(period)),
-  };
-  if (scoped) orderMatch.storeId = scoped._id;
-
-  const rows = await Order.aggregate<{ _id: mongoose.Types.ObjectId } & StoreAgg>([
-    { $match: orderMatch },
-    {
-      $group: {
-        _id: "$storeId",
-        revenue: netRevenueSumBaseExpr,
-        cogs: cogsSumBaseExpr,
-        shipping: shippingSumBaseExpr,
-        fees: feesSumBaseExpr,
-        refunds: refundsSumBaseExpr,
-        orders: { $sum: 1 },
-      },
-    },
-  ]);
-  const byStore = new Map<string, StoreAgg>(rows.map((r) => [String(r._id), r]));
+  const byStore = await aggregateStoreAggs(wsId, storeList, pnlSlice, storeTz);
 
   const adSpendByStore = new Map<string, number>();
   await Promise.all(
@@ -1413,11 +1671,16 @@ export async function buildWorkspacePnl(
   );
   const totalAdSpend = [...adSpendByStore.values()].reduce((s, v) => s + v, 0);
   const netProfit = calcProfit(t, totalAdSpend);
-  const storeOids = storeList.map((s) => s._id);
   const [missingCogsCount, missingAdSpendDays] = await Promise.all([
-    countSoldVariantsMissingCost(storeOids, pnlSlice),
+    countMissingCogsForStores(storeList, pnlSlice),
     sumMissingAdSpendDays(storeList, currency),
   ]);
+  const missingCogsMessage = scoped
+    ? formatMissingCogsWarning(
+        missingCogsCount,
+        (scoped.cogsMode ?? "shopify") as CogsMode,
+      )
+    : formatMissingCogsWarning(missingCogsCount);
 
   return {
     currency,
@@ -1432,6 +1695,7 @@ export async function buildWorkspacePnl(
     stores: storeLines,
     cogsIncomplete: missingCogsCount > 0,
     missingCogsCount,
+    missingCogsMessage,
     missingAdSpendDays,
   };
 }
@@ -1459,6 +1723,7 @@ function emptySummary(currency = "EUR"): DashboardSummary {
     dailyNotes: [],
     cogsIncomplete: false,
     missingCogsCount: 0,
+    missingCogsMessage: "",
     missingAdSpendDays: 0,
     profitChart: [],
     dailyMetrics: [],
@@ -1601,31 +1866,11 @@ export async function buildWorkspaceSummary(
     return agg;
   }
 
-  const orderMatch: Record<string, unknown> = {
-    workspaceId: wsId,
-    ...(storeTz
-      ? orderDateMatchInTimezone(currentSlice, storeTz)
-      : orderDateMatch(currentSlice)),
-  };
-  if (scoped) orderMatch.storeId = scoped._id;
-
-  const rows = await Order.aggregate<{ _id: mongoose.Types.ObjectId } & StoreAgg>([
-    { $match: orderMatch },
-    {
-      $group: {
-        _id: "$storeId",
-        revenue: netRevenueSumBaseExpr,
-        cogs: cogsSumBaseExpr,
-        shipping: shippingSumBaseExpr,
-        fees: feesSumBaseExpr,
-        refunds: refundsSumBaseExpr,
-        orders: { $sum: 1 },
-      },
-    },
-  ]);
-
-  const byStore = new Map<string, StoreAgg>(
-    rows.map((r) => [String(r._id), r]),
+  const byStore = await aggregateStoreAggs(
+    wsId,
+    stores,
+    currentSlice,
+    storeTz,
   );
 
   const fmtMoney = (v: number) => formatCurrency(v, currency);
@@ -1662,10 +1907,13 @@ export async function buildWorkspaceSummary(
         : scopedCogsMode === "day"
           ? countMissingCogsDays(scoped)
           : countSoldVariantsMissingCost([scoped._id], currentSlice)
-      : countSoldVariantsMissingCost(storeOids, currentSlice),
+      : countMissingCogsForStores(stores, currentSlice),
     sumMissingAdSpendDays(stores, currency),
   ]);
   const cogsIncomplete = missingCogsCount > 0;
+  const missingCogsMessage = scoped
+    ? formatMissingCogsWarning(missingCogsCount, scopedCogsMode)
+    : formatMissingCogsWarning(missingCogsCount);
 
   const summaryStores = await Promise.all(
     stores.map(async (s) => {
@@ -1777,7 +2025,7 @@ export async function buildWorkspaceSummary(
         label: "Net Profit",
         value: money(curProfit),
         title: cogsIncomplete
-          ? `${formatProfitBreakdown(cur, curAdSpend, fmtMoney, { adSpendKnown: scopedAdSpendKnown })} · ${missingCogsNote(missingCogsCount)}`
+          ? `${formatProfitBreakdown(cur, curAdSpend, fmtMoney, { adSpendKnown: scopedAdSpendKnown })} · ${missingCogsNote(missingCogsCount, scopedCogsMode)}`
           : formatProfitBreakdown(cur, curAdSpend, fmtMoney, {
               adSpendKnown: scopedAdSpendKnown,
             }),
@@ -1826,7 +2074,7 @@ export async function buildWorkspaceSummary(
         label: "Net Profit",
         value: money(netProfit),
         title: cogsIncomplete
-          ? `${formatProfitBreakdown(totals, adSpend, fmtMoney, { adSpendKnown: curAdSpendKnownWorkspace })} · ${missingCogsNote(missingCogsCount)}`
+          ? `${formatProfitBreakdown(totals, adSpend, fmtMoney, { adSpendKnown: curAdSpendKnownWorkspace })} · ${missingCogsNote(missingCogsCount, null)}`
           : formatProfitBreakdown(totals, adSpend, fmtMoney, {
               adSpendKnown: curAdSpendKnownWorkspace,
             }),
@@ -2119,6 +2367,7 @@ export async function buildWorkspaceSummary(
     dailyNotes,
     cogsIncomplete,
     missingCogsCount,
+    missingCogsMessage,
     missingAdSpendDays,
     profitChart,
     profitChartSeries,

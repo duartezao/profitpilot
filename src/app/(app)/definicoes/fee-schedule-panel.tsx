@@ -6,6 +6,7 @@ import {
   type FeeScheduleState,
 } from "./fee-schedule-actions";
 import type { FeeScheduleEntryView } from "@/lib/fee-schedule";
+import { DecimalInput } from "@/components/decimal-input";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -20,6 +21,7 @@ export function FeeSchedulePanel({
   defaultProcessingPercent,
   defaultProcessingFixed,
   defaultTransactionFeePercent,
+  currencyConversionPercent = 0,
 }: {
   storeId: string;
   canEdit: boolean;
@@ -29,6 +31,7 @@ export function FeeSchedulePanel({
   defaultProcessingPercent: number;
   defaultProcessingFixed: number;
   defaultTransactionFeePercent: number;
+  currencyConversionPercent?: number;
 }) {
   const [state, action, pending] = useActionState<
     FeeScheduleState,
@@ -40,16 +43,23 @@ export function FeeSchedulePanel({
   return (
     <div className="rounded-lg border border-border bg-surface p-5">
       <div className="mb-4">
-        <p className="text-sm font-medium">Taxas de processamento</p>
+        <p className="text-sm font-medium">Taxas de processamento (fallback)</p>
         <p className="text-xs text-muted-foreground">
-          Quando a Shopify ou o gateway mudam a comissão, regista a nova taxa
-          com a data em que passa a valer. Encomendas de dias anteriores
-          mantêm a taxa já gravada — o lucro passado não muda.
+          Com Shopify Payments, as taxas reais vêm automaticamente das balance
+          transactions no sync. Este calendário só se aplica a encomendas sem
+          taxa real (gateway externo ou sem dados da Shopify).
         </p>
         <p className="mt-2 text-sm">
           Taxa actual:{" "}
           <span className="font-medium tabular-nums">{currentLabel}</span>
         </p>
+        {currencyConversionPercent > 0 && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Inclui automaticamente{" "}
+            {currencyConversionPercent.toFixed(2).replace(".", ",")}% de conversão
+            de moeda Shopify (loja ≠ moeda de payout).
+          </p>
+        )}
       </div>
 
       {entries.length > 0 && (
@@ -116,11 +126,8 @@ export function FeeSchedulePanel({
             </div>
             <div>
               <label className={labelCls}>Percentagem (%)</label>
-              <input
+              <DecimalInput
                 name="processingPercent"
-                type="number"
-                step="0.01"
-                min="0"
                 placeholder="1.5"
                 defaultValue={defaultProcessingPercent}
                 className={inputCls}
@@ -129,11 +136,8 @@ export function FeeSchedulePanel({
             </div>
             <div>
               <label className={labelCls}>Fixo por encomenda</label>
-              <input
+              <DecimalInput
                 name="processingFixed"
-                type="number"
-                step="0.01"
-                min="0"
                 placeholder="0.30"
                 defaultValue={defaultProcessingFixed}
                 className={inputCls}
@@ -142,14 +146,10 @@ export function FeeSchedulePanel({
             </div>
             <div>
               <label className={labelCls}>
-                Taxa extra (%){" "}
-                <span className="text-muted-foreground">(opcional)</span>
+                Taxa extra gateway externo (%)
               </label>
-              <input
+              <DecimalInput
                 name="transactionFeePercent"
-                type="number"
-                step="0.01"
-                min="0"
                 placeholder="0"
                 defaultValue={defaultTransactionFeePercent}
                 className={inputCls}

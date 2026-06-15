@@ -136,6 +136,7 @@ export function DashboardClient() {
           <DataWarnings
             cogsIncomplete={portfolioData.cogsIncomplete}
             missingCogsCount={portfolioData.missingCogsCount}
+            missingCogsMessage={portfolioData.missingCogsMessage}
             missingAdSpendDays={portfolioData.missingAdSpendDays}
           />
         )}
@@ -179,6 +180,7 @@ export function DashboardClient() {
           <DataWarnings
             cogsIncomplete={workspaceData.cogsIncomplete}
             missingCogsCount={workspaceData.missingCogsCount}
+            missingCogsMessage={workspaceData.missingCogsMessage}
             missingAdSpendDays={workspaceData.missingAdSpendDays}
           />
           <StoreDashboardView data={workspaceData} />
@@ -214,6 +216,7 @@ export function DashboardClient() {
             <DataWarnings
               cogsIncomplete={workspaceData.cogsIncomplete}
               missingCogsCount={workspaceData.missingCogsCount}
+              missingCogsMessage={workspaceData.missingCogsMessage}
               missingAdSpendDays={workspaceData.missingAdSpendDays}
             />
           )}

@@ -11,6 +11,7 @@ import { CashEntry } from "@/models/CashEntry";
 import { parseDateInput } from "@/lib/period";
 import { assertStoreAccess } from "@/lib/store-scope";
 import { isManualCashType } from "@/lib/cash-entries";
+import { parseLocaleNumber } from "@/lib/parse-number";
 
 export type CashActionState = { ok?: boolean; error?: string };
 
@@ -40,7 +41,7 @@ export async function addCashEntryAction(
   const parsed = addSchema.safeParse({
     storeId: formData.get("storeId"),
     type: formData.get("type"),
-    amount: Number(formData.get("amount")),
+    amount: parseLocaleNumber(formData.get("amount")),
     dueDateKey: String(formData.get("dueDateKey") ?? ""),
     description: String(formData.get("description") ?? "").trim(),
     confirm: formData.get("confirm") === "on" ? "yes" : undefined,

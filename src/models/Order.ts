@@ -46,6 +46,12 @@ const OrderSchema = new Schema(
     // Calculados na sincronização.
     cogs: { type: Number, default: 0 },
     fees: { type: Number, default: 0 },
+    /** `real` = Shopify Payments (balance transactions); `estimated` = fallback manual. */
+    feesSource: {
+      type: String,
+      enum: ["real", "estimated"],
+      default: null,
+    },
 
     /** COGS manual por encomenda (modo «order»), na moeda base do workspace. */
     manualCogs: { type: Number, default: null },

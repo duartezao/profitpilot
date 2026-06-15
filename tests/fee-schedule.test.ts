@@ -4,6 +4,7 @@ import {
   computeOrderFees,
   ensureFeeSchedule,
   resolveFeeConfigForDateKey,
+  shopifyCurrencyConversionPercent,
   shouldPreserveStoredOrderFees,
 } from "../src/lib/fee-schedule.ts";
 
@@ -46,6 +47,14 @@ describe("fee schedule", () => {
     const cfg = resolveFeeConfigForDateKey(schedule, null, "2026-06-15", floor);
     const fees = computeOrderFees(100, cfg);
     assert.equal(fees, 2.3);
+  });
+
+  it("adiciona 2% de conversão quando moeda da loja ≠ payout", () => {
+    const cfg = resolveFeeConfigForDateKey(schedule, null, "2026-06-15", floor);
+    assert.equal(shopifyCurrencyConversionPercent("RSD", "EUR"), 2);
+    assert.equal(shopifyCurrencyConversionPercent("EUR", "EUR"), 0);
+    const fees = computeOrderFees(100, cfg, 2);
+    assert.equal(fees, 4.3);
   });
 
   it("cria entrada inicial a partir de feeConfig legado", () => {

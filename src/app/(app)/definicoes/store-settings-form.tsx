@@ -8,6 +8,7 @@ import {
 import { RemoveBankrollForm } from "./remove-bankroll-form";
 import { listSessionCountryOptions } from "@/lib/shopify-countries";
 import { Sensitive } from "@/components/privacy-mode";
+import { DecimalInput } from "@/components/decimal-input";
 import {
   COGS_MODES,
   COGS_MODE_LABELS,
@@ -171,10 +172,8 @@ export function StoreSettingsForm({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className={labelCls}>Saldo inicial ({symbol})</label>
-            <input
+            <DecimalInput
               name="startingBalance"
-              type="number"
-              step="0.01"
               defaultValue={store.startingBalance}
               disabled={!canEdit}
               className={inputCls}

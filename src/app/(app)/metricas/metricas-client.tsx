@@ -71,6 +71,7 @@ export function MetricasClient() {
         <DataWarnings
           cogsIncomplete={data.cogsIncomplete}
           missingCogsCount={data.missingCogsCount}
+          missingCogsMessage={data.missingCogsMessage}
           missingAdSpendDays={data.missingAdSpendDays}
         />
       )}

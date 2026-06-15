@@ -375,6 +375,29 @@ export async function countMissingCogsDays(
   return rows.filter((r) => r.hasOrders && r.amount === null).length;
 }
 
+/** Soma COGS em falta respeitando o modo de cada loja. */
+export async function countMissingCogsForStores(
+  stores: Array<Parameters<typeof countMissingCogsForStore>[0]>,
+  period?: PeriodSlice,
+): Promise<number> {
+  let total = 0;
+  for (const store of stores) {
+    total += await countMissingCogsForStore(store, period);
+  }
+  return total;
+}
+
+export function formatMissingCogsWarning(
+  count: number,
+  mode?: CogsMode | null,
+): string {
+  if (count <= 0) return "";
+  const detail = mode
+    ? cogsMissingLabel(mode, count)
+    : `${count} ${count === 1 ? "entrada de COGS em falta" : "entradas de COGS em falta"}`;
+  return `${detail} neste período.`;
+}
+
 /** Conta COGS em falta conforme o modo configurado na loja. */
 export async function countMissingCogsForStore(
   store: {

@@ -102,6 +102,75 @@ function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+type OrderMoneyFields = {
+  subtotal?: number | null;
+  totalPrice?: number | null;
+  refunded?: number | null;
+  netRevenue?: number | null;
+  cogs?: number | null;
+  shipping?: number | null;
+  fees?: number | null;
+  manualCogs?: number | null;
+  amountsBase?: {
+    netRevenue?: number | null;
+    cogs?: number | null;
+    shipping?: number | null;
+    fees?: number | null;
+    refunded?: number | null;
+    fxRate?: number | null;
+    baseCurrency?: string | null;
+  } | null;
+};
+
+/** Taxa loja → moeda base (derivada de amountsBase quando existir). */
+export function orderFxRate(order: OrderMoneyFields): number {
+  const base = order.amountsBase?.netRevenue;
+  const store = order.netRevenue ?? orderNetRevenue(order);
+  if (base != null && store > 0) return base / store;
+  const fx = order.amountsBase?.fxRate;
+  return fx != null && fx > 0 ? fx : 1;
+}
+
+export function orderNetRevenueBase(order: OrderMoneyFields): number {
+  const base = order.amountsBase?.netRevenue;
+  if (base != null) return base;
+  return (order.netRevenue ?? orderNetRevenue(order)) * orderFxRate(order);
+}
+
+export function orderRefundedBase(order: OrderMoneyFields): number {
+  const base = order.amountsBase?.refunded;
+  if (base != null) return base;
+  return num(order.refunded) * orderFxRate(order);
+}
+
+export function orderCogsBase(order: OrderMoneyFields): number {
+  if (order.manualCogs != null) return order.manualCogs;
+  const base = order.amountsBase?.cogs;
+  if (base != null) return base;
+  return num(order.cogs) * orderFxRate(order);
+}
+
+export function orderShippingBase(order: OrderMoneyFields): number {
+  const base = order.amountsBase?.shipping;
+  if (base != null) return base;
+  return num(order.shipping) * orderFxRate(order);
+}
+
+export function orderFeesBase(order: OrderMoneyFields): number {
+  const base = order.amountsBase?.fees;
+  if (base != null) return base;
+  return num(order.fees) * orderFxRate(order);
+}
+
+export function orderProfitBase(order: OrderMoneyFields): number {
+  return (
+    orderNetRevenueBase(order) -
+    orderCogsBase(order) -
+    orderShippingBase(order) -
+    orderFeesBase(order)
+  );
+}
+
 /** Converte entrada manual de COGS para a moeda da loja (linhas de encomenda). */
 export async function convertCogsInputToStoreCurrency(
   inputAmount: number,

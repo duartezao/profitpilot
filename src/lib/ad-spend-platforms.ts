@@ -1,4 +1,5 @@
 /** Plataformas de ads suportadas no registo manual. */
+import { parseLocaleNumberOrZero } from "@/lib/parse-number";
 export const AD_PLATFORMS = ["meta", "google", "tiktok"] as const;
 export type AdPlatform = (typeof AD_PLATFORMS)[number];
 
@@ -87,6 +88,6 @@ export function platformDefaultsFromLines(
 
 export function parseNum(raw: FormDataEntryValue | null): number {
   if (raw === "" || raw == null) return 0;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : 0;
+  const n = parseLocaleNumberOrZero(raw);
+  return n >= 0 ? n : 0;
 }
