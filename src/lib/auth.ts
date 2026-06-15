@@ -12,7 +12,7 @@ import { normalizeStoreAccess, type StoreAccess } from "@/lib/store-access";
 import {
   isEmailLike,
   normalizeUsername,
-  validateUsername,
+  parseRegistrationContact,
 } from "@/lib/username";
 
 const SESSION_COOKIE = "pp_session";
@@ -59,7 +59,12 @@ async function findUserByLoginIdentifier(identifier: string) {
 }
 
 /** Contas antigas sem username — gera um a partir do email. */
-async function ensureUsername(userId: mongoose.Types.ObjectId, email: string) {
+async function ensureUsername(
+  userId: mongoose.Types.ObjectId,
+  email?: string | null,
+) {
+  if (!email) return;
+
   const existing = await User.findById(userId).select("username").lean();
   if (existing?.username) return;
 
@@ -214,7 +219,7 @@ export async function switchWorkspace(workspaceId: string): Promise<void> {
 export type CurrentUser = {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   username: string | null;
   workspaceId: string;
   workspaceName: string;
@@ -269,7 +274,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   return {
     id: String(user._id),
     name: user.name,
-    email: user.email,
+    email: user.email ?? null,
     username: user.username ?? null,
     workspaceId: workspace ? String(workspace._id) : "",
     workspaceName: workspace?.name ?? "",
@@ -291,34 +296,45 @@ export async function logout() {
 /** Regista um utilizador, cria o workspace e a membership de owner. */
 export async function registerUser(input: {
   name: string;
-  username: string;
-  email: string;
+  username?: string;
+  email?: string;
   password: string;
   workspaceName?: string;
 }) {
   await connectToDatabase();
-  const email = input.email.toLowerCase().trim();
-  const username = normalizeUsername(input.username);
-  const usernameError = validateUsername(username);
-  if (usernameError) {
-    throw new Error(usernameError);
+
+  const parsed = parseRegistrationContact(
+    input.username ?? "",
+    input.email ?? "",
+  );
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  const { username, email } = parsed.contact;
+
+  if (!input.password) {
+    throw new Error("Preenche a password.");
   }
 
-  const existingEmail = await User.findOne({ email });
-  if (existingEmail) {
-    throw new Error("Já existe uma conta com este email.");
+  if (email) {
+    const existingEmail = await User.findOne({ email }).lean();
+    if (existingEmail) {
+      throw new Error("Já existe uma conta com este email.");
+    }
   }
 
-  const existingUsername = await User.findOne({ username });
-  if (existingUsername) {
-    throw new Error("Este utilizador já está em uso. Escolhe outro.");
+  if (username) {
+    const existingUsername = await User.findOne({ username }).lean();
+    if (existingUsername) {
+      throw new Error("Este utilizador já está em uso. Escolhe outro.");
+    }
   }
 
   const passwordHash = await hashPassword(input.password);
   const user = await User.create({
     name: input.name.trim(),
-    username,
-    email,
+    ...(username ? { username } : {}),
+    ...(email ? { email } : {}),
     passwordHash,
   });
 
@@ -353,7 +369,7 @@ export async function loginUser(input: {
     throw new Error("Utilizador ou password incorretos.");
   }
 
-  await ensureUsername(user._id, user.email);
+  await ensureUsername(user._id, user.email ?? null);
 
   const membership = await Membership.findOne({
     userId: user._id,

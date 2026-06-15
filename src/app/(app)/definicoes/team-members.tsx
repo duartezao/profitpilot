@@ -62,7 +62,11 @@ function MemberRow({
             @{member.username}
           </Sensitive>
         )}
-        <Sensitive as="p" className="text-xs text-muted-foreground">{member.email}</Sensitive>
+        {member.email && (
+          <Sensitive as="p" className="text-xs text-muted-foreground">
+            {member.email}
+          </Sensitive>
+        )}
         {member.isSelf && (
           <span className="text-xs text-muted-foreground">(tu)</span>
         )}

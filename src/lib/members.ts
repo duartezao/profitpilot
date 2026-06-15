@@ -14,7 +14,7 @@ export type WorkspaceMemberView = {
   membershipId: string;
   userId: string;
   name: string;
-  email: string;
+  email: string | null;
   username: string | null;
   role: string;
   storeAccess: StoreAccess;
@@ -56,7 +56,7 @@ export async function listWorkspaceMembers(
       membershipId: String(m._id),
       userId,
       name: u?.name ?? "—",
-      email: u?.email ?? "—",
+      email: u?.email ?? null,
       username: u?.username ?? null,
       role: m.role,
       storeAccess,

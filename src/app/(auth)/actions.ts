@@ -3,8 +3,8 @@
 import { redirect } from "next/navigation";
 import { loginUser, registerUser } from "@/lib/auth";
 import {
+  parseRegistrationContact,
   validateLoginIdentifier,
-  validateUsername,
 } from "@/lib/username";
 
 export type AuthState = { error?: string };
@@ -41,17 +41,26 @@ export async function registerAction(
   const password = String(formData.get("password") ?? "");
   const workspaceName = String(formData.get("workspaceName") ?? "").trim();
 
-  if (!name || !username || !email || !password) {
-    return { error: "Preenche todos os campos obrigatórios." };
+  if (!name) {
+    return { error: "Preenche o nome." };
   }
-  const usernameError = validateUsername(username);
-  if (usernameError) return { error: usernameError };
-  if (password.length < 8) {
-    return { error: "A password tem de ter pelo menos 8 caracteres." };
+  if (!password) {
+    return { error: "Preenche a password." };
+  }
+
+  const contact = parseRegistrationContact(username, email);
+  if (!contact.ok) {
+    return { error: contact.error };
   }
 
   try {
-    await registerUser({ name, username, email, password, workspaceName });
+    await registerUser({
+      name,
+      username: contact.contact.username,
+      email: contact.contact.email,
+      password,
+      workspaceName,
+    });
   } catch (e) {
     return {
       error: e instanceof Error ? e.message : "Não foi possível criar a conta.",
