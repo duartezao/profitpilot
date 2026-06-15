@@ -50,6 +50,15 @@ export function PeriodSelector({
   const shortLabel = shortPeriodLabel(period);
 
   useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  useEffect(() => {
     if (active === "custom") {
       setCustomFrom(params.get("from") ?? "");
       setCustomTo(params.get("to") ?? "");
@@ -209,16 +218,18 @@ export function PeriodSelector({
       {open && (
         <>
           <div
-            className="fixed inset-0 z-[100] bg-black/20 dark:bg-black/40"
+            className="fixed inset-0 z-[200] bg-background/80 backdrop-blur-[1px] md:bg-black/20 md:dark:bg-black/40"
             onClick={() => setOpen(false)}
             aria-hidden
           />
           <div
             className={cn(
-              "absolute z-[110] mt-1 max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-sm",
+              "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-md",
               fullWidth
-                ? "left-0 right-0 w-auto"
-                : "right-0 w-[min(20rem,calc(100vw-1.5rem))] sm:w-80",
+                ? "max-md:fixed max-md:inset-x-3 max-md:top-[5.75rem] md:absolute md:left-0 md:right-0 md:top-full md:mt-1 md:w-auto"
+                : "max-md:fixed max-md:inset-x-3 max-md:top-[5.75rem] md:absolute md:right-0 md:top-full md:mt-1 md:w-80",
+              !fullWidth &&
+                "w-[min(20rem,calc(100vw-1.5rem))]",
             )}
             onMouseDown={(e) => e.stopPropagation()}
           >

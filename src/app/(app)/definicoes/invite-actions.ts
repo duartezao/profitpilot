@@ -9,14 +9,15 @@ import {
   acceptInvitation,
   declineInvitation,
   revokeInvitation,
+  resolveInviteIdentifier,
 } from "@/lib/invitations";
 import { canManageMembers } from "@/lib/rbac";
 import { parseStoreIdsFromForm } from "@/lib/store-access";
+import { validateInviteIdentifier } from "@/lib/username";
 
 export type InviteActionState = { ok?: boolean; error?: string };
 
 const inviteSchema = z.object({
-  email: z.string().email("Email inválido."),
   role: z.enum(["admin", "editor", "viewer"]),
   storeScope: z.enum(["all", "selected"]),
 });
@@ -31,14 +32,20 @@ export async function inviteMemberAction(
     return { error: "Só o proprietário pode convidar membros." };
   }
 
+  const identifier = String(formData.get("identifier") ?? "").trim();
+  const idError = validateInviteIdentifier(identifier);
+  if (idError) return { error: idError };
+
   const parsed = inviteSchema.safeParse({
-    email: formData.get("email"),
     role: formData.get("role"),
     storeScope: formData.get("storeScope"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
+
+  const resolved = await resolveInviteIdentifier(identifier);
+  if (!resolved.ok) return { error: resolved.error };
 
   const storeIds = parseStoreIdsFromForm(formData.get("storeIds"));
   const storeAccess =
@@ -48,7 +55,7 @@ export async function inviteMemberAction(
     workspaceId: user.workspaceId,
     invitedByUserId: user.id,
     actorRole: user.role,
-    email: parsed.data.email,
+    email: resolved.email,
     role: parsed.data.role,
     storeAccess,
   });

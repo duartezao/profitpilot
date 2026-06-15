@@ -24,6 +24,21 @@ export function RegisterForm() {
         <input name="name" type="text" autoComplete="name" required className={inputCls} />
       </div>
       <div>
+        <label className="mb-1 block text-sm font-medium">Utilizador</label>
+        <input
+          name="username"
+          type="text"
+          autoComplete="username"
+          required
+          placeholder="nome.unico"
+          className={inputCls}
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Único na plataforma — usas para entrar e para te convidarem. 3–30
+          caracteres (a-z, 0-9, . _ -).
+        </p>
+      </div>
+      <div>
         <label className="mb-1 block text-sm font-medium">Email</label>
         <input name="email" type="email" autoComplete="email" required className={inputCls} />
       </div>

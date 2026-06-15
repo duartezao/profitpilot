@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils";
 
 export type StoreOption = { id: string; name: string };
 
+const menuPanelCls =
+  "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-md max-md:fixed max-md:inset-x-3 max-md:top-[5.75rem] md:absolute md:top-full md:mt-1 md:max-h-80";
+
 export function StoreSelector({
   stores,
   className,
@@ -26,6 +29,15 @@ export function StoreSelector({
 
   const validStore =
     current && stores.some((s) => s.id === current) ? current : null;
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   // Limpa ?store= inválido (ex. após trocar de workspace).
   useEffect(() => {
@@ -69,7 +81,7 @@ export function StoreSelector({
     "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted";
 
   return (
-    <div className={cn("relative min-w-0", className)}>
+    <div className={cn("relative z-50 min-w-0", className)}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -84,13 +96,14 @@ export function StoreSelector({
 
       {open && (
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div
-            className={cn(
-              "absolute z-40 mt-1 max-h-80 overflow-auto rounded-lg border border-border bg-surface p-1 shadow-sm",
-              "left-0 w-[min(16rem,calc(100vw-1.5rem))]",
-              "sm:left-auto sm:right-0 sm:w-56",
-            )}
+            className="fixed inset-0 z-[200] bg-background/80 backdrop-blur-[1px] md:bg-black/20 md:dark:bg-black/40"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <div
+            className={cn(menuPanelCls, "md:left-auto md:right-0 md:w-56")}
+            onMouseDown={(e) => e.stopPropagation()}
           >
             <button className={itemCls} onClick={() => select(null)}>
               <span>Todas as lojas</span>

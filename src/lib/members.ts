@@ -15,6 +15,7 @@ export type WorkspaceMemberView = {
   userId: string;
   name: string;
   email: string;
+  username: string | null;
   role: string;
   storeAccess: StoreAccess;
   storeAccessLabel: string;
@@ -39,7 +40,7 @@ export async function listWorkspaceMembers(
 
   const userIds = memberships.map((m) => m.userId);
   const users = await User.find({ _id: { $in: userIds } })
-    .select("name email")
+    .select("name email username")
     .lean();
   const userById = new Map(users.map((u) => [String(u._id), u]));
   const storeCount = await Store.countDocuments({
@@ -56,6 +57,7 @@ export async function listWorkspaceMembers(
       userId,
       name: u?.name ?? "—",
       email: u?.email ?? "—",
+      username: u?.username ?? null,
       role: m.role,
       storeAccess,
       storeAccessLabel: storeAccessLabel(storeAccess, storeCount),

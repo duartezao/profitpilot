@@ -311,8 +311,6 @@ function buildExtendedWorkspaceKpis(
 ): SummaryKpi[] {
   const curCm = contributionMarginPct(cur);
   const prevCm = contributionMarginPct(prev);
-  const curBer = berRoas(cur);
-  const prevBer = berRoas(prev);
   const curAov = cur.orders > 0 ? cur.revenue / cur.orders : null;
   const prevAov = prev.orders > 0 ? prev.revenue / prev.orders : null;
 
@@ -325,20 +323,6 @@ function buildExtendedWorkspaceKpis(
       deltaLabel: deltaSuffix,
       deltaIsPoints: true,
       icon: "percent",
-    },
-    {
-      label: "BER",
-      value: fmtRoasRatio(curBer),
-      title:
-        curBer != null
-          ? "Break-even ROAS — ROAS mínimo para não perder dinheiro"
-          : "Sem margem de contribuição positiva",
-      delta:
-        curBer != null && prevBer != null
-          ? deltaPct(curBer, prevBer)
-          : undefined,
-      deltaLabel: curBer != null ? deltaSuffix : undefined,
-      icon: "target",
     },
     {
       label: "COGS",
@@ -999,7 +983,7 @@ function emptySummary(currency = "EUR"): DashboardSummary {
       { label: "Margem %", value: "0,0%" },
       { label: "Ad Spend", value: zeroCompact, title: zero },
       { label: "ROAS", value: "—" },
-      { label: "MER", value: "—" },
+      { label: "BER", value: "—" },
     ],
     stores: [],
     scopeName: null,
@@ -1221,6 +1205,7 @@ export async function buildWorkspaceSummary(
 
   const netProfit = calcProfit(totals, adSpend);
   const margin = totals.revenue > 0 ? (netProfit / totals.revenue) * 100 : 0;
+  const curBer = berRoas(totals);
 
   const money = (v: number): SummaryKpi["value"] =>
     formatCurrencyCompact(v, currency);
@@ -1318,11 +1303,12 @@ export async function buildWorkspaceSummary(
             : "—",
       },
       {
-        label: "MER",
-        value:
-          adSpend > 0
-            ? (totals.revenue / adSpend).toFixed(2).replace(".", ",")
-            : "—",
+        label: "BER",
+        value: fmtRoasRatio(curBer),
+        title:
+          curBer != null
+            ? "Break-even ROAS — ROAS mínimo para não perder dinheiro"
+            : "Sem margem de contribuição positiva",
       },
     ];
     const curAll = await aggregateOrders(currentSlice);

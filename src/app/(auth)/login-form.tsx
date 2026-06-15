@@ -20,12 +20,15 @@ export function LoginForm() {
         </p>
       )}
       <div>
-        <label className="mb-1 block text-sm font-medium">Email</label>
+        <label className="mb-1 block text-sm font-medium">
+          Email ou utilizador
+        </label>
         <input
-          name="email"
-          type="email"
-          autoComplete="email"
+          name="identifier"
+          type="text"
+          autoComplete="username"
           required
+          placeholder="tu@email.com ou nome.utilizador"
           className={inputCls}
         />
       </div>

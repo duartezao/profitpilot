@@ -9,6 +9,16 @@ const UserSchema = new Schema(
       lowercase: true,
       trim: true,
     },
+    /** Identificador único para login e convites (ex.: duarte.leal) */
+    username: {
+      type: String,
+      unique: true,
+      sparse: true,
+      lowercase: true,
+      trim: true,
+      minlength: 3,
+      maxlength: 30,
+    },
     passwordHash: { type: String, required: true },
     name: { type: String, required: true, trim: true },
     twoFactorEnabled: { type: Boolean, default: false },

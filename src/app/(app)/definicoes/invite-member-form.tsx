@@ -74,23 +74,27 @@ export function InviteMemberForm({
           {state.ok && (
             <p className="rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-sm text-positive">
               Convite enviado. A pessoa verá o alerta em Definições ao iniciar
-              sessão com esse email.
+              sessão.
             </p>
           )}
 
           <div>
-            <label className={labelCls} htmlFor="invite-email">
-              Email
+            <label className={labelCls} htmlFor="invite-identifier">
+              Email ou utilizador
             </label>
             <input
-              id="invite-email"
-              name="email"
-              type="email"
+              id="invite-identifier"
+              name="identifier"
+              type="text"
               required
               autoComplete="off"
-              placeholder="colega@exemplo.com"
+              placeholder="colega@exemplo.com ou nome.utilizador"
               className={inputCls}
             />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Utilizador só funciona se a pessoa já tiver conta. Sem conta, usa
+              o email.
+            </p>
           </div>
 
           <div>
