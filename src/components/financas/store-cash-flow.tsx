@@ -1,16 +1,21 @@
+"use client";
+
 import Link from "next/link";
 import { Settings, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import type { StoreTreasuryLine } from "@/lib/treasury";
 import { ScopeLink } from "@/components/scope-link";
+import { CollapsibleSection } from "@/components/collapsible-section";
 
 export function StoreCashFlowSection({
   cash,
   settingsHref = "/definicoes",
   treasuryHref = "/tesouraria",
+  embedded = false,
 }: {
   cash: StoreTreasuryLine;
   settingsHref?: string;
   treasuryHref?: string;
+  embedded?: boolean;
 }) {
   const entries = [
     { label: "Saldo inicial", value: cash.startingBalanceFmt, tone: "" },
@@ -40,17 +45,43 @@ export function StoreCashFlowSection({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">Caixa da loja</h2>
-          <p className="text-sm text-muted-foreground">
-            Desde {cash.sinceLabel}
-            {cash.startingBalanceDate
-              ? ` · saldo inicial em ${new Date(cash.startingBalanceDate).toLocaleDateString("pt-PT")}`
-              : ""}
-            .
-          </p>
+      {!embedded && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Caixa da loja</h2>
+            <p className="text-sm text-muted-foreground">
+              Desde {cash.sinceLabel}
+              {cash.startingBalanceDate
+                ? ` · saldo inicial em ${new Date(cash.startingBalanceDate).toLocaleDateString("pt-PT")}`
+                : ""}
+              .
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <ScopeLink
+              href={settingsHref}
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              <Settings className="h-4 w-4" />
+              Saldo inicial
+            </ScopeLink>
+            <ScopeLink
+              href={`${settingsHref}#capital-negocio`}
+              className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              Injetar capital
+            </ScopeLink>
+            <ScopeLink
+              href={treasuryHref}
+              className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              Ver tesouraria
+            </ScopeLink>
+          </div>
         </div>
+      )}
+
+      {embedded && (
         <div className="flex flex-wrap gap-2">
           <ScopeLink
             href={settingsHref}
@@ -60,19 +91,13 @@ export function StoreCashFlowSection({
             Saldo inicial
           </ScopeLink>
           <ScopeLink
-            href={`${settingsHref}#capital-negocio`}
-            className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
-          >
-            Injetar capital
-          </ScopeLink>
-          <ScopeLink
             href={treasuryHref}
             className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
           >
             Ver tesouraria
           </ScopeLink>
         </div>
-      </div>
+      )}
 
       {cash.payoutsError && (
         <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
@@ -133,14 +158,11 @@ export function StoreCashFlowSection({
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-surface">
-        <div className="border-b border-border p-4 sm:p-5">
-          <h3 className="text-sm font-semibold">Movimento de caixa</h3>
-          <p className="text-xs text-muted-foreground">
-            Payouts somam quando a Shopify marca como pago (após sync). Despesas
-            vêm das encomendas e do ad spend registado.
-          </p>
-        </div>
+      <CollapsibleSection
+        title="Movimento de caixa"
+        description="Entradas e saídas desde o saldo inicial."
+        flush
+      >
         <div className="divide-y divide-border">
           {entries.map((e) => (
             <div
@@ -167,13 +189,14 @@ export function StoreCashFlowSection({
             </span>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {cash.receivedByDay.length > 0 && (
-        <div className="rounded-lg border border-border bg-surface">
-          <div className="border-b border-border p-4 sm:p-5">
-            <h3 className="text-sm font-semibold">Últimos payouts recebidos</h3>
-          </div>
+        <CollapsibleSection
+          title="Últimos payouts recebidos"
+          description={`${cash.receivedByDay.length} entradas recentes.`}
+          flush
+        >
           <ul className="divide-y divide-border">
             {cash.receivedByDay.slice(0, 8).map((line) => (
               <li
@@ -194,7 +217,7 @@ export function StoreCashFlowSection({
               </Link>
             </p>
           )}
-        </div>
+        </CollapsibleSection>
       )}
 
       <p className="text-xs text-muted-foreground">

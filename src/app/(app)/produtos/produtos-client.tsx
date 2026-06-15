@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import { ExportFormatLinks } from "@/components/export-format-links";
+import { CollapsibleSection } from "@/components/collapsible-section";
 import { ProductsProfitTable } from "@/components/dashboard/products-profit-table";
 import { Sensitive } from "@/components/privacy-mode";
 import { useWorkspace } from "@/components/workspace-context";
@@ -24,6 +26,12 @@ async function fetchProducts(
   const res = await fetch(`/api/products/ranking?${q}`, { cache: "no-store" });
   if (!res.ok) throw new Error("Falha ao carregar produtos.");
   return res.json();
+}
+
+function productsExportUrl(storeId: string, params: URLSearchParams): string {
+  const q = new URLSearchParams(periodQueryFromSearchParams(params));
+  q.set("store", storeId);
+  return `/api/products/ranking?${q}`;
 }
 
 function ProdutosSkeleton() {
@@ -58,19 +66,33 @@ export function ProdutosClient({ storeId }: { storeId: string }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Produtos ·{" "}
-          <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {data.mode === "units"
-            ? `Top produtos por unidades · ${data.periodLabel}`
-            : `Top produtos por lucro · ${data.periodLabel}`}
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Produtos ·{" "}
+            <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {data.mode === "units"
+              ? `Top produtos por unidades · ${data.periodLabel}`
+              : `Top produtos por lucro · ${data.periodLabel}`}
+          </p>
+        </div>
+        <ExportFormatLinks href={productsExportUrl(storeId, searchParams)} />
       </div>
 
-      <ProductsProfitTable products={data.products} mode={data.mode} />
+      <CollapsibleSection
+        title="Ranking de produtos"
+        description={`${data.products.length} produtos no período.`}
+        badge={
+          <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {data.products.length}
+          </span>
+        }
+        flush
+      >
+        <ProductsProfitTable products={data.products} mode={data.mode} embedded />
+      </CollapsibleSection>
     </div>
   );
 }

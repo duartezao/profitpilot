@@ -4,11 +4,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
+import { ExportFormatLinks } from "@/components/export-format-links";
 import { useWorkspace } from "@/components/workspace-context";
 import { scopeQueryFromInput } from "@/lib/scope-query";
 import type { AdSpendView } from "@/lib/ad-spend-view";
 import { AdSpendForm } from "./ad-spend-form";
 import { AdSpendRow } from "./ad-spend-row";
+import { AdAccountsPanel } from "@/components/anuncios/ad-accounts-panel";
+import { CollapsibleSection } from "@/components/collapsible-section";
 
 async function fetchAdSpendView(storeId: string | null): Promise<AdSpendView> {
   const url = storeId
@@ -173,6 +176,9 @@ export function AnunciosClient() {
           </p>
         </div>
         <LiveBadge updatedAt={dataUpdatedAt} fetching={isFetching} />
+        <ExportFormatLinks
+          href={`/api/export/ad-spend?store=${encodeURIComponent(s.storeId)}`}
+        />
       </div>
 
       {s.missingCount > 0 && (
@@ -190,25 +196,43 @@ export function AnunciosClient() {
         </div>
       )}
 
-      <AdSpendForm
+      <AdAccountsPanel
         storeId={s.storeId}
-        storeName={s.storeName}
-        baseCurrency={s.baseCurrency}
-        defaultDate={s.yesterday}
-        minDate={s.minDate}
+        accounts={s.adAccounts}
         canEdit={s.canEdit}
-        onSaved={onDataChanged}
       />
 
-      <div className="rounded-lg border border-border bg-surface">
-        <div className="border-b border-border p-5">
-          <h2 className="text-lg font-semibold">Dias a preencher</h2>
-          <p className="text-sm text-muted-foreground">
-            Desde a importação ({s.rangeLabel}). Se dois utilizadores guardarem
-            ao mesmo tempo, prevalece o primeiro — o segundo vê aviso e dados
-            actualizados.
-          </p>
-        </div>
+        <CollapsibleSection
+          title="Registar gasto manual"
+          description={`Ontem (${s.yesterday}) ou outro dia — Meta/Google/TikTok com fees.`}
+        >
+        <AdSpendForm
+          storeId={s.storeId}
+          storeName={s.storeName}
+          baseCurrency={s.baseCurrency}
+          defaultDate={s.yesterday}
+          minDate={s.minDate}
+          canEdit={s.canEdit}
+          onSaved={onDataChanged}
+          embedded
+        />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Dias a preencher"
+        description={`${s.calendar.length} dias desde importação · actualiza a cada 10 s.`}
+        badge={
+          s.missingCount > 0 ? (
+            <span className="rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+              {s.missingCount} em falta
+            </span>
+          ) : (
+            <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              Completo
+            </span>
+          )
+        }
+      >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
@@ -233,7 +257,7 @@ export function AnunciosClient() {
             </tbody>
           </table>
         </div>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

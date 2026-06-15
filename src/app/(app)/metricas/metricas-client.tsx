@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import { ExportFormatLinks } from "@/components/export-format-links";
+import { BackfillSnapshotsButton } from "@/components/metricas/backfill-snapshots-button";
 import { StoreMetricsView } from "@/components/dashboard/store-metrics-view";
 import { StoreDashboardHeader } from "@/components/dashboard/store-dashboard-view";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
@@ -55,11 +57,19 @@ export function MetricasClient() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <StoreDashboardHeader
-        title={headerTitle}
-        periodLabel={periodLabel}
-        prevPeriodLabel={prevPeriodLabel}
-      />
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <StoreDashboardHeader
+          title={headerTitle}
+          periodLabel={periodLabel}
+          prevPeriodLabel={prevPeriodLabel}
+        />
+        <div className="flex flex-wrap items-end gap-2">
+          <ExportFormatLinks
+            href={`/api/export/daily-metrics?store=${encodeURIComponent(storeId)}`}
+          />
+          <BackfillSnapshotsButton storeId={storeId} />
+        </div>
+      </div>
 
       {isError && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">

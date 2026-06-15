@@ -36,6 +36,10 @@ const workspaceSchema = z.object({
   netMarginMin: z.number(),
   refundRateMax: z.number(),
   chargebackRateMax: z.number(),
+  poasMin: z.number().min(0),
+  refundWindowDays: z.number().min(1).max(365),
+  monthlyRevenueGoal: z.number().min(0).optional(),
+  monthlyProfitGoal: z.number().min(0).optional(),
 });
 
 export async function updateWorkspaceAction(
@@ -55,6 +59,10 @@ export async function updateWorkspaceAction(
     netMarginMin: numOpt(formData.get("netMarginMin")),
     refundRateMax: numOpt(formData.get("refundRateMax")),
     chargebackRateMax: numOpt(formData.get("chargebackRateMax")),
+    poasMin: numOpt(formData.get("poasMin")),
+    refundWindowDays: numOpt(formData.get("refundWindowDays")),
+    monthlyRevenueGoal: numOpt(formData.get("monthlyRevenueGoal")) || undefined,
+    monthlyProfitGoal: numOpt(formData.get("monthlyProfitGoal")) || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -72,6 +80,10 @@ export async function updateWorkspaceAction(
         "targets.netMarginMin": d.netMarginMin,
         "targets.refundRateMax": d.refundRateMax,
         "targets.chargebackRateMax": d.chargebackRateMax,
+        "targets.poasMin": d.poasMin,
+        "targets.monthlyRevenueGoal": d.monthlyRevenueGoal ?? null,
+        "targets.monthlyProfitGoal": d.monthlyProfitGoal ?? null,
+        refundWindowDays: d.refundWindowDays,
       },
     },
   );

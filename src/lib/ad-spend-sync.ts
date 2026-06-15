@@ -1,13 +1,15 @@
 import "server-only";
 import type { Types } from "mongoose";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
-import { Workspace } from "@/models/Workspace";
-import { Store } from "@/models/Store";
 import {
   getTodayDateKey,
   isAdSpendDayLockedForApi,
   isAdSpendTodayOpen,
 } from "@/lib/ad-spend-lock";
+import { syncAdAccountsSpendForStore } from "@/lib/ad-api-sync";
+import type { ApiAdSpendSyncResult } from "@/lib/ad-api-sync";
+
+export type { ApiAdSpendSyncResult };
 
 export type ApiAdSpendUpsertResult = "updated" | "skipped_locked" | "skipped_not_today";
 
@@ -57,60 +59,11 @@ export async function upsertApiAdSpendDay(
   return "updated";
 }
 
-export type ApiAdSpendSyncResult = {
-  storeId: string;
-  today: string;
-  updated: boolean;
-  skippedReason?: "no_accounts" | "locked" | "no_data";
-};
-
-/**
- * Sync automático de ad spend por loja.
- * Substitui sempre o valor de hoje; dias passados nunca são reescritos.
- * (Integração Meta/Google/TikTok por implementar — estrutura e regras já aplicam.)
- */
+/** Sync automático de ad spend por loja (contas API + regras de hoje). */
 export async function syncApiAdSpendForStore(
   storeId: string,
 ): Promise<ApiAdSpendSyncResult> {
-  const store = await Store.findById(storeId)
-    .select("workspaceId")
-    .lean();
-  if (!store) {
-    return {
-      storeId,
-      today: getTodayDateKey(),
-      updated: false,
-      skippedReason: "no_data",
-    };
-  }
-
-  const workspace = await Workspace.findById(store.workspaceId)
-    .select("baseCurrency")
-    .lean();
-  const baseCurrency = workspace?.baseCurrency ?? "EUR";
-  const today = getTodayDateKey();
-
-  // TODO: quando existirem adAccounts ligadas, buscar spend de hoje e converter.
-  const hasAdAccounts = false;
-  if (!hasAdAccounts) {
-    return { storeId, today, updated: false, skippedReason: "no_accounts" };
-  }
-
-  const spendToday = 0;
-  const result = await upsertApiAdSpendDay(
-    store.workspaceId,
-    store._id,
-    today,
-    spendToday,
-    baseCurrency,
-  );
-
-  return {
-    storeId,
-    today,
-    updated: result === "updated",
-    skippedReason: result === "skipped_locked" ? "locked" : undefined,
-  };
+  return syncAdAccountsSpendForStore(storeId);
 }
 
 /** Corre após sync Shopify nas lojas com autoSync. */

@@ -31,6 +31,9 @@ import {
   recordShopifyPriceChange,
 } from "@/lib/cogs";
 import { syncSessionMetricsForStore } from "@/lib/session-metrics";
+import { syncDisputes } from "@/lib/dispute-sync";
+import { snapshotYesterdayMetrics, backfillDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
+import { syncApiAdSpendForStore } from "@/lib/ad-spend-sync";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { buildOrderAmountsBase } from "@/lib/order-money";
@@ -758,6 +761,7 @@ export type SyncResult = {
   sessionMetricsDays: number;
   orderFeesReal: number;
   orderFeesEstimated: number;
+  disputes: number;
   payoutsError?: string;
   sessionMetricsError?: string;
 };
@@ -843,6 +847,7 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   // impedir a sync de orders/produtos. Registamos o erro na loja.
   let payouts = 0;
   let balanceTransactions = 0;
+  let disputes = 0;
   let payoutsError: string | undefined;
   try {
     payouts = await syncPayouts(store, domain, accessToken);
@@ -851,6 +856,11 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
       domain,
       accessToken,
     );
+    try {
+      disputes = await syncDisputes(store, domain, accessToken);
+    } catch (e) {
+      console.error("[sync] disputes", e);
+    }
     store.payoutsError = null;
   } catch (e) {
     const raw = e instanceof Error ? e.message : "Falha a obter payouts.";
@@ -868,6 +878,19 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
     sessionMetricsError =
       e instanceof Error ? e.message : "Falha a obter sessões Shopify.";
     store.lastSessionMetricsError = sessionMetricsError;
+  }
+
+  try {
+    await snapshotYesterdayMetrics(String(store.workspaceId), storeId);
+    await backfillDailyMetricsForStore(storeId, { maxDays: 30 });
+  } catch (e) {
+    console.error("[sync] daily metrics snapshot", e);
+  }
+
+  try {
+    await syncApiAdSpendForStore(storeId);
+  } catch (e) {
+    console.error("[sync] ad spend api", e);
   }
 
   await persistStoreSyncFields(store._id, {
@@ -893,6 +916,7 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
     sessionMetricsDays,
     orderFeesReal,
     orderFeesEstimated,
+    disputes,
     payoutsError,
     sessionMetricsError,
   };

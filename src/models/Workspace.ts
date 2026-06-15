@@ -6,6 +6,8 @@ const TargetsSchema = new Schema(
     refundRateMax: { type: Number, default: 5 },
     chargebackRateMax: { type: Number, default: 1 },
     poasMin: { type: Number, default: 1 },
+    monthlyRevenueGoal: { type: Number, default: null },
+    monthlyProfitGoal: { type: Number, default: null },
   },
   { _id: false },
 );

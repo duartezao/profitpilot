@@ -6,6 +6,10 @@ import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { ManualCogsDay } from "@/models/ManualCogsDay";
 import { DailyNote } from "@/models/DailyNote";
 import { CashEntry } from "@/models/CashEntry";
+import { Expense } from "@/models/Expense";
+import { Dispute } from "@/models/Dispute";
+import { AdAccount } from "@/models/AdAccount";
+import { DailyMetric } from "@/models/DailyMetric";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { SessionMetricsMonth } from "@/models/SessionMetricsMonth";
@@ -27,6 +31,10 @@ export type StorePurgeCounts = {
   productCosts: number;
   cogsHistory: number;
   priceHistory: number;
+  expenses: number;
+  disputes: number;
+  adAccounts: number;
+  dailyMetrics: number;
 };
 
 /** Apaga todos os dados associados a uma loja e o documento da loja. */
@@ -50,6 +58,10 @@ export async function purgeStoreCompletely(
     productCosts,
     cogsHistory,
     priceHistory,
+    expenses,
+    disputes,
+    adAccounts,
+    dailyMetrics,
   ] = await Promise.all([
     Order.deleteMany({ storeId: storeOid }),
     ManualAdSpend.deleteMany({ storeId: storeOid }),
@@ -62,6 +74,10 @@ export async function purgeStoreCompletely(
     ProductCost.deleteMany({ storeId: storeOid }),
     CogsHistory.deleteMany({ storeId: storeOid }),
     PriceHistory.deleteMany({ storeId: storeOid }),
+    Expense.deleteMany({ storeId: storeOid }),
+    Dispute.deleteMany({ storeId: storeOid }),
+    AdAccount.deleteMany({ storeId: storeOid }),
+    DailyMetric.deleteMany({ storeId: storeOid }),
   ]);
 
   await Membership.updateMany(
@@ -86,5 +102,9 @@ export async function purgeStoreCompletely(
     productCosts: productCosts.deletedCount,
     cogsHistory: cogsHistory.deletedCount,
     priceHistory: priceHistory.deletedCount,
+    expenses: expenses.deletedCount,
+    disputes: disputes.deletedCount,
+    adAccounts: adAccounts.deletedCount,
+    dailyMetrics: dailyMetrics.deletedCount,
   };
 }

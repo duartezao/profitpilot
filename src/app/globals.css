@@ -88,3 +88,21 @@ html[data-privacy="true"] textarea[data-sensitive] {
   filter: blur(7px);
   user-select: none;
 }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #daily-report-print,
+  #daily-report-print * {
+    visibility: visible;
+  }
+  #daily-report-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: white;
+    color: black;
+  }
+}

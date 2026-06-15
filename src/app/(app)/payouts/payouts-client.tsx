@@ -3,6 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { Banknote } from "lucide-react";
+import { ExportFormatLinks } from "@/components/export-format-links";
+import { CollapsibleSection } from "@/components/collapsible-section";
 import { Sensitive } from "@/components/privacy-mode";
 import { useWorkspace } from "@/components/workspace-context";
 import type { PayoutsView } from "@/lib/payouts-data";
@@ -56,7 +58,8 @@ export function PayoutsClient() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           {data.scopeName ? (
             <>
@@ -75,6 +78,16 @@ export function PayoutsClient() {
             "Quanto e quando vais receber do Shopify Payments."
           )}
         </p>
+        </div>
+        {data.payouts.length > 0 && (
+          <ExportFormatLinks
+            href={
+              storeId
+                ? `/api/export/payouts?store=${encodeURIComponent(storeId)}`
+                : "/api/export/payouts"
+            }
+          />
+        )}
       </div>
 
       {data.payoutErrors.length > 0 && (
@@ -118,14 +131,22 @@ export function PayoutsClient() {
         ))}
       </div>
 
-      <div className="rounded-lg border border-border bg-surface">
-        <div className="border-b border-border p-5">
-          <h2 className="text-lg font-semibold">Histórico de payouts</h2>
-          <p className="text-sm text-muted-foreground">
-            Últimos payouts de todas as lojas.
-          </p>
-        </div>
-
+      <CollapsibleSection
+        title="Histórico de payouts"
+        description={
+          data.scopeName
+            ? `Últimos payouts de ${data.scopeName}.`
+            : "Últimos payouts de todas as lojas."
+        }
+        badge={
+          data.payouts.length > 0 ? (
+            <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              {data.payouts.length}
+            </span>
+          ) : undefined
+        }
+        flush
+      >
         {data.payouts.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-12 text-center">
             <Banknote className="h-8 w-8 text-muted-foreground" />
@@ -176,7 +197,7 @@ export function PayoutsClient() {
             </table>
           </div>
         )}
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

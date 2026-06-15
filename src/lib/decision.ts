@@ -82,7 +82,7 @@ function buildProductRows(products: TopProduct[]): DecisionRow[] {
       status,
       statusLabel: statusLabel(status),
       roas: "—",
-      ber: "—",
+      ber: p.berRoas,
       margin: p.margin,
       spend: "—",
     };
@@ -124,7 +124,7 @@ function buildTodayActions(input: {
   if (scaleRows[0]) {
     actions.push({
       level: "positive",
-      text: `${scaleRows[0].name} com margem saudável — considera escalar.`,
+      text: `${scaleRows[0].name} com margem saudável — considera escalar (+10–15% budget se tesouraria permitir).`,
     });
   }
 

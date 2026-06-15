@@ -170,7 +170,7 @@ export function DecisaoClient() {
                   : "Por loja no período selecionado."}
               </p>
             </div>
-            <div className="overflow-x-auto">
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="text-left text-xs font-medium text-muted-foreground">
@@ -220,6 +220,54 @@ export function DecisaoClient() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="space-y-3 p-4 md:hidden">
+              {data.rows.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Sem dados no período.
+                </p>
+              ) : (
+                data.rows.map((row) => (
+                  <div
+                    key={row.name}
+                    className="rounded-lg border border-border bg-background p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <Sensitive className="font-medium leading-snug">
+                        {row.name}
+                      </Sensitive>
+                      <StatusBadge status={row.status} />
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <dt className="text-muted-foreground">ROAS</dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          <Sensitive>{row.roas}</Sensitive>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">BER</dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          <Sensitive>{row.ber}</Sensitive>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Margem</dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          <Sensitive>{row.margin}</Sensitive>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Gasto</dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          <Sensitive>{row.spend}</Sensitive>
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </>

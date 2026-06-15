@@ -15,6 +15,10 @@ export type WorkspaceValues = {
   netMarginMin: number;
   refundRateMax: number;
   chargebackRateMax: number;
+  refundWindowDays: number;
+  poasMin: number;
+  monthlyRevenueGoal: number;
+  monthlyProfitGoal: number;
 };
 
 export function WorkspaceForm({
@@ -102,7 +106,55 @@ export function WorkspaceForm({
               className={inputCls}
             />
           </div>
+          <div>
+            <label className={labelCls}>POAS mín.</label>
+            <DecimalInput
+              name="poasMin"
+              defaultValue={values.poasMin}
+              disabled={!canEdit}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Janela refunds (dias)</label>
+            <DecimalInput
+              name="refundWindowDays"
+              defaultValue={values.refundWindowDays}
+              disabled={!canEdit}
+              className={inputCls}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Dias até o lucro de um dia ser considerado consolidado.
+            </p>
+          </div>
         </div>
+      </div>
+
+      <div>
+        <p className="mb-2 text-sm font-medium">Metas mensais (dashboard)</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>Receita alvo (mês)</label>
+            <DecimalInput
+              name="monthlyRevenueGoal"
+              defaultValue={values.monthlyRevenueGoal}
+              disabled={!canEdit}
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Lucro alvo (mês)</label>
+            <DecimalInput
+              name="monthlyProfitGoal"
+              defaultValue={values.monthlyProfitGoal}
+              disabled={!canEdit}
+              className={inputCls}
+            />
+          </div>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Deixa a 0 para ocultar. Progresso MTD nos snapshots diários.
+        </p>
       </div>
 
       {canEdit && (

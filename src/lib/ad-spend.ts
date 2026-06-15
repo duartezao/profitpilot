@@ -1,5 +1,6 @@
 import "server-only";
 import type { Types } from "mongoose";
+import type { CurrentUser } from "@/lib/auth";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { Order } from "@/models/Order";
 import {
@@ -13,6 +14,11 @@ import type { AdSpendLineStored } from "@/lib/ad-spend-platforms";
 import { AD_PLATFORM_LABELS, adSpendLineTotalBase } from "@/lib/ad-spend-platforms";
 import { isAdSpendDayLockedForApi } from "@/lib/ad-spend-lock";
 import { dayKeysBetweenInTimezone, normalizeStoreTimezone } from "@/lib/store-timezone";
+import { connectToDatabase } from "@/lib/db";
+import { Store } from "@/models/Store";
+import { Workspace } from "@/models/Workspace";
+import { activeStoreQueryForUser } from "@/lib/store-scope";
+import { canAccessStore } from "@/lib/store-access";
 
 export const AD_SPEND_LOOKBACK_DAYS = 60;
 
@@ -396,4 +402,76 @@ export async function buildStoreAdSpendSummaries(
     }),
   );
   return summaries.sort((a, b) => b.missingCount - a.missingCount);
+}
+
+export type AdSpendExportRow = {
+  dateKey: string;
+  meta: number | null;
+  google: number | null;
+  tiktok: number | null;
+  adsTotal: number | null;
+  fees: number | null;
+  grandTotal: number | null;
+  source: string | null;
+  note: string;
+};
+
+function platformAmount(
+  lines: AdSpendLineView[],
+  platform: "meta" | "google" | "tiktok",
+): number | null {
+  const line = lines.find((l) => l.platform === platform);
+  if (!line) return null;
+  return line.totalBase > 0 ? line.totalBase : line.amount;
+}
+
+/** Calendário de ad spend em linhas para CSV. */
+export async function listAdSpendForExport(
+  user: Pick<CurrentUser, "workspaceId" | "storeAccess">,
+  storeId: string,
+): Promise<{ rows: AdSpendExportRow[]; storeName: string } | null> {
+  if (!canAccessStore(user.storeAccess, storeId)) return null;
+  await connectToDatabase();
+
+  const store = await Store.findOne({
+    ...activeStoreQueryForUser(user),
+    _id: storeId,
+  })
+    .select("name importStartDate createdAt")
+    .lean();
+  if (!store) return null;
+
+  const workspace = await Workspace.findById(user.workspaceId)
+    .select("baseCurrency")
+    .lean();
+  const baseCurrency = workspace?.baseCurrency ?? "EUR";
+
+  const calendar = await buildAdSpendCalendar(
+    store._id,
+    baseCurrency,
+    store.importStartDate,
+    store.createdAt,
+  );
+
+  const rows: AdSpendExportRow[] = calendar.map((d) => {
+    const meta = d.lines.length ? platformAmount(d.lines, "meta") : d.amount;
+    const google = d.lines.length ? platformAmount(d.lines, "google") : null;
+    const tiktok = d.lines.length ? platformAmount(d.lines, "tiktok") : null;
+    const adsTotal = d.amount;
+    const fees = d.extraFee;
+    const grandTotal = d.totalAmount;
+    return {
+      dateKey: d.dateKey,
+      meta,
+      google,
+      tiktok,
+      adsTotal,
+      fees,
+      grandTotal,
+      source: d.source,
+      note: d.note ?? "",
+    };
+  });
+
+  return { rows, storeName: store.name };
 }

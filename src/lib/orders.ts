@@ -193,6 +193,74 @@ export async function listStoreOrders(
   };
 }
 
+export type OrderExportRow = {
+  name: string;
+  orderDateIso: string;
+  financialStatus: string;
+  revenue: number;
+  cogs: number;
+  shipping: number;
+  fees: number;
+  profit: number;
+  refunded: number;
+};
+
+/** Encomendas para exportação CSV (até 5000). */
+export async function listStoreOrdersForExport(
+  user: Pick<CurrentUser, "workspaceId" | "storeAccess">,
+  storeId: string,
+  periodInput?: PeriodInput,
+  limit = 5000,
+): Promise<{
+  rows: OrderExportRow[];
+  storeName: string;
+  periodLabel: string;
+  currency: string;
+}> {
+  const { period, wsId, store, currency, storeTz } = await resolveStoreContext(
+    user,
+    storeId,
+    periodInput,
+  );
+
+  if (!store) {
+    return { rows: [], storeName: "", periodLabel: period.label, currency };
+  }
+
+  const orders = await Order.find({
+    workspaceId: wsId,
+    storeId: store._id,
+    ...(storeTz
+      ? orderDateMatchInTimezone(period, storeTz)
+      : orderDateMatch(period)),
+  })
+    .sort({ orderDate: -1 })
+    .limit(limit)
+    .select(
+      "name orderDate financialStatus cogs shipping fees refunded manualCogs amountsBase netRevenue subtotal totalPrice",
+    )
+    .lean();
+
+  const rows: OrderExportRow[] = orders.map((o) => ({
+    name: o.name ?? "—",
+    orderDateIso: o.orderDate ? new Date(o.orderDate).toISOString() : "",
+    financialStatus: statusLabel(o.financialStatus),
+    revenue: orderNetRevenueBase(o),
+    cogs: o.amountsBase?.cogs ?? o.cogs ?? 0,
+    shipping: o.amountsBase?.shipping ?? o.shipping ?? 0,
+    fees: o.amountsBase?.fees ?? o.fees ?? 0,
+    profit: orderProfitBase(o),
+    refunded: orderRefundedBase(o),
+  }));
+
+  return {
+    rows,
+    storeName: store.name,
+    periodLabel: period.label,
+    currency,
+  };
+}
+
 /** Encomendas com reembolso no período + refund rate agregado. */
 export async function listStoreRefunds(
   user: Pick<CurrentUser, "workspaceId" | "storeAccess">,
@@ -272,6 +340,69 @@ export async function listStoreRefunds(
   return {
     rows,
     stats: buildStats(allInPeriod, currency, fmt, fmtPct),
+    storeName: store.name,
+    periodLabel: period.label,
+    currency,
+  };
+}
+
+export type RefundExportRow = {
+  name: string;
+  orderDateIso: string;
+  financialStatus: string;
+  revenue: number;
+  refunded: number;
+  profit: number;
+};
+
+/** Reembolsos para exportação CSV (até 5000). */
+export async function listStoreRefundsForExport(
+  user: Pick<CurrentUser, "workspaceId" | "storeAccess">,
+  storeId: string,
+  periodInput?: PeriodInput,
+  limit = 5000,
+): Promise<{
+  rows: RefundExportRow[];
+  storeName: string;
+  periodLabel: string;
+  currency: string;
+}> {
+  const { period, wsId, store, currency, storeTz } = await resolveStoreContext(
+    user,
+    storeId,
+    periodInput,
+  );
+
+  if (!store) {
+    return { rows: [], storeName: "", periodLabel: period.label, currency };
+  }
+
+  const refundedOrders = await Order.find({
+    workspaceId: wsId,
+    storeId: store._id,
+    ...(storeTz
+      ? orderDateMatchInTimezone(period, storeTz)
+      : orderDateMatch(period)),
+    refunded: { $gt: 0 },
+  })
+    .sort({ orderDate: -1 })
+    .limit(limit)
+    .select(
+      "name orderDate financialStatus cogs shipping fees refunded manualCogs amountsBase netRevenue subtotal totalPrice",
+    )
+    .lean();
+
+  const rows: RefundExportRow[] = refundedOrders.map((o) => ({
+    name: o.name ?? "—",
+    orderDateIso: o.orderDate ? new Date(o.orderDate).toISOString() : "",
+    financialStatus: statusLabel(o.financialStatus),
+    revenue: orderNetRevenueBase(o),
+    refunded: orderRefundedBase(o),
+    profit: orderProfitBase(o),
+  }));
+
+  return {
+    rows,
     storeName: store.name,
     periodLabel: period.label,
     currency,

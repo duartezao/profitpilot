@@ -22,7 +22,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 2. **Responsividade 100%** — todos os ecrãs funcionam e ficam bem em **telemóvel, tablet e desktop**. Mobile-first. Nada pode ficar cortado, sobreposto ou inutilizável em ecrãs pequenos.
 3. **UI clean, sem aspeto de IA** — sem emojis na interface, sem gradientes, sem cores neon. Estética sóbria de ferramenta financeira (ver secção "Design e UI").
 4. **Segurança em primeiro lugar** — credenciais sempre encriptadas, isolamento total de dados por utilizador (ver secção "Segurança").
-5. **Lucro real exato** — todos os custos (COGS, taxas, ads, refunds, chargebacks, apps) entram no cálculo. O cálculo de lucro tem testes.
+5. **Lucro real exato** — todos os custos (COGS, taxas, ads, refunds, chargebacks, apps/subscrições) entram no cálculo. O cálculo de lucro tem testes.
 6. **Histórico permanente** — nada de dados se perde; soft delete e snapshots diários.
 7. **Este documento (`app.md`) é a fonte de verdade.** Antes de implementar qualquer parte, consultar a secção correspondente. Manter o documento atualizado quando algo mudar.
 8. **Terminar o que se começa** — cada funcionalidade é entregue completa (frontend + backend + responsividade + segurança), não pela metade.
@@ -347,7 +347,7 @@ Net Profit =
 * **P&L em `/financas`** — demonstração de resultados com COGS, envio, taxas, ad spend e reembolsos; avisos de COGS/ad spend em falta.
 * Lucro por loja, por produto, por país, por canal de aquisição
 * **Profit por order** (margem média por encomenda)
-* Breakeven ROAS por produto (a partir de que ROAS o produto deixa de dar prejuízo)
+* Breakeven ROAS por produto (a partir de que ROAS o produto deixa de dar prejuízo) — coluna **BER** em `/produtos` e dashboard da loja; exportação CSV em `/produtos`.
 
 ## Pedidos e reembolsos (por loja)
 
@@ -370,13 +370,15 @@ Net Profit =
 
 ## Ligação Meta Ads (Facebook/Instagram)
 
-> Usa a **Meta Marketing API** para ler o spend.
+> Usa a **Meta Marketing API** ([Insights](https://developers.facebook.com/docs/marketing-api/insights)) para ler o spend.
 
 1. Criar uma app no **Meta for Developers** (`developers.facebook.com`), tipo **Business**.
 2. Pedir a permissão **`ads_read`** (e `business_management` se gerires várias contas via Business Manager).
-3. Obter um **token de longa duração** ou, melhor para servidor, um **System User token** do Business Manager (não expira / renovável).
-4. Na app, o utilizador liga a conta (botão "Ligar Meta") e **escolhe a(s) ad account(s)** (`act_<ID>`) a associar à loja.
-5. O spend vem do endpoint **`/act_<AD_ACCOUNT_ID>/insights`** com `fields=spend,impressions,clicks,cpc,ctr,cpm,actions` e `level=campaign`, por dia.
+3. Obter um **System User token** do Business Manager (recomendado para servidor) com acesso às ad accounts.
+4. Em `/anuncios`: colar o token → **Procurar contas** (`GET /me/adaccounts`) → escolher `act_<ID>` → a app valida com `GET /act_<ID>` antes de guardar (credenciais encriptadas AES-256-GCM).
+5. O spend vem de **`GET /act_<AD_ACCOUNT_ID>/insights`** com `fields=spend,account_currency`, `level=account`, `time_range` do dia (fuso da loja). API Graph **v25.0** por defeito.
+
+> **OAuth completo** («Ligar Meta» com redirect) — fase seguinte; o fluxo actual segue a documentação oficial para tokens de servidor (System User).
 
 ## Ligação Google Ads
 
@@ -553,7 +555,7 @@ Cada loja deve ter:
 
 > Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
 
-**Estado (implementado):** em `/notas` e `/metricas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, PROFIT (aviso COGS), funil ATC/checkout/CVR. Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). CPC/CTR/CPM omitidos até API de ads.
+**Estado (implementado):** em `/notas` e `/metricas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** quando a loja tem contas de ads ligadas por API (Meta/Google/TikTok). Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
 
 ## Exemplo do template gerado
 
@@ -1122,6 +1124,8 @@ Lucro após taxas =
 
 > Sim — podes exportar **os dados que quiseres, como quiseres**: escolher o que exportar, que colunas, que período e que lojas. Funciona para lojas ativas **e arquivadas**.
 
+**Estado (implementado v1):** botões CSV / Excel / PDF nas páginas de pedidos, reembolsos, chargebacks, anúncios, payouts, finanças (P&L), métricas (snapshots diários) e produtos. Parâmetro `?format=csv|xlsx|pdf` nas rotas `/api/export/*` e `/api/products/ranking`.
+
 ## Como funciona (exportação flexível)
 
 * **Escolher o que exportar**: Orders, Products/Top sellers, Customers, Ad spend, Payouts, Taxas, Métricas diárias, P&L.
@@ -1374,7 +1378,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## expenses
 
-> Custos fixos / apps / subscrições / taxas de chargeback.
+> Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário** com rateio diário (mensal/anual). Despesas de workspace aplicam-se a todas as lojas; despesas com `storeId` só à loja indicada.
 
 * `_id`
 * `workspaceId` (gasto da conta) ou `storeId` (gasto de uma loja)
@@ -1386,6 +1390,41 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `startDate`
 * `endDate` (opcional — quando cancelas a subscrição)
 * `currency`
+
+## Modo empresarial (planeado — não implementado)
+
+> Visão futura acordada: uma **vista alternativa da dashboard** para quem gere várias lojas como um negócio único, com custos fixos mensais centralizados e lucro por loja após rateio. **Não construir até plano aprovado.** O painel actual em `/financas` (coleção `expenses`) é a solução intermédia.
+
+### Objectivo
+
+* Alternar entre **modo loja** (dashboard actual por loja / consolidado) e **modo empresarial** (P&L da empresa).
+* Registar **gastos fixos mensais** num só sítio (salários, contabilista, ferramentas partilhadas, renda, etc.).
+* **Associar lojas** ao negócio e ver lucro real por loja depois de imputar custos partilhados.
+* Manter o cálculo de lucro **exacto** (mesma fórmula: REV − COGS − envio − taxas − ads − despesas operacionais).
+
+### Diferença face ao actual
+
+| Actual (`/financas`) | Modo empresarial (futuro) |
+|---|---|
+| Despesas por workspace ou loja, lista simples | Vista dedicada, foco em fixos mensais |
+| Rateio automático no P&L/dashboard | Regras de imputação configuráveis (igual, % revenue, manual) |
+| Dashboard igual para todos | Layout e KPIs orientados ao negócio (EBITDA simplificado, burn, break-even empresa) |
+| Sem agrupamento de lojas | Grupos / marcas / países com P&L por grupo |
+
+### Requisitos a planear
+
+1. **Toggle** modo loja ↔ modo empresarial (persistido por utilizador/workspace).
+2. **Ecrã empresarial**: tabela de fixos mensais + total mensal + projeção anual.
+3. **Regras de rateio** workspace → lojas: igual, proporcional à revenue, ou pesos manuais.
+4. **Lucro por loja** = lucro operacional da loja − quota de fixos empresariais.
+5. **Consolidação multi-loja** com linha «Empresa» (fixos não atribuíveis a uma loja).
+6. Migração: despesas `expenses` existentes continuam válidas; modo empresarial pode ser UI + regras em cima do mesmo modelo ou extensão (`allocationRule`).
+7. Testes do rateio e do lucro por loja após imputação.
+
+### Fora de âmbito inicial do modo empresarial
+
+* Folha de pagamento completa, IVA, contabilidade oficial.
+* Multi-entidade legal (várias empresas com NIF distintos) — fase posterior.
 
 ## cashEntries
 
@@ -1464,6 +1503,24 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `paidAt`
 * `breakdown` (vendas / refunds / chargebacks / ajustes)
 * `createdAt`
+
+## disputes
+
+> Chargebacks / disputas Shopify Payments — sincronizadas no sync da loja (`read_shopify_payments_disputes`). Vista em `/chargebacks`.
+
+* `_id`
+* `workspaceId`
+* `storeId`
+* `shopifyId`
+* `initiatedAt`
+* `finalizedAt` (opcional)
+* `status` (needs_response / under_review / won / lost / …)
+* `type`
+* `amount`
+* `currency`
+* `orderShopifyId` (opcional)
+* `orderName` (opcional)
+* `reason`
 
 ## syncLogs
 
@@ -1680,6 +1737,24 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 # Roadmap
 
+## Escopo actual (decisão de produto)
+
+**Construir tudo o que falta na app operacional** — lucro real, operação multi-loja, relatórios, exports, ads API, alertas, modo empresarial (quando planeado), etc.
+
+**Fora de âmbice por agora (não implementar):**
+
+* **SaaS pago** — Stripe, planos, limites por plano, faturação, upgrade/downgrade
+* **White label** para agências (modelo comercial)
+* **API pública** comercial / relatórios agendados por email como produto pago
+* **BD dedicada por tenant** (opção enterprise) — só isolamento lógico por workspace
+* **WooCommerce** — integração de lojas
+* **IA** — insights automáticos, chat sobre dados, resumo por IA
+* **2FA** (TOTP)
+* **Email** de convites
+* **Notificações push** / email automáticas
+
+**Continua em scope** (não é «SaaS pago»): multi-utilizador, RBAC, convites, PWA, workspaces, toda a funcionalidade financeira e operacional.
+
 ## Fase 1 — Fundação
 
 * Sistema de autenticação + workspaces
@@ -1691,8 +1766,8 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## Fase 2 — Lucro Real
 * COGS automático da Shopify (cost per item) + manual + CSV + cogsHistory — **feito**
-* Ad spend manual (`/anuncios`) + integração em métricas — **feito**; ligação Meta/Google/TikTok API — **por implementar**
-* Refunds no cálculo e páginas `/pedidos` + `/reembolsos` — **feito**; chargebacks — **por implementar**
+* Ad spend manual (`/anuncios`) + integração em métricas — **feito**; ligação **Meta / Google / TikTok** API — **feito** (tokens + discover); OAuth Meta redirect — **feito** (`/api/oauth/meta/*`)
+* Refunds no cálculo e páginas `/pedidos` + `/reembolsos` — **feito**; chargebacks — página `/chargebacks` + sync Shopify Payments disputes — **feito** (entrada no lucro via taxas Shopify; alertas por implementar)
 * Cálculo de Net Profit, margem, ROAS/MER, **BER** e **POAS** nos KPIs estendidos — **feito**
 * Aviso COGS em falta por período + lucro sempre visível + gráfico lucro consolidado + sparklines — **feito**
 * Dashboard consolidado multi-loja + tabela comparativa loja a loja (ordenável, coluna Ad Spend) — **feito**
@@ -1701,12 +1776,12 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 ## Fase 3 — Operação e Histórico
 
 * **Notas diárias** (scale / mudanças) com marcadores nos gráficos — **feito**
-* **Relatório diário automático** (template auto-preenchido, por plataforma, média vs total, export)
-* Google Ads e TikTok Ads (várias contas por loja)
-* Registo de custos de apps / ferramentas
-* **Payouts da Shopify** (quanto e quando recebes, por loja e consolidado)
-* Histórico permanente + snapshots diários + backups
-* Exportações CSV / Excel / PDF + P&L
+* **Relatório diário automático** — texto multi-loja + TXT + PDF + **cartão visual** (print) — **feito**
+* Histórico permanente + **snapshots `dailyMetrics`** (ontem no sync + backfill 30 dias/sync) — **feito**; export CSV/Excel/PDF `/api/export/daily-metrics`
+* Exportações CSV / Excel / PDF — **feito** em pedidos, reembolsos, chargebacks, ad spend, payouts, P&L, snapshots diários e ranking de produtos (`?format=csv|xlsx|pdf`)
+* **Modo empresarial** — toggle em `/financas` (v1: fixos workspace + quota por loja)
+* **Metas mensais** — Definições + cartão no dashboard (MTD via snapshots)
+* **Deteção anomalias** — alertas receita/lucro vs média 7 dias
 * WooCommerce
 
 ## Fase 4 — Inteligência
@@ -1714,20 +1789,22 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * **Tesouraria por loja** (`/financas` → Resumo com loja, `/tesouraria`) — saldo em conta desde início (inicial + payouts + injeções − COGS/envio/ads − levantamentos), payouts na BD — **feito**
 * **Injeções de capital** (Definições → Capital no negócio) — **feito**
 * **Apoio à decisão**: resumo "o que fazer hoje", semáforo kill/scale, recomendação de budget
-* Lucro provisório vs consolidado (janela de refunds)
 * IA para insights + resumo diário + chat sobre dados
-* Alertas automáticos (margem, BER, MER, chargebacks)
+* Alertas automáticos (margem, BER, MER, **chargeback rate**, refund rate, POAS) — **feito**
+* Lucro provisório vs consolidado (janela `refundWindowDays`) — **feito**
 * Deteção de anomalias
 * Comparações avançadas + metas mensais
 
 ## Fase 5 — Escala / SaaS
 
-* Multi-tenant com isolamento de dados (lógico + opção de BD dedicada)
+> **Billing e planos pagos — adiado.** O resto desta fase pode avançar quando fizer sentido.
+
+* Multi-tenant com isolamento de dados (lógico + opção de BD dedicada) — isolamento lógico **feito**; BD dedicada **adiado**
 * Multi-utilizador + permissões (RBAC): convites, acessos por loja, aceitar em Definições — **feito** (email por implementar)
-* Billing (Stripe), planos e limites
-* White Label para agências
-* Aplicação mobile / PWA
-* Relatórios agendados + API pública
+* ~~Billing (Stripe), planos e limites~~ — **fora de âmbice por agora**
+* ~~White Label para agências~~ — **fora de âmbice por agora**
+* Aplicação mobile / PWA — **base feita**; refinamentos em curso
+* Relatórios agendados + API pública — **adiado** (parte comercial)
 
 ---
 
