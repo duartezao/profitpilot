@@ -1,8 +1,8 @@
 /** Convites: enviar, ver pendentes, aceitar/recusar. */
 export const TEAM_INVITES_ENABLED = true;
 
-/** Lista de membros, papéis e remoções — pode ficar off em demo. */
-export const TEAM_MEMBERSHIP_ENABLED = false;
+/** Lista de membros, papéis e remoções. */
+export const TEAM_MEMBERSHIP_ENABLED = true;
 
 export const TEAM_INVITES_DISABLED_MESSAGE =
   "Convites estão indisponíveis por agora.";

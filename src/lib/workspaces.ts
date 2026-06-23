@@ -25,21 +25,15 @@ export async function listOwnedWorkspacesForUser(
   userId: string,
 ): Promise<OwnedWorkspaceRow[]> {
   await connectToDatabase();
-  const memberships = await Membership.find({
-    userId,
-    role: "owner",
-    status: "active",
-  })
+  const userOid = new mongoose.Types.ObjectId(userId);
+  const workspaces = await Workspace.find({ ownerId: userOid })
     .sort({ createdAt: 1 })
-    .lean();
-
-  if (!memberships.length) return [];
-
-  const workspaceIds = memberships.map((m) => m.workspaceId);
-  const workspaces = await Workspace.find({ _id: { $in: workspaceIds } })
     .select("name")
     .lean();
-  const wsMap = new Map(workspaces.map((w) => [String(w._id), w]));
+
+  if (!workspaces.length) return [];
+
+  const workspaceIds = workspaces.map((w) => w._id);
 
   const storeCounts = await Store.aggregate<{ _id: mongoose.Types.ObjectId; n: number }>([
     {
@@ -53,13 +47,11 @@ export async function listOwnedWorkspacesForUser(
   const countByWs = new Map(storeCounts.map((r) => [String(r._id), r.n]));
 
   const rows: OwnedWorkspaceRow[] = [];
-  for (const m of memberships) {
-    const ws = wsMap.get(String(m.workspaceId));
-    if (!ws) continue;
+  for (const ws of workspaces) {
     rows.push({
-      id: String(m.workspaceId),
+      id: String(ws._id),
       name: ws.name,
-      storeCount: countByWs.get(String(m.workspaceId)) ?? 0,
+      storeCount: countByWs.get(String(ws._id)) ?? 0,
     });
   }
   return rows;
@@ -72,13 +64,8 @@ export async function renameOwnedWorkspace(
 ): Promise<void> {
   await connectToDatabase();
   const wsOid = new mongoose.Types.ObjectId(workspaceId);
-  const membership = await Membership.findOne({
-    userId,
-    workspaceId: wsOid,
-    role: "owner",
-    status: "active",
-  });
-  if (!membership) {
+  const workspace = await Workspace.findById(wsOid).select("ownerId name").lean();
+  if (!workspace || String(workspace.ownerId) !== userId) {
     throw new Error("Sem permissão para editar este workspace.");
   }
 
@@ -104,13 +91,8 @@ export async function deleteOwnedWorkspace(
   const userOid = new mongoose.Types.ObjectId(userId);
   const wsOid = new mongoose.Types.ObjectId(workspaceId);
 
-  const membership = await Membership.findOne({
-    userId: userOid,
-    workspaceId: wsOid,
-    role: "owner",
-    status: "active",
-  });
-  if (!membership) {
+  const workspace = await Workspace.findById(wsOid).select("name ownerId").lean();
+  if (!workspace || String(workspace.ownerId) !== userId) {
     throw new Error("Sem permissão para apagar este workspace.");
   }
 
@@ -123,9 +105,6 @@ export async function deleteOwnedWorkspace(
       "Não podes apagar o único workspace a que tens acesso. Cria outro primeiro.",
     );
   }
-
-  const workspace = await Workspace.findById(wsOid).select("name").lean();
-  if (!workspace) throw new Error("Workspace não encontrado.");
 
   const storeCount = await Store.countDocuments({
     workspaceId: wsOid,

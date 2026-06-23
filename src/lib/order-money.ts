@@ -36,7 +36,17 @@ export const refundsSumBaseExpr = {
 } as const;
 
 export const cogsSumBaseExpr = {
-  $sum: { $ifNull: ["$amountsBase.cogs", "$cogs"] },
+  $sum: {
+    $let: {
+      vars: {
+        ab: { $ifNull: ["$amountsBase.cogs", 0] },
+        cg: { $ifNull: ["$cogs", 0] },
+      },
+      in: {
+        $cond: [{ $gt: ["$$ab", 0] }, "$$ab", "$$cg"],
+      },
+    },
+  },
 } as const;
 
 /** COGS por encomenda: manual > convertido > linha. */

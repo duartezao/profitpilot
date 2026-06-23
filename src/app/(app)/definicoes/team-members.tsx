@@ -30,12 +30,14 @@ function MemberRow({
   actorRole,
   actorUserId,
   canManage,
+  isWorkspaceOwner,
   stores,
 }: {
   member: WorkspaceMemberView;
   actorRole: string;
   actorUserId: string;
   canManage: boolean;
+  isWorkspaceOwner: boolean;
   stores: Array<{ id: string; name: string }>;
 }) {
   const [roleState, updateRole, updating] = useActionState<
@@ -49,7 +51,13 @@ function MemberRow({
 
   const modifiable =
     canManage &&
-    canModifyMember(actorRole, member.role, actorUserId, member.userId).ok;
+    canModifyMember(
+      actorRole,
+      member.role,
+      actorUserId,
+      member.userId,
+      isWorkspaceOwner,
+    ).ok;
 
   const error = roleState.error ?? revokeState.error;
 
@@ -99,7 +107,18 @@ function MemberRow({
       </td>
       <td className="px-4 py-3 text-right">
         {modifiable ? (
-          <form action={revoke}>
+          <form
+            action={revoke}
+            onSubmit={(e) => {
+              if (
+                !window.confirm(
+                  `Remover o acesso de ${member.name} a este workspace?`,
+                )
+              ) {
+                e.preventDefault();
+              }
+            }}
+          >
             <input type="hidden" name="membershipId" value={member.membershipId} />
             <button
               type="submit"
@@ -126,6 +145,7 @@ export function TeamMembers({
   actorRole,
   actorUserId,
   canManage,
+  isWorkspaceOwner,
   stores,
   sentInvitations,
 }: {
@@ -133,6 +153,7 @@ export function TeamMembers({
   actorRole: string;
   actorUserId: string;
   canManage: boolean;
+  isWorkspaceOwner: boolean;
   stores: Array<{ id: string; name: string }>;
   sentInvitations: SentInvitationView[];
 }) {
@@ -176,6 +197,7 @@ export function TeamMembers({
               actorRole={actorRole}
               actorUserId={actorUserId}
               canManage={canManage}
+              isWorkspaceOwner={isWorkspaceOwner}
               stores={stores}
             />
           ))}

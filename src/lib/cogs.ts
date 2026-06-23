@@ -2,6 +2,8 @@ import "server-only";
 import type { AnyBulkWriteOperation } from "mongoose";
 import type { Types } from "mongoose";
 import { Order } from "@/models/Order";
+import { Store } from "@/models/Store";
+import { Workspace } from "@/models/Workspace";
 import { ProductCost } from "@/models/ProductCost";
 import { CogsHistory } from "@/models/CogsHistory";
 import { PriceHistory } from "@/models/PriceHistory";
@@ -15,6 +17,7 @@ import {
   applyLineUnitPrice,
   type CostResolver,
 } from "@/lib/line-snapshots";
+import { buildOrderAmountsBase } from "@/lib/order-money";
 
 export type CogsPeriodSlice = {
   start: Date;
@@ -413,6 +416,18 @@ export async function assimilatePendingCogsForStore(
   const resolveCost = await loadCostResolverForStore(storeId);
   const result: AssimilateResult = { ordersUpdated: 0, linesFilled: 0 };
 
+  const store = await Store.findById(storeId)
+    .select("workspaceId currency ianaTimezone")
+    .lean();
+  if (!store) return result;
+
+  const workspace = await Workspace.findById(store.workspaceId)
+    .select("baseCurrency")
+    .lean();
+  const storeCurrency = (store.currency ?? "EUR").toUpperCase();
+  const baseCurrency = (workspace?.baseCurrency ?? "EUR").toUpperCase();
+  const tz = normalizeStoreTimezone(store.ianaTimezone);
+
   let lastId: Types.ObjectId | null = null;
   const batchSize = 100;
   const variantIds = options?.variantIds?.filter(Boolean);
@@ -436,7 +451,9 @@ export async function assimilatePendingCogsForStore(
     if (lastId) filter._id = { $gt: lastId };
 
     const orders = await Order.find(filter)
-      .select("_id orderDate lineItems")
+      .select(
+        "_id orderDate lineItems subtotal totalPrice refunded netRevenue shipping fees cogs currency",
+      )
       .sort({ _id: 1 })
       .limit(batchSize)
       .lean();
@@ -467,10 +484,27 @@ export async function assimilatePendingCogsForStore(
 
       if (!changed) continue;
 
+      const newCogs = sumOrderCogs(lineItems);
+      const amountsBase = await buildOrderAmountsBase(
+        {
+          subtotal: order.subtotal,
+          totalPrice: order.totalPrice,
+          refunded: order.refunded,
+          netRevenue: order.netRevenue,
+          cogs: newCogs,
+          shipping: order.shipping,
+          fees: order.fees,
+        },
+        storeCurrency,
+        baseCurrency,
+        orderDate,
+        tz,
+      );
+
       bulkOps.push({
         updateOne: {
           filter: { _id: order._id },
-          update: { $set: { lineItems, cogs: sumOrderCogs(lineItems) } },
+          update: { $set: { lineItems, cogs: newCogs, amountsBase } },
         },
       });
       result.ordersUpdated++;

@@ -93,7 +93,8 @@ export function InviteMemberForm({
               data-sensitive
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Utilizador — a conta tem de existir. Sem conta, usa o email.
+              Utilizador — a conta tem de existir. Sem conta, usa o email. O
+              convite é para o workspace activo (vê o nome no topo da app).
             </p>
           </div>
 
