@@ -27,6 +27,13 @@ const OperationTaskSchema = new Schema(
     position: { type: Number, default: 0 },
     /** Lembrete / prazo (opcional). */
     dueDate: { type: Date, default: null },
+    /** Responsável (membro activo do workspace). */
+    assigneeId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
     deletedAt: { type: Date, default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
@@ -34,6 +41,7 @@ const OperationTaskSchema = new Schema(
 );
 
 OperationTaskSchema.index({ workspaceId: 1, storeId: 1, status: 1, position: 1 });
+OperationTaskSchema.index({ workspaceId: 1, assigneeId: 1, status: 1 });
 
 export type OperationTaskDoc = mongoose.InferSchemaType<
   typeof OperationTaskSchema

@@ -12,6 +12,12 @@ export const OPERATION_TASK_STATUS_LABEL: Record<OperationTaskStatus, string> = 
   done: "Concluído",
 };
 
+export type WorkspaceMemberOption = {
+  userId: string;
+  name: string;
+  isSelf: boolean;
+};
+
 export type OperationTaskView = {
   id: string;
   title: string;
@@ -20,6 +26,9 @@ export type OperationTaskView = {
   position: number;
   storeId: string | null;
   storeName: string | null;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  isAssignedToMe: boolean;
   dueDate: string | null;
   dueDateLabel: string | null;
   isOverdue: boolean;
@@ -29,6 +38,8 @@ export type OperationTaskView = {
 export type OperationTaskBoard = {
   columns: Record<OperationTaskStatus, OperationTaskView[]>;
   stores: { id: string; name: string }[];
+  members: WorkspaceMemberOption[];
+  currentUserId: string;
 };
 
 export function normalizeOperationTaskStatus(

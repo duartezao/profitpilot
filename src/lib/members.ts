@@ -30,6 +30,34 @@ export type WorkspaceMemberView = {
   isSelf: boolean;
 };
 
+export async function isActiveWorkspaceMember(
+  workspaceId: string,
+  userId: string,
+): Promise<boolean> {
+  await connectToDatabase();
+  const row = await Membership.findOne({
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    userId: new mongoose.Types.ObjectId(userId),
+    status: "active",
+  })
+    .select("_id")
+    .lean();
+  return Boolean(row);
+}
+
+import type { WorkspaceMemberOption } from "@/lib/operation-tasks-types";
+
+export async function listWorkspaceMemberOptions(
+  workspaceId: string,
+  currentUserId: string,
+): Promise<WorkspaceMemberOption[]> {
+  const members = await listWorkspaceMembers(workspaceId, currentUserId);
+  return members.map((m) => ({
+    userId: m.userId,
+    name: m.name,
+    isSelf: m.isSelf,
+  }));
+}
 export async function listWorkspaceMembers(
   workspaceId: string,
   currentUserId: string,

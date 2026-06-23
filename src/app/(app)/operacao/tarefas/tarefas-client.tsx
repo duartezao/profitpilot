@@ -2,28 +2,28 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { Calendar, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
-import type { OperationTaskBoard, OperationTaskStatus } from "@/lib/operation-tasks-types";
-import { OPERATION_TASK_STATUS_LABEL } from "@/lib/operation-tasks-types";
+import { OperationKanbanBoard } from "@/components/operations/operation-kanban-board";
+import type { OperationTaskBoard } from "@/lib/operation-tasks-types";
 import {
   createOperationTaskAction,
   deleteOperationTaskAction,
-  moveOperationTaskAction,
 } from "@/app/(app)/operacao/actions";
+import { TaskAssigneePicker } from "@/components/operations/task-assignee-picker";
 import { cn } from "@/lib/utils";
-
-const COLUMNS: OperationTaskStatus[] = ["todo", "doing", "done"];
+import Link from "next/link";
 
 export function TarefasClient({
   board,
   canEdit,
   initialFilter,
   initialStoreId,
+  initialAssigneeFilter = "all",
 }: {
   board: OperationTaskBoard;
   canEdit: boolean;
   initialFilter: "all" | "workspace" | "store";
   initialStoreId?: string | null;
+  initialAssigneeFilter?: "all" | "mine" | "unassigned";
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -33,18 +33,39 @@ export function TarefasClient({
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [taskStoreId, setTaskStoreId] = useState(initialStoreId ?? "");
+  const [assigneeId, setAssigneeId] = useState("");
+  const [assigneeFilter, setAssigneeFilter] = useState(initialAssigneeFilter);
 
   const storeOptions = useMemo(
     () => [{ id: "", name: "Workspace (geral)" }, ...board.stores],
     [board.stores],
   );
 
-  function applyFilter(next: "all" | "workspace" | "store", store?: string) {
+  function applyFilter(
+    next: "all" | "workspace" | "store",
+    store?: string,
+    assignee?: "all" | "mine" | "unassigned",
+  ) {
     setFilter(next);
     const params = new URLSearchParams(window.location.search);
     params.set("filter", next);
     if (next === "store" && store) params.set("taskStore", store);
     else params.delete("taskStore");
+    const af = assignee ?? assigneeFilter;
+    if (af !== "all") params.set("assignee", af);
+    else params.delete("assignee");
+    router.push(`/operacao/tarefas?${params.toString()}`);
+  }
+
+  function applyAssigneeFilter(next: "all" | "mine" | "unassigned") {
+    setAssigneeFilter(next);
+    const params = new URLSearchParams(window.location.search);
+    params.set("filter", filter);
+    if (filter === "store" && (initialStoreId ?? board.stores[0]?.id)) {
+      params.set("taskStore", initialStoreId ?? board.stores[0]!.id);
+    }
+    if (next !== "all") params.set("assignee", next);
+    else params.delete("assignee");
     router.push(`/operacao/tarefas?${params.toString()}`);
   }
 
@@ -57,23 +78,23 @@ export function TarefasClient({
     });
   }
 
-  function moveTask(
-    id: string,
-    status: OperationTaskStatus,
-    position: number,
-  ) {
-    run(() => moveOperationTaskAction({ id, status, position }));
-  }
-
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Tarefas e lembretes
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Quadro estilo Trello — organiza por workspace ou por loja.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Tarefas e lembretes
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Arrasta cartões entre colunas ou usa as setas no telemóvel.
+          </p>
+        </div>
+        <Link
+          href="/operacao"
+          className="text-sm text-accent hover:underline"
+        >
+          Voltar a Hoje
+        </Link>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -119,6 +140,33 @@ export function TarefasClient({
         )}
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <span className="self-center text-xs text-muted-foreground">
+          Responsável:
+        </span>
+        {(
+          [
+            ["all", "Todas"],
+            ["mine", "Minhas"],
+            ["unassigned", "Sem responsável"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => applyAssigneeFilter(key)}
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-sm font-medium",
+              assigneeFilter === key
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-border text-muted-foreground hover:bg-muted",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {error && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
           {error}
@@ -137,19 +185,21 @@ export function TarefasClient({
                 description,
                 dueDate: dueDate || undefined,
                 storeId: taskStoreId || undefined,
+                assigneeId: assigneeId || undefined,
               });
               if (result.error) setError(result.error);
               else {
                 setTitle("");
                 setDescription("");
                 setDueDate("");
+                setAssigneeId("");
                 router.refresh();
               }
             });
           }}
         >
           <h2 className="text-sm font-semibold">Nova tarefa</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <label className="block text-sm sm:col-span-2">
               <span className="mb-1 block text-muted-foreground">Título</span>
               <input
@@ -183,7 +233,15 @@ export function TarefasClient({
                 className="w-full rounded-lg border border-border bg-background px-3 py-2"
               />
             </label>
-            <label className="block text-sm sm:col-span-2 lg:col-span-4">
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">Responsável</span>
+              <TaskAssigneePicker
+                members={board.members}
+                value={assigneeId}
+                onChange={setAssigneeId}
+              />
+            </label>
+            <label className="block text-sm sm:col-span-2 lg:col-span-5">
               <span className="mb-1 block text-muted-foreground">Notas</span>
               <input
                 value={description}
@@ -203,122 +261,12 @@ export function TarefasClient({
         </form>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {COLUMNS.map((col) => (
-          <section
-            key={col}
-            className="flex min-h-[280px] flex-col rounded-lg border border-border bg-muted/20"
-          >
-            <header className="border-b border-border px-3 py-2.5">
-              <h2 className="text-sm font-semibold">
-                {OPERATION_TASK_STATUS_LABEL[col]}
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                {board.columns[col].length} tarefa
-                {board.columns[col].length === 1 ? "" : "s"}
-              </p>
-            </header>
-            <ul className="flex-1 space-y-2 p-2">
-              {board.columns[col].length === 0 ? (
-                <li className="px-2 py-6 text-center text-xs text-muted-foreground">
-                  Vazio
-                </li>
-              ) : (
-                board.columns[col].map((task, idx) => (
-                  <li
-                    key={task.id}
-                    className="rounded-lg border border-border bg-surface p-3 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-medium leading-snug">
-                        {task.title}
-                      </p>
-                      {canEdit && (
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() =>
-                            run(() => deleteOperationTaskAction(task.id))
-                          }
-                          className="shrink-0 rounded p-1 text-muted-foreground hover:text-negative disabled:opacity-60"
-                          aria-label="Remover tarefa"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                    {task.storeName ? (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {task.storeName}
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Workspace
-                      </p>
-                    )}
-                    {task.description && (
-                      <p className="mt-2 text-xs text-muted-foreground line-clamp-3">
-                        {task.description}
-                      </p>
-                    )}
-                    {task.dueDateLabel && (
-                      <p
-                        className={cn(
-                          "mt-2 inline-flex items-center gap-1 text-xs",
-                          task.isOverdue
-                            ? "font-medium text-negative"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        <Calendar className="h-3 w-3" />
-                        {task.dueDateLabel}
-                      </p>
-                    )}
-                    {canEdit && (
-                      <div className="mt-3 flex items-center justify-between gap-1 border-t border-border pt-2">
-                        <button
-                          type="button"
-                          disabled={pending || col === "todo"}
-                          onClick={() => {
-                            const prev =
-                              col === "doing"
-                                ? "todo"
-                                : col === "done"
-                                  ? "doing"
-                                  : "todo";
-                            moveTask(task.id, prev, idx);
-                          }}
-                          className="rounded border border-border p-1 hover:bg-muted disabled:opacity-40"
-                          aria-label="Mover para coluna anterior"
-                        >
-                          <ChevronLeft className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={pending || col === "done"}
-                          onClick={() => {
-                            const next =
-                              col === "todo"
-                                ? "doing"
-                                : col === "doing"
-                                  ? "done"
-                                  : "done";
-                            moveTask(task.id, next, idx);
-                          }}
-                          className="rounded border border-border p-1 hover:bg-muted disabled:opacity-40"
-                          aria-label="Mover para coluna seguinte"
-                        >
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                ))
-              )}
-            </ul>
-          </section>
-        ))}
-      </div>
+      <OperationKanbanBoard
+        board={board}
+        canEdit={canEdit}
+        onDelete={(id) => run(() => deleteOperationTaskAction(id))}
+        onRefresh={() => router.refresh()}
+      />
     </div>
   );
 }

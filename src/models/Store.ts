@@ -73,6 +73,8 @@ const StoreSchema = new Schema(
       enum: ["running", "waiting", "killed"],
       default: null,
     },
+    /** Dia em que passou a «matada» — métricas financeiras só até este dia (inclusive). */
+    operationKilledAt: { type: Date, default: null },
     /** Dias por ciclo de teste de coleções (modo operação). */
     collectionTestCycleDays: { type: Number, default: 5, min: 1, max: 60 },
     /** Avisar N dias antes do fim do ciclo / início agendado. */

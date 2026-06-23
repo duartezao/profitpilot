@@ -47,14 +47,14 @@ export function MobileNavMoreMenu({
       <button
         type="button"
         aria-label="Fechar menu"
-        className="fixed inset-0 z-50 bg-black/40 md:hidden"
+        className="fixed inset-0 z-50 bg-black/40 lg:hidden"
         onClick={onClose}
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(70vh,32rem)] flex-col rounded-t-lg border border-border bg-surface shadow-none md:hidden"
+        className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-50 flex max-h-[min(70vh,32rem)] flex-col rounded-t-lg border border-border bg-surface shadow-none lg:hidden"
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <p className="text-sm font-semibold">{title}</p>

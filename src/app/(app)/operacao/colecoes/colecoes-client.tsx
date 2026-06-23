@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import type { TestCollectionView } from "@/lib/operations";
@@ -86,13 +87,21 @@ export function ColecoesClient({
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Coleções</h1>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Coleções</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Ciclo de teste (ex. 5 dias) com lembretes 1–2 dias antes. O relatório
           diário da loja inclui o que está a testar, o que falta e próximos
           passos.
         </p>
+        </div>
+        <Link
+          href="/operacao"
+          className="text-sm text-accent hover:underline"
+        >
+          Voltar a Hoje
+        </Link>
       </div>
 
       {error && (
@@ -266,7 +275,117 @@ export function ColecoesClient({
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="space-y-3 lg:hidden">
+        {rows.length === 0 ? (
+          <p className="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-muted-foreground">
+            Sem coleções. Adiciona a primeira acima.
+          </p>
+        ) : (
+          rows.map((row) => (
+            <div
+              key={row.id}
+              className="rounded-lg border border-border bg-surface p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium">{row.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {row.storeName}
+                  </p>
+                </div>
+                {canEdit && (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => run(() => deleteTestCollectionAction(row.id))}
+                    className="shrink-0 text-sm text-negative hover:underline disabled:opacity-60"
+                  >
+                    Remover
+                  </button>
+                )}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Estado
+                  </p>
+                  <div className="mt-1">
+                    {canEdit ? (
+                      <select
+                        value={row.status}
+                        disabled={pending}
+                        onChange={(e) =>
+                          run(() =>
+                            updateTestCollectionAction({
+                              id: row.id,
+                              status: e.target.value,
+                            }),
+                          )
+                        }
+                        className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+                      >
+                        {COLLECTION_PIPELINE_STATUSES.map((st) => (
+                          <option key={st} value={st}>
+                            {COLLECTION_PIPELINE_LABEL[st]}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <PipelineStatusPill
+                        label={COLLECTION_PIPELINE_LABEL[row.status]}
+                        tone={collectionPipelineTone(row.status)}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Ciclo
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    {row.cycleProgress ??
+                      (row.cycleDays ? `${row.cycleDays}d` : "—")}
+                    {row.testEndsLabel && (
+                      <span className="block text-xs">até {row.testEndsLabel}</span>
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Agendamento
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    {row.scheduledStartLabel ?? "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Lembrete
+                  </p>
+                  <p className="mt-1">
+                    {row.reminderText ? (
+                      <span
+                        className={cn(
+                          "text-xs font-medium",
+                          row.reminderText.includes("terminou")
+                            ? "text-negative"
+                            : "text-warning",
+                        )}
+                      >
+                        {row.reminderText}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-lg border border-border lg:block">
         <table className="w-full min-w-[880px] text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/30 text-left text-xs text-muted-foreground">

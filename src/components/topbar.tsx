@@ -9,6 +9,7 @@ import { TopbarPeriodSelector } from "@/components/topbar-period";
 import { AppViewModeToggle } from "@/components/app-view-mode-toggle";
 import { logoutAction } from "@/app/(app)/actions";
 import type { CurrentUser, UserWorkspace } from "@/lib/auth";
+import { cn } from "@/lib/utils";
 
 function initials(name: string) {
   return name
@@ -22,42 +23,41 @@ function initials(name: string) {
 
 function TopbarActions({
   user,
-  showLogout = true,
-  showAvatar = true,
+  variant = "full",
 }: {
   user: CurrentUser;
-  showLogout?: boolean;
-  showAvatar?: boolean;
+  variant?: "compact" | "full";
 }) {
+  const compact = variant === "compact";
+
   return (
     <div className="flex shrink-0 items-center gap-1">
       <ThemeToggle />
       <PrivacyToggle />
-      {showAvatar && (
-        <div
-          title={
-            user.email
-              ? `${user.name} · ${user.email}`
-              : user.username
-                ? `${user.name} · @${user.username}`
-                : user.name
-          }
-          className="hidden h-9 w-9 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground md:flex"
+      <div
+        title={
+          user.email
+            ? `${user.name} · ${user.email}`
+            : user.username
+              ? `${user.name} · @${user.username}`
+              : user.name
+        }
+        className={cn(
+          "h-9 w-9 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground",
+          compact ? "hidden md:flex" : "flex",
+        )}
+      >
+        {initials(user.name)}
+      </div>
+      <form action={logoutAction} className={compact ? "hidden md:block" : "block"}>
+        <button
+          type="submit"
+          aria-label="Terminar sessão"
+          className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted"
         >
-          {initials(user.name)}
-        </div>
-      )}
-      {showLogout && (
-        <form action={logoutAction} className="hidden md:block">
-          <button
-            type="submit"
-            aria-label="Terminar sessão"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
-        </form>
-      )}
+          <LogOut className="h-4 w-4" />
+        </button>
+      </form>
     </div>
   );
 }
@@ -73,9 +73,10 @@ export function Topbar({
 }) {
   return (
     <header className="sticky top-0 z-50 shrink-0 overflow-visible border-b border-border bg-background">
-      {/* Mobile — 2 linhas, altura automática */}
-      <div className="flex flex-col gap-2 overflow-visible px-3 py-2 md:hidden">
-        <div className="grid min-w-0 grid-cols-2 gap-2">
+      {/* Telemóvel + tablet — barra inferior como navegação principal até lg */}
+      <div className="flex flex-col gap-2 overflow-visible px-3 py-2 sm:px-4 lg:hidden">
+        {/* Telemóvel: workspace + portfolio */}
+        <div className="grid min-w-0 grid-cols-2 gap-2 md:hidden">
           <Suspense
             fallback={
               <div className="h-9 rounded-lg border border-border bg-muted" />
@@ -100,24 +101,61 @@ export function Topbar({
             />
           </Suspense>
         </div>
+
+        {/* Telemóvel: loja em linha própria */}
         <Suspense
           fallback={
-            <div className="h-9 rounded-lg border border-border bg-muted" />
+            <div className="h-9 rounded-lg border border-border bg-muted md:hidden" />
           }
         >
-          <StoreSelector stores={stores} className="min-w-0" />
+          <StoreSelector stores={stores} className="min-w-0 md:hidden" />
         </Suspense>
-        <div className="flex min-w-0 items-center gap-2">
+
+        {/* Tablet: loja + workspace + portfolio numa linha */}
+        <div className="hidden min-w-0 grid-cols-3 gap-2 md:grid">
+          <Suspense
+            fallback={
+              <div className="h-9 rounded-lg border border-border bg-muted" />
+            }
+          >
+            <StoreSelector stores={stores} className="min-w-0" />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div className="h-9 rounded-lg border border-border bg-muted" />
+            }
+          >
+            <WorkspaceSelector
+              workspaces={workspaces}
+              currentId={user.workspaceId}
+              menuPlacement="bottom"
+              className="min-w-0"
+            />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div className="h-9 rounded-lg border border-border bg-muted" />
+            }
+          >
+            <PortfolioScopeSelector
+              workspaces={workspaces}
+              userId={user.id}
+              className="min-w-0"
+            />
+          </Suspense>
+        </div>
+
+        <div className="flex min-w-0 items-center gap-2 md:gap-3">
           <Suspense fallback={null}>
             <AppViewModeToggle className="shrink-0" />
           </Suspense>
           <TopbarPeriodSelector className="min-w-0 flex-1" fullWidth />
-          <TopbarActions user={user} showLogout={false} showAvatar={false} />
+          <TopbarActions user={user} variant="compact" />
         </div>
       </div>
 
-      {/* Desktop — flexível, quebra se necessário */}
-      <div className="hidden flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2 lg:px-6 md:flex">
+      {/* Desktop — lg+ */}
+      <div className="hidden flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2 lg:flex lg:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <Suspense
             fallback={
@@ -136,13 +174,13 @@ export function Topbar({
             <PortfolioScopeSelector
               workspaces={workspaces}
               userId={user.id}
-              className="w-32 shrink-0 lg:w-36"
+              className="w-32 shrink-0 xl:w-36"
             />
           </Suspense>
           <TopbarPeriodSelector />
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 lg:gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 xl:gap-2">
           <Suspense fallback={null}>
             <AppViewModeToggle compact />
           </Suspense>
@@ -155,7 +193,7 @@ export function Topbar({
               workspaces={workspaces}
               currentId={user.workspaceId}
               menuPlacement="bottom"
-              className="w-36 shrink-0 lg:w-40"
+              className="w-36 shrink-0 xl:w-40"
             />
           </Suspense>
           <TopbarActions user={user} />

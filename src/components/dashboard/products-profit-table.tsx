@@ -44,7 +44,7 @@ export function ProductsProfitTable({
         </p>
       ) : (
         <>
-          <div className="hidden overflow-x-auto md:block">
+          <div className="hidden overflow-x-auto lg:block">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-left text-xs font-medium text-muted-foreground">
@@ -107,7 +107,7 @@ export function ProductsProfitTable({
             </table>
           </div>
 
-          <div className="space-y-3 p-4 md:hidden">
+          <div className="space-y-3 p-4 lg:hidden">
             {products.map((p) => (
               <div
                 key={p.title}

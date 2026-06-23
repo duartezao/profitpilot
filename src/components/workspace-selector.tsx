@@ -198,12 +198,12 @@ export function WorkspaceSelector({
             createPortal(
               <>
                 <div
-                  className="fixed inset-0 z-[9998] bg-background md:hidden"
+                  className="fixed inset-0 z-[9998] bg-background lg:hidden"
                   onClick={() => setOpen(false)}
                   aria-hidden
                 />
                 <div
-                  className="fixed inset-x-3 top-[3.25rem] z-[9999] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-none md:hidden"
+                  className="fixed inset-x-3 top-[3.25rem] z-[9999] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-none lg:hidden"
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   {menuBody}
@@ -213,13 +213,13 @@ export function WorkspaceSelector({
             )}
 
           <div
-            className="fixed inset-0 z-[200] hidden bg-black/20 dark:bg-black/40 md:block"
+            className="fixed inset-0 z-[200] hidden bg-black/20 dark:bg-black/40 lg:block"
             onClick={() => setOpen(false)}
             aria-hidden
           />
           <div
             className={cn(
-              "z-[210] hidden max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 md:block",
+              "z-[210] hidden max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 lg:block",
               menuPlacement === "top"
                 ? "absolute inset-x-auto bottom-full top-auto mb-1"
                 : "absolute inset-x-auto top-full mt-1",

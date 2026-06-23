@@ -69,7 +69,7 @@ export const storeNavItems: NavItem[] = [
  * Modo operação — pipeline de lojas, coleções e produtos em teste.
  */
 export const operationsNavItems: NavItem[] = [
-  { label: "Operação", href: "/operacao", icon: Kanban },
+  { label: "Hoje", href: "/operacao", icon: Kanban },
   { label: "Tarefas", href: "/operacao/tarefas", icon: ListTodo },
   { label: "Coleções", href: "/operacao/colecoes", icon: Layers },
   { label: "Produtos teste", href: "/operacao/produtos", icon: FlaskConical },
@@ -117,7 +117,7 @@ export function mobilePrimaryNavItems(
 ): NavItem[] {
   if (viewMode === "operations") {
     return [
-      { label: "Operação", href: "/operacao", icon: Kanban },
+      { label: "Hoje", href: "/operacao", icon: Kanban },
       { label: "Tarefas", href: "/operacao/tarefas", icon: ListTodo },
       { label: "Coleções", href: "/operacao/colecoes", icon: Layers },
       mobileMoreNavItem,

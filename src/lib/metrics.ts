@@ -50,10 +50,17 @@ import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import type { CollectionReminder } from "@/lib/collection-schedule";
 import { listCollectionRemindersForWorkspace } from "@/lib/collection-operations";
 import {
+  clipSliceForKilledStore,
+  countKilledExcludedFromPeriod,
   filterStoresForFinancialMetrics,
   operationExclusionNote,
   resolveStoreOperationStatus,
+  storesForFinancialConsolidated,
 } from "@/lib/operation-filters";
+import {
+  aggregateAdSpendWithKillClip,
+  aggregateStoreAggsWithKillClip,
+} from "@/lib/operation-metrics";
 import {
   resolvePeriod,
   orderDateMatch,
@@ -1184,6 +1191,8 @@ async function buildConsolidatedDailyProfitSeries(
     name: string;
     cogsMode?: string | null;
     ianaTimezone?: string | null;
+    operationStatus?: string | null;
+    operationKilledAt?: Date | null;
   }>,
   colorByStoreId: Map<string, string>,
   slice: PeriodSlice,
@@ -1237,6 +1246,15 @@ async function buildConsolidatedDailyProfitSeries(
     };
 
     for (const meta of series) {
+      const storeRef = stores.find((s) => String(s._id) === meta.storeId);
+      if (
+        storeRef &&
+        resolveStoreOperationStatus(storeRef) === "killed" &&
+        storeRef.operationKilledAt
+      ) {
+        const killKey = formatDateInput(startOfDay(storeRef.operationKilledAt));
+        if (dateKey > killKey) continue;
+      }
       const o =
         ordersByStoreDay.get(storeDayKey(dateKey, meta.storeId)) ?? zeros;
       const storeKey = storeDayKey(dateKey, meta.storeId);
@@ -1976,7 +1994,7 @@ export async function buildWorkspaceSummary(
     ...NON_ARCHIVED_STORE_FILTER,
   })
     .select(
-      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry ianaTimezone lastSessionMetricsError cogsMode workspaceId operationStatus status collectionTestCycleDays collectionReminderDaysBefore",
+      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry ianaTimezone lastSessionMetricsError cogsMode workspaceId operationStatus operationKilledAt status collectionTestCycleDays collectionReminderDaysBefore",
     )
     .lean();
 
@@ -1999,13 +2017,8 @@ export async function buildWorkspaceSummary(
       : null;
   if (storeId && !scoped) return emptySummary(currency);
 
-  const financialSplit = scoped
-    ? null
-    : filterStoresForFinancialMetrics(accessibleStores);
+  if (storeId && !scoped) return emptySummary(currency);
 
-  const stores = scoped
-    ? [scoped]
-    : (financialSplit?.included ?? accessibleStores);
   const scopeName = scoped ? scoped.name : null;
   const scopeDomain = scoped ? getStoreDisplayUrl(scoped) : null;
   const storeTz = scoped ? normalizeStoreTimezone(scoped.ianaTimezone) : null;
@@ -2036,13 +2049,57 @@ export async function buildWorkspaceSummary(
     ? { start: prevStart, end: prevEnd, specificDates: prevSpecificDates }
     : { start: prevStart, end: prevEnd };
 
+  const financialSplit = scoped
+    ? null
+    : filterStoresForFinancialMetrics(accessibleStores, currentSlice);
+
+  const stores = scoped
+    ? [scoped]
+    : (financialSplit?.included ?? storesForFinancialConsolidated(accessibleStores));
+
+  let effectiveCurrentSlice = currentSlice;
+  let effectivePrevSlice = prevSlice;
+
+  if (scoped && resolveStoreOperationStatus(scoped) === "killed") {
+    const curClip = clipSliceForKilledStore(scoped, currentSlice);
+    if (!curClip) {
+      return {
+        ...emptySummary(currency),
+        operationContext: {
+          exclusionNote:
+            "Este período é posterior à data em que a loja foi matada — sem métricas financeiras.",
+          excludedWaiting: 0,
+          excludedKilled: 1,
+          scopedStoreStatus: "killed",
+          collectionReminders: [],
+        },
+      };
+    }
+    effectiveCurrentSlice = curClip;
+    effectivePrevSlice =
+      clipSliceForKilledStore(scoped, prevSlice) ?? prevSlice;
+  }
+
+  const hasKilledPartial =
+    !scoped &&
+    accessibleStores.some(
+      (s) =>
+        resolveStoreOperationStatus(s) === "killed" &&
+        clipSliceForKilledStore(s, currentSlice) !== null,
+    );
+
   const importFloor = scoped
     ? resolveImportFloor(scoped.importStartDate, scoped.createdAt)
     : earliestImportFloor(stores);
   const chartSlice: PeriodSlice = clampSliceToImportFloor(
-    currentSlice,
+    effectiveCurrentSlice,
     importFloor,
   );
+  let effectiveChartSlice = chartSlice;
+  if (scoped && resolveStoreOperationStatus(scoped) === "killed") {
+    effectiveChartSlice =
+      clipSliceForKilledStore(scoped, chartSlice) ?? chartSlice;
+  }
 
   const refundWindowDays = workspace?.refundWindowDays ?? 30;
   const profitWindowStatus = classifyProfitWindow(
@@ -2104,10 +2161,11 @@ export async function buildWorkspaceSummary(
     return agg;
   }
 
-  const byStore = await aggregateStoreAggs(
+  const byStore = await aggregateStoreAggsWithKillClip(
     wsId,
     stores,
-    currentSlice,
+    effectiveCurrentSlice,
+    aggregateStoreAggs,
     storeTz,
   );
 
@@ -2120,12 +2178,12 @@ export async function buildWorkspaceSummary(
   const scopedStoreId = scoped ? String(scoped._id) : null;
   const curOperatingExpenses = sumLoadedExpenses(
     expenseRows,
-    currentSlice,
+    effectiveCurrentSlice,
     scopedStoreId,
   );
   const prevOperatingExpenses = sumLoadedExpenses(
     expenseRows,
-    prevSlice,
+    effectivePrevSlice,
     scopedStoreId,
   );
   const opExByStore =
@@ -2138,8 +2196,8 @@ export async function buildWorkspaceSummary(
       : new Map<string, number>();
 
   const [curAdAgg, prevAdAgg] = await Promise.all([
-    aggregateAdSpendForStores(stores, currentSlice),
-    aggregateAdSpendForStores(stores, prevSlice),
+    aggregateAdSpendWithKillClip(stores, effectiveCurrentSlice),
+    aggregateAdSpendWithKillClip(stores, effectivePrevSlice),
   ]);
   const adSpend = curAdAgg.total;
   const prevAdSpend = prevAdAgg.total;
@@ -2162,11 +2220,11 @@ export async function buildWorkspaceSummary(
   const [missingCogsCount, missingAdSpendDays] = await Promise.all([
     scoped
       ? scopedCogsMode === "order"
-        ? countOrdersMissingManualCogs([scoped._id], currentSlice, storeTz)
+        ? countOrdersMissingManualCogs([scoped._id], effectiveCurrentSlice, storeTz)
         : scopedCogsMode === "day"
           ? countMissingCogsDays(scoped)
-          : countSoldVariantsMissingCost([scoped._id], currentSlice)
-      : countMissingCogsForStores(stores, currentSlice),
+          : countSoldVariantsMissingCost([scoped._id], effectiveCurrentSlice)
+      : countMissingCogsForStores(stores, effectiveCurrentSlice),
     sumMissingAdSpendDays(stores, currency),
   ]);
   const cogsIncomplete = missingCogsCount > 0;
@@ -2265,8 +2323,8 @@ export async function buildWorkspaceSummary(
   let extendedKpis: SummaryKpi[] = [];
 
   if (scoped) {
-    const cur = await aggregateOrders(currentSlice, scoped._id);
-    const prev = await aggregateOrders(prevSlice, scoped._id);
+    const cur = await aggregateOrders(effectiveCurrentSlice, scoped._id);
+    const prev = await aggregateOrders(effectivePrevSlice, scoped._id);
     const curAdSpend = adSpend;
     const curAdSpendForProfit = scopedAdSpendKnown ? curAdSpend : 0;
     const prevAdSpendForProfit = scopedPrevAdSpendKnown ? prevAdSpend : 0;
@@ -2380,8 +2438,33 @@ export async function buildWorkspaceSummary(
             : "Sem margem de contribuição positiva",
       },
     ];
-    const curAll = await aggregateOrders(currentSlice);
-    const prevAll = await aggregateOrders(prevSlice);
+    const curAll = totals;
+    const prevByStore = await aggregateStoreAggsWithKillClip(
+      wsId,
+      stores,
+      effectivePrevSlice,
+      aggregateStoreAggs,
+      storeTz,
+    );
+    const prevAll = [...prevByStore.values()].reduce(
+      (acc, a) => {
+        acc.revenue += a.revenue;
+        acc.cogs += a.cogs;
+        acc.shipping += a.shipping;
+        acc.fees += a.fees;
+        acc.refunds += a.refunds;
+        acc.orders += a.orders;
+        return acc;
+      },
+      {
+        revenue: 0,
+        cogs: 0,
+        shipping: 0,
+        fees: 0,
+        refunds: 0,
+        orders: 0,
+      },
+    );
     extendedKpis = buildExtendedWorkspaceKpis(
       curAll,
       prevAll,
@@ -2429,7 +2512,7 @@ export async function buildWorkspaceSummary(
     profitChart = await buildDailyProfitSeries(
       wsId,
       storeOids,
-      scoped ? currentSlice : chartSlice,
+      scoped ? effectiveChartSlice : chartSlice,
       fmtMoney,
       storeTz,
       scoped ? scopedCogsMode : null,
@@ -2445,21 +2528,21 @@ export async function buildWorkspaceSummary(
   let dailyMetrics: StoreDailyMetricRow[] = [];
 
   if (scoped) {
-    const cur = await aggregateOrders(currentSlice, scoped._id);
+    const cur = await aggregateOrders(effectiveCurrentSlice, scoped._id);
     const curAdSpend = adSpend;
 
     topProducts =
       topProductsMode === "units"
         ? await buildTopProductsByUnits(
             scoped._id,
-            currentSlice,
+            effectiveCurrentSlice,
             fmtMoney,
             5,
             storeTz,
           )
         : await buildTopProductsByProfit(
             scoped._id,
-            currentSlice,
+            effectiveCurrentSlice,
             fmtMoney,
             5,
             storeTz,
@@ -2573,7 +2656,7 @@ export async function buildWorkspaceSummary(
     dailyNotes = await fetchStoreDailyNotesForPeriod(
       wsId,
       scoped._id,
-      currentSlice,
+      effectiveCurrentSlice,
     );
     profitChart = annotateProfitChartNotes(profitChart, dailyNotes);
     profitChart = annotateProfitChartConsolidation(profitChart, refundWindowDays);
@@ -2586,21 +2669,21 @@ export async function buildWorkspaceSummary(
       aggregateSessionFunnelFromDb(
         scoped._id,
         scoped.analyticsSessionCountry,
-        currentSlice,
+        effectiveCurrentSlice,
         storeImportFloorKey,
         storeTz,
       ),
       aggregateSessionFunnelFromDb(
         scoped._id,
         scoped.analyticsSessionCountry,
-        prevSlice,
+        effectivePrevSlice,
         storeImportFloorKey,
         storeTz,
       ),
       buildStoreDailyMetrics(
         wsId,
         scoped._id,
-        currentSlice,
+        effectiveCurrentSlice,
         fmtMoney,
         scoped.analyticsSessionCountry,
         storeTz,
@@ -2626,15 +2709,15 @@ export async function buildWorkspaceSummary(
       funnelError = `${funnelCur.error} (${sessionErr})`;
     }
 
-    const prevForExtended = await aggregateOrders(prevSlice, scoped._id);
+    const prevForExtended = await aggregateOrders(effectivePrevSlice, scoped._id);
     const [adInsightsCur, adInsightsPrev] = await Promise.all([
       aggregateStoreAdInsightsForPeriod(
         String(scoped._id),
-        dayKeysInSlice(currentSlice, storeTz),
+        dayKeysInSlice(effectiveCurrentSlice, storeTz),
       ),
       aggregateStoreAdInsightsForPeriod(
         String(scoped._id),
-        dayKeysInSlice(prevSlice, storeTz),
+        dayKeysInSlice(effectivePrevSlice, storeTz),
       ),
     ]);
     extendedKpis = buildExtendedStoreKpis(
@@ -2691,11 +2774,13 @@ export async function buildWorkspaceSummary(
   const operationContext = {
     exclusionNote: financialSplit
       ? operationExclusionNote(
-          financialSplit.excludedWaiting,
           financialSplit.excludedKilled,
+          hasKilledPartial,
         )
-      : null,
-    excludedWaiting: financialSplit?.excludedWaiting ?? 0,
+      : scoped && resolveStoreOperationStatus(scoped) === "killed"
+        ? "Métricas desta loja só incluem dias até à data em que foi matada."
+        : null,
+    excludedWaiting: 0,
     excludedKilled: financialSplit?.excludedKilled ?? 0,
     scopedStoreStatus: scoped
       ? resolveStoreOperationStatus(scoped)

@@ -20,6 +20,7 @@ import {
   normalizeAppViewMode,
   type AppViewMode,
 } from "@/lib/app-view-mode";
+import { isActiveWorkspaceMember } from "@/lib/members";
 import {
   getAppViewModeForUser,
   saveAppViewModeForUser,
@@ -87,24 +88,28 @@ export async function updateStoreOperationStatusAction(
   }
 
   await connectToDatabase();
+  const next = normalizeStoreOperationStatus(parsed.data.operationStatus);
+  const $set: Record<string, unknown> = { operationStatus: next };
+  if (next === "killed") {
+    $set.operationKilledAt = startOfDay(new Date());
+  } else {
+    $set.operationKilledAt = null;
+  }
+
   const result = await Store.updateOne(
     {
       _id: new mongoose.Types.ObjectId(parsed.data.storeId),
       workspaceId: new mongoose.Types.ObjectId(user.workspaceId),
       deletedAt: null,
     },
-    {
-      $set: {
-        operationStatus: normalizeStoreOperationStatus(
-          parsed.data.operationStatus,
-        ),
-      },
-    },
+    { $set },
   );
 
   if (result.matchedCount === 0) return { error: "Loja não encontrada." };
 
   revalidatePath("/operacao");
+  revalidatePath("/dashboard");
+  revalidatePath("/metricas");
   return { ok: true };
 }
 
@@ -436,7 +441,24 @@ const taskSchema = z.object({
   status: z.enum(["todo", "doing", "done"]).optional(),
   storeId: z.string().trim().optional(),
   dueDate: z.string().trim().optional(),
+  assigneeId: z.string().trim().optional(),
 });
+
+async function resolveTaskAssigneeId(
+  workspaceId: string,
+  raw: string | undefined,
+): Promise<
+  | { ok: true; id: mongoose.Types.ObjectId | null }
+  | { ok: false; error: string }
+> {
+  if (!raw?.length) return { ok: true, id: null };
+  if (!mongoose.Types.ObjectId.isValid(raw)) {
+    return { ok: false, error: "Responsável inválido." };
+  }
+  const ok = await isActiveWorkspaceMember(workspaceId, raw);
+  if (!ok) return { ok: false, error: "Responsável não pertence ao workspace." };
+  return { ok: true, id: new mongoose.Types.ObjectId(raw) };
+}
 
 function revalidateTasks() {
   revalidatePath("/operacao");
@@ -491,6 +513,12 @@ export async function createOperationTaskAction(
   const wsId = new mongoose.Types.ObjectId(user.workspaceId);
   const position = await nextTaskPosition(wsId, status, storeOid);
 
+  const assignee = await resolveTaskAssigneeId(
+    user.workspaceId,
+    parsed.data.assigneeId,
+  );
+  if (!assignee.ok) return { error: assignee.error };
+
   await OperationTask.create({
     workspaceId: wsId,
     storeId: storeOid,
@@ -499,6 +527,7 @@ export async function createOperationTaskAction(
     status,
     position,
     dueDate,
+    assigneeId: assignee.id,
     createdBy: new mongoose.Types.ObjectId(user.id),
   });
 
@@ -513,6 +542,7 @@ export async function updateOperationTaskAction(input: {
   status?: OperationTaskStatus;
   dueDate?: string | null;
   position?: number;
+  assigneeId?: string | null;
 }): Promise<{ ok?: boolean; error?: string }> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
@@ -547,6 +577,18 @@ export async function updateOperationTaskAction(input: {
       const d = new Date(input.dueDate);
       if (Number.isNaN(d.getTime())) return { error: "Data inválida." };
       $set.dueDate = d;
+    }
+  }
+  if (input.assigneeId !== undefined) {
+    if (input.assigneeId === null || input.assigneeId === "") {
+      $set.assigneeId = null;
+    } else {
+      const assignee = await resolveTaskAssigneeId(
+        user.workspaceId,
+        input.assigneeId,
+      );
+      if (!assignee.ok) return { error: assignee.error };
+      $set.assigneeId = assignee.id;
     }
   }
 

@@ -45,9 +45,9 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 ## Responsividade (obrigatória em tudo)
 
 * **Mobile-first**: desenhar primeiro para telemóvel, depois escalar para tablet e desktop.
-* **Breakpoints** consistentes (Tailwind: `sm`, `md`, `lg`, `xl`).
-* Layouts adaptáveis: cartões empilham no telemóvel, tabelas grandes ganham **scroll horizontal** ou viram cartões.
-* **Navegação adaptada**: menu lateral no desktop, menu inferior/hambúrguer no telemóvel.
+* **Breakpoints** consistentes (Tailwind: `sm`, `md`, `lg`, `xl`). **Breakpoint principal de layout: `lg` (1024px)** — abaixo disso usa barra inferior; a partir de `lg` usa sidebar fixa.
+* Layouts adaptáveis: cartões empilham no telemóvel; **tabelas viram cartões até `lg`**; em desktop (`lg+`) tabelas com scroll horizontal quando necessário.
+* **Navegação adaptada**: sidebar fixa à esquerda em `lg+`; barra inferior (4 itens + «Mais») em telemóvel e tablet (`< lg`).
 * Áreas de toque grandes, fontes legíveis, gráficos que encolhem sem perder leitura.
 * **Critério de aceitação**: cada ecrã é testado em larguras de ~375px (telemóvel), ~768px (tablet) e ~1280px+ (desktop) antes de dar como concluído.
 
@@ -62,7 +62,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * Tailwind CSS
 * Shadcn/UI
 * Recharts (ou Tremor para dashboards financeiros)
-* TanStack Query (cache e sincronização de dados no cliente)
+* TanStack Query (cache e sincronização de dados no cliente; dashboard com `refetchInterval` + invalidação via live sync)
 * Zustand (estado global leve)
 * **PWA**: `manifest.json` + service worker (ex.: Serwist / next-pwa) para instalar no telemóvel e funcionar offline
 
@@ -72,6 +72,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * Node.js
 * **BullMQ + Redis** — filas para sincronização periódica e import histórico
 * **Zod** — validação de payloads dos webhooks e da API
+* **Live sync**: `GET /api/live/stream` (SSE, autenticado) — ver secção «Sincronização em tempo real»
 
 ## Base de Dados
 
@@ -780,6 +781,7 @@ Principais dificuldades: 0
 * (Opcional) limitar o que um Viewer vê — ex.: esconder lucro/custos e mostrar só revenue.
 * **Log de auditoria** por membro (quem viu/alterou o quê e quando).
 * **Feed de atividade da equipa**: timeline do que cada membro fez (ligou loja, editou COGS, escreveu nota, exportou), para acompanhares o trabalho conjunto.
+* **Tarefas de operação**: atribuir `operationTasks` a qualquer membro activo do workspace (incluindo a ti); validação `isActiveWorkspaceMember` nas server actions.
 * Nada de passwords partilhadas: cada pessoa tem as suas próprias credenciais.
 
 ---
@@ -907,10 +909,21 @@ Lucro após taxas =
  = Net Profit
 ```
 
-* Os valores de taxa são **reais** (vindos das *balance transactions* da Shopify), com `feesSource: real | estimated`.
-* No sync: encomendas → balance transactions (`associatedOrder`) → `order.fees` real; sem BT ligada → fallback `computeOrderFees()` (calendário em Definições).
-* Taxas reais já incluem conversão de moeda e comissões Shopify Payments — não se soma +2% manual em cima.
-* Para gateways sem API de taxas, o calendário manual em Definições serve de **fallback estimado** (`feesSource: estimated`).
+* Os valores de taxa usam `feesSource: real | estimated` por encomenda.
+
+### Fontes por tipo de pagamento (importante)
+
+| Tipo | O que entra no lucro | Aparece em payouts / balance transactions? |
+|---|---|---|
+| **Shopify Payments** (cartão via Shopify) | Taxa **real** por encomenda: `shopifyPaymentsAccount.balanceTransactions` com `fee` + `associatedOrder` → `order.fees` (`feesSource: real`). Implementado em `order-fees-from-shopify.ts`. | **Sim** — cada charge/refund na conta Shopify Payments tem `fee` ligado à encomenda. |
+| **Gateway externo** (Stripe/PayPal/Braintree fora do Shopify Payments, etc.) | Hoje: **estimado** via calendário em Definições (`computeOrderFees`, `feesSource: estimated`). | **Não** — o dinheiro não passa pela conta Shopify Payments; **não há** balance transaction de charge com taxa do gateway externo nos payouts. |
+| **Taxa Shopify por usar gateway externo** (0,5–2% do plano) | Não está hoje mapeada por encomenda na API de payouts; cobrada na faturação Shopify (relatórios Finance/Billing). | **Não** por transação nos payouts — é taxa de plataforma, distinta do processamento do PayPal/Stripe. |
+| **Taxa do próprio gateway** (ex. PayPal 2,9% + fixo) | Futuro: API do gateway (Stripe/PayPal) com ID da transação obtido da encomenda Shopify. | **Não** na Shopify — só no extrato/API do gateway. |
+
+* No sync actual: encomendas Shopify Payments → balance transactions (`associatedOrder`) → `order.fees` real; sem BT ligada → fallback `computeOrderFees()` (calendário em Definições).
+* `OrderTransaction.fees` na GraphQL Admin API existe mas Shopify documenta: **só para transações Shopify Payments** (não gateways externos).
+* Taxas reais (Shopify Payments) já incluem conversão de moeda e comissões — não se soma +2% manual em cima.
+* **Objectivo futuro** para externo: (1) taxa Shopify % do plano por encomenda (gateway ≠ `shopify_payments`); (2) opcionalmente ligar Stripe/PayPal para taxa real do processador. Até lá, calendário manual = `estimated`.
 
 ## Organização e usabilidade
 
@@ -1203,7 +1216,8 @@ Lucro após taxas =
 * `dataScope` (opcional: campos visíveis, ex.: esconder custos/lucro)
 * `expiresAt` (opcional — acesso temporário)
 * `status` (active / revoked)
-* `createdAt`
+* `appViewMode` (`financial` / `operations` — preferência de vista da app por utilizador neste workspace)
+* `createdAt` / `updatedAt`
 
 ## invitations
 
@@ -1228,6 +1242,7 @@ Lucro após taxas =
 * `platform`
 * `status` (active / paused / archived)
 * `operationStatus` (running / waiting / killed — pipeline operacional; `null` = inferido de `status`)
+* `operationKilledAt` (data em que passou a «matada» — métricas financeiras só até ao fim deste dia, inclusive; limpa-se ao sair de `killed`)
 * `collectionTestCycleDays` (dias por ciclo de teste de coleção; defeito 5)
 * `collectionReminderDaysBefore` (avisar N dias antes do fim/início; defeito 2)
 * `currency`
@@ -1290,9 +1305,18 @@ Lucro após taxas =
 * `status` (todo / doing / done)
 * `position` (ordem na coluna)
 * `dueDate` (lembrete opcional)
+* `assigneeId` (membro **activo** do workspace — opcional; validado em server action)
 * `deletedAt`
 * `createdBy`
 * `createdAt` / `updatedAt`
+
+**Atribuição e filtros (UI):**
+
+* Criar tarefa com responsável em **Hoje** (`/operacao`) e **Tarefas** (`/operacao/tarefas`).
+* Alterar responsável no cartão Kanban (dropdown por membro; «Sem responsável»).
+* Filtros na página de tarefas (`?assignee=`): `all` (todas), `mine` (minhas), `unassigned` (sem responsável).
+* Lista de membros = `listWorkspaceMemberOptions` (inclui o utilizador actual como «tu»).
+* Componentes: `task-assignee-picker`, `task-assignee-control`; acções `createOperationTaskAction` / `updateOperationTaskAction` com `assigneeId`.
 
 ## session_metrics_months
 
@@ -1442,15 +1466,29 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## Modo financeiro vs modo operação
 
-> Duas vistas da app, alternáveis no topo (**Modo financeiro** / **Modo operação**). Preferência guardada por utilizador/workspace (`Membership.appViewMode`).
+> Duas vistas da app, alternáveis no topo (**Modo financeiro** / **Modo operação**). Preferência guardada por utilizador/workspace (`Membership.appViewMode`). Implementação: `AppViewModeToggle`, `AppViewModeShell`, `AppViewModePathSync` (rota e modo mantêm-se alinhados; toggle optimista).
 
 ### Modo financeiro (actual)
 
 Dashboard, métricas, lucro, payouts, decisão, etc. — tudo o que já existia.
 
+**Pipeline operacional → impacto no financeiro** (`src/lib/operation-filters.ts`, `src/lib/operation-metrics.ts`, `src/lib/metrics.ts`):
+
+| Estado loja (`Store.operationStatus`) | Consolidado / KPIs | Selector de loja (modo financeiro) |
+|---|---|---|
+| **A rodar** (`running`) | Contribui normalmente | Sempre visível (se o user tem acesso) |
+| **Em espera** (`waiting`) | Contribui normalmente (igual a «a rodar») | Sempre visível |
+| **Matada** (`killed`) | Contribui só até `operationKilledAt` (fim desse dia civil, inclusive); dias posteriores = zero | Só aparece se o **período da topbar** sobrepõe dias activos (ex.: últimos 7 dias só após matança → oculta; últimos 30 dias com vendas antes da matança → visível) |
+
+* Ao passar loja para **matada**: `updateStoreOperationStatusAction` grava `operationKilledAt = startOfDay(hoje)`; ao sair de `killed`, limpa o campo.
+* Vista scoped (loja seleccionada) matada: KPIs/gráficos/produtos/funil recortados ao período activo; aviso no banner se o período é todo posterior à matança.
+* Consolidado: lojas matadas fora do período excluídas da lista comparativa; gráfico diário ignora dias pós-matança por loja.
+* Banner `OperationsAlertsBanner`: aviso scoped só para **matada** (não para «em espera»); nota de exclusão quando lojas matadas não têm overlap com o período.
+* Modo operação: selector de loja mostra **todas** as lojas (sem filtro por período).
+
 ### Modo operação (`/operacao`)
 
-Pipeline operacional de dropshipping — **influencia o consolidado financeiro** (métricas/dashboard excluem lojas «em espera» e «matadas»; loja scoped mostra aviso se não estiver «a rodar»):
+Pipeline operacional de dropshipping.
 
 | Área | Estados |
 |---|---|
@@ -1458,14 +1496,24 @@ Pipeline operacional de dropshipping — **influencia o consolidado financeiro**
 | **Coleções** (`testCollections`) | Por testar · A testar · Não vai testar · Performou · Matada |
 | **Produtos** (`testProducts`) | A testar · Já testado · Performou · Falhou |
 
-* Rotas: `/operacao`, `/operacao/tarefas`, `/operacao/colecoes`, `/operacao/produtos`
-* **Ciclo de coleções**: por loja `collectionTestCycleDays` (defeito 5) e `collectionReminderDaysBefore` (defeito 2). Ao passar para «A testar» regista início/fim; lembretes 1–2 dias antes do fim ou do início agendado. Banner no dashboard/métricas + bloco automático no **relatório diário** da loja (`--- Operação (coleções) ---`).
-* **Tarefas** (`operationTasks`): quadro Kanban (Por fazer · Em progresso · Concluído), filtro workspace/loja, lembrete por data
-* **Ad spend 0€**: em Anúncios, checkbox «Sem gasto (0€)» ou botão rápido «0€» no calendário — fecha o dia sem gasto
-* Header: período oculto em modo operação; toggle compacto em ecrãs pequenos
-* Sidebar e barra inferior adaptam-se ao modo
-* Soft delete em coleções/produtos de teste
-* Editor+ pode alterar; viewer só consulta
+* **Rotas**: `/operacao` (**Hoje**), `/operacao/tarefas`, `/operacao/colecoes`, `/operacao/produtos`
+* **Hoje** (`/operacao`): hub do dia — lembretes de ciclo, decisão assistida (lucro/ROAS), tarefas inline com atribuição, coleções/produtos com mudança de estado, lojas colapsáveis, atalhos para quadro completo
+* **Decisão assistida**: ao fim do ciclo sugere Performou/Matada com base em lucro e ROAS do período de teste (`collection-decision.ts`)
+* **Ciclo de coleções**: `collectionTestCycleDays` (defeito 5) e `collectionReminderDaysBefore` (defeito 2). Ao passar para «A testar» regista início/fim; lembretes antes do fim ou início agendado. Banner no dashboard/métricas + bloco no relatório diário (`--- Operação (coleções) ---`, `--- Operação (produtos) ---`)
+* **Tarefas** (`operationTasks`): Kanban drag-and-drop + setas no telemóvel; atribuição a membros do workspace; filtros Todas / Minhas / Sem responsável
+* **Ad spend 0€**: em Anúncios, checkbox «Sem gasto (0€)» ou botão «0€» no calendário
+* **Header**: período oculto em modo operação; toggle de modo compacto em ecrãs pequenos
+* **Navegação**: sidebar e barra inferior mudam itens consoante o modo (`nav.ts` → `operationsNavItems`)
+* Soft delete em coleções/produtos/tarefas de teste
+* **Permissões**: editor+ altera pipeline e tarefas; viewer só consulta
+
+### Sincronização em tempo real (live)
+
+> A app actualiza-se sem F5 nem reentrar no browser quando mudam dados do workspace.
+
+* **SSE** `GET /api/live/stream` — stream autenticado; poll interno ~4 s a `getWorkspaceRevision(workspaceId)` (`src/lib/workspace-revision.ts`: `updatedAt` de stores, tarefas, coleções + assinatura de `operationStatus`/`operationKilledAt`).
+* **Cliente** `WorkspaceLiveSync` no layout `(app)` — `EventSource`; quando a revisão muda → `queryClient.invalidateQueries()` + `router.refresh()`.
+* Complementa o `refetchInterval` do dashboard (~15 s) e o registo do service worker (PWA).
 
 ### Modo empresarial P&L (`/financas?mode=business`)
 
@@ -1732,26 +1780,37 @@ Pipeline operacional de dropshipping — **influencia o consolidado financeiro**
 
 ## Navegação
 
-* **Desktop**: barra lateral fixa à esquerda com as secções; topo com seletor de loja/período e perfil.
-* **Telemóvel**: barra inferior com os itens principais (Dashboard, Lojas, Decisão, Mais) + menu para o resto.
-* **Seletor global** sempre acessível: lojas (todas / grupo / seleção) + período (com comparação).
+* **Desktop (`lg+`)**: sidebar **fixa** à esquerda (`AppSidebar`, altura `h-dvh`); **só a coluna principal faz scroll** (`layout.tsx`: `lg:h-dvh lg:overflow-hidden` + `lg:overflow-y-auto` no conteúdo). Lista de nav com scroll interno se for longa. Topbar fixa no topo da coluna (sticky).
+* **Telemóvel e tablet (`< lg`)**: sidebar oculta; **barra inferior fixa** (`BottomNav`) com itens principais + menu «Mais»; padding inferior no `main` para não tapar conteúdo.
+* **Seletor global** na topbar: workspace, loja (filtrada por período no modo financeiro se loja matada), portfolio multi-workspace, período (oculto em modo operação), toggle modo financeiro/operação.
+* **Troca de modo**: navegação optimista para o hub correcto (`/dashboard` vs `/operacao`); `ScopeRouteGuard` e `ScopeSync` mantêm `?store=` coerente.
 
 ## Secções principais (menu)
 
+### Modo financeiro
+
 1. **Dashboard** — visão consolidada (KPIs, lucro, comparação loja a loja).
 2. **Lojas** — lista de lojas e dashboard individual de cada uma.
-3. **Lucro & Finanças** — lucro real, taxas, P&L, saúde financeira, tesouraria.
-4. **Payouts** — quanto e quando recebes.
-5. **Decisão** — "o que fazer hoje", kill/scale, recomendações.
-6. **Notas & Relatórios** — diário, relatório diário automático, exportações.
-7. **Anúncios** — ad spend por plataforma/campanha.
-8. **Definições** — secções colapsáveis (fechadas por defeito) com atalhos: Conta, Workspaces, Workspace activo, Equipa, Lojas (uma sub-secção por loja), Capital, Mover lojas.
+3. **Métricas** — funil + tabela dia a dia (requer loja seleccionada).
+4. **Lucro & Finanças** — lucro real, taxas, P&L, saúde financeira, tesouraria.
+5. **Payouts** — quanto e quando recebes.
+6. **Decisão** — "o que fazer hoje", kill/scale, recomendações.
+7. **Notas & Relatórios** — diário, relatório diário automático, exportações.
+8. **Anúncios** — ad spend por plataforma/campanha.
+9. **Definições** — conta, workspaces, equipa, lojas, capital.
+
+### Modo operação
+
+1. **Hoje** (`/operacao`) — hub central do dia.
+2. **Tarefas** — Kanban com atribuição a membros.
+3. **Coleções** — pipeline de testes de coleção.
+4. **Produtos teste** — pipeline de produtos.
 
 ## Padrões de ecrã
 
 * **Topo**: título + seletores + ação principal.
 * **Meio**: cartões de KPI (grelha que reflui no telemóvel) → gráficos → tabela detalhada.
-* **Tabelas**: ordenáveis, com scroll horizontal no telemóvel (ou viram cartões).
+* **Tabelas**: ordenáveis; **cartões em `< lg`**, tabela com scroll horizontal em `lg+` quando necessário.
 * **Estados**: skeletons no loading, estado vazio com ação ("Adiciona a tua primeira loja"), e estado de erro claro.
 * **Cores**: neutras; verde/vermelho só para lucro/prejuízo e saúde.
 
@@ -1765,12 +1824,12 @@ Pipeline operacional de dropshipping — **influencia o consolidado financeiro**
 
 ![Dashboard consolidado](assets/mockup-dashboard-consolidado.png)
 
-* **Sidebar** (esquerda, fixa): Dashboard, Lojas, Lucro & Finanças, Payouts, Decisão, Notas, Anúncios, Definições.
+* **Sidebar** (esquerda, fixa em `lg+`, não acompanha o scroll da página): Dashboard, Lojas, … (itens mudam no modo operação).
 * **Top bar**: seletor de loja ("Todas as lojas"), seletor de período ("Últimos 30 dias"), avatar/perfil.
 * **Linha de KPIs**: Revenue, Net Profit, Margem %, Ad Spend, ROAS, MER — valor + variação (verde/vermelho) + sparkline.
 * **Gráfico** "Lucro líquido" ao longo do tempo.
 * **Tabela comparativa** loja a loja: Revenue, Lucro, Margem, Ad Spend, ROAS + sparkline; ordenável.
-* **Responsivo**: KPIs reflowem para 2 colunas/empilhados; tabela ganha scroll horizontal ou vira cartões.
+* **Responsivo**: KPIs reflowem para 2 colunas/empilhados; tabelas em cartões até `lg`, depois tabela com scroll horizontal.
 
 ## Dashboard por Loja (desktop, dark mode)
 
@@ -1804,7 +1863,7 @@ Pipeline operacional de dropshipping — **influencia o consolidado financeiro**
 
 * App em ecrã inteiro (sem barra do browser), instalada no telemóvel.
 * KPIs empilhados, gráfico compacto, lista de lojas como cartões.
-* **Navegação inferior**: Dashboard, Lojas, Decisão, Mais.
+* **Navegação inferior** (`< lg`): Dashboard, Lojas, Decisão, Mais (modo financeiro) ou Hoje, Tarefas, Coleções, Mais (modo operação).
 * Áreas de toque grandes, números tabulares legíveis.
 
 > Estes mockups são a base; podem ser refinados, mas a linguagem visual (sobriedade, flat, sem emojis/gradientes) é obrigatória.

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { TestProductView } from "@/lib/operations";
@@ -55,11 +56,16 @@ export function ProdutosTesteClient({
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Produtos em teste</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Acompanha produtos a testar, já testados, que performaram ou falharam.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Produtos em teste</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Acompanha produtos a testar, já testados, que performaram ou falharam.
+          </p>
+        </div>
+        <Link href="/operacao" className="text-sm text-accent hover:underline">
+          Voltar a Hoje
+        </Link>
       </div>
 
       {error && (
@@ -154,7 +160,85 @@ export function ProdutosTesteClient({
         </form>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="space-y-3 lg:hidden">
+        {rows.length === 0 ? (
+          <p className="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-muted-foreground">
+            Sem produtos. Adiciona o primeiro acima.
+          </p>
+        ) : (
+          rows.map((row) => (
+            <div
+              key={row.id}
+              className="rounded-lg border border-border bg-surface p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium">{row.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {row.storeName}
+                    {row.collectionName ? ` · ${row.collectionName}` : ""}
+                  </p>
+                </div>
+                {canEdit && (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => run(() => deleteTestProductAction(row.id))}
+                    className="shrink-0 text-sm text-negative hover:underline disabled:opacity-60"
+                  >
+                    Remover
+                  </button>
+                )}
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div className="col-span-2 sm:col-span-1">
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Estado
+                  </p>
+                  <div className="mt-1">
+                    {canEdit ? (
+                      <select
+                        value={row.status}
+                        disabled={pending}
+                        onChange={(e) =>
+                          run(() =>
+                            updateTestProductAction({
+                              id: row.id,
+                              status: e.target.value,
+                            }),
+                          )
+                        }
+                        className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+                      >
+                        {PRODUCT_PIPELINE_STATUSES.map((st) => (
+                          <option key={st} value={st}>
+                            {PRODUCT_PIPELINE_LABEL[st]}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <PipelineStatusPill
+                        label={PRODUCT_PIPELINE_LABEL[row.status]}
+                        tone={productPipelineTone(row.status)}
+                      />
+                    )}
+                  </div>
+                </div>
+                {row.notes && (
+                  <div className="col-span-2">
+                    <p className="text-[11px] font-medium text-muted-foreground">
+                      Notas
+                    </p>
+                    <p className="mt-1 text-muted-foreground">{row.notes}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-lg border border-border lg:block">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/30 text-left text-xs text-muted-foreground">

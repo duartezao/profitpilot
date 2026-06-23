@@ -78,7 +78,7 @@ export function StoreDailyMetricsTable({
   return (
     <>
       {/* Desktop */}
-      <div className="hidden overflow-x-auto md:block">
+      <div className="hidden overflow-x-auto lg:block">
         <table className="w-full min-w-[960px] text-sm">
           <thead>
             <tr className="text-left text-xs font-medium text-muted-foreground">
@@ -150,7 +150,7 @@ export function StoreDailyMetricsTable({
       </div>
 
       {/* Mobile — cartões */}
-      <div className="space-y-3 p-4 md:hidden">
+      <div className="space-y-3 p-4 lg:hidden">
         {rows.map((row) => (
           <div
             key={row.dateKey}

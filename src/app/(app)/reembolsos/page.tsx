@@ -104,7 +104,7 @@ export default async function ReembolsosPage({
           flush
         >
         <>
-          <div className="hidden overflow-x-auto rounded-lg border border-border bg-surface md:block">
+          <div className="hidden overflow-x-auto rounded-lg border border-border bg-surface lg:block">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-left text-xs font-medium text-muted-foreground">
@@ -147,7 +147,7 @@ export default async function ReembolsosPage({
             </table>
           </div>
 
-          <div className="space-y-3 md:hidden">
+          <div className="space-y-3 lg:hidden">
             {rows.map((o) => (
               <div
                 key={o.id}

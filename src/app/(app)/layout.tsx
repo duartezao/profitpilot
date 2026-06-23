@@ -17,6 +17,8 @@ import { PendingInvitesBanner } from "@/components/pending-invites-banner";
 import { AppViewModeShell } from "@/components/app-view-mode-shell";
 import { AppViewModePathSync } from "@/components/app-view-mode-path-sync";
 import { getAppViewModeForUser } from "@/lib/app-view-mode-prefs";
+import { WorkspaceLiveSync } from "@/components/workspace-live-sync";
+import type { StoreOption } from "@/components/store-selector";
 
 export default async function AppLayout({
   children,
@@ -30,10 +32,15 @@ export default async function AppLayout({
   const storeQuery = activeStoreQueryForUser(user);
 
   const storeDocs = await Store.find(storeQuery)
-    .select("name")
+    .select("name operationStatus operationKilledAt")
     .sort({ name: 1 })
     .lean();
-  const stores = storeDocs.map((s) => ({ id: String(s._id), name: s.name }));
+  const stores = storeDocs.map((s) => ({
+    id: String(s._id),
+    name: s.name,
+    operationStatus: s.operationStatus as StoreOption["operationStatus"],
+    operationKilledAt: s.operationKilledAt?.toISOString() ?? null,
+  }));
   const storeIds = stores.map((s) => s.id);
   const workspaces = await listUserWorkspaces(user.id);
 
@@ -64,17 +71,18 @@ export default async function AppLayout({
         initialMode={initialAppViewMode}
       >
       <AppViewModePathSync />
+      <WorkspaceLiveSync />
       <PrivacyModeProvider>
       <Suspense fallback={null}>
         <ScopeSync workspaceId={user.workspaceId} storeIds={storeIds} />
         <ScopeRouteGuard />
       </Suspense>
-      <div className="flex min-h-screen">
+      <div className="flex min-h-screen lg:h-dvh lg:overflow-hidden">
         <AppSidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col lg:overflow-y-auto">
           <Topbar user={user} stores={stores} workspaces={workspaces} />
           <PendingInvitesBanner count={pendingInviteCount} />
-          <main className="flex-1 p-4 pb-24 md:p-6 md:pb-6">{children}</main>
+          <main className="flex-1 p-4 pb-24 sm:p-5 lg:p-6 lg:pb-6">{children}</main>
         </div>
         <BottomNav />
       </div>
