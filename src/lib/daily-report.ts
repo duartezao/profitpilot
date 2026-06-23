@@ -7,6 +7,7 @@ import { fetchStoreAdInsightsForDay } from "@/lib/ad-insights";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { parseDateInput } from "@/lib/period";
 import { buildCollectionReportBlock } from "@/lib/collection-operations";
+import { buildProductReportBlock } from "@/lib/product-operations";
 import { assertStoreAccess, activeStoreQueryForUser, NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import type { StoreAccess } from "@/lib/store-access";
 
@@ -186,7 +187,6 @@ export async function buildDailyReportText(opts: {
       pushLine(lines, line);
     }
   } else if (!rf?.collectionsTested && !rf?.nextCollection) {
-    // Preenche automaticamente se o utilizador não escreveu manualmente
     if (collectionBlock.testingNow) {
       pushLine(lines, `COLEÇÃO A TESTAR: ${collectionBlock.testingNow}`);
     }
@@ -201,6 +201,23 @@ export async function buildDailyReportText(opts: {
     }
     if (collectionBlock.reminder) {
       pushLine(lines, `LEMBRETE: ${collectionBlock.reminder}`);
+    }
+  }
+
+  const productBlock = await buildProductReportBlock(
+    opts.workspaceId,
+    opts.storeId,
+  );
+  if (productBlock.lines.length) {
+    pushLine(lines, "");
+    pushLine(lines, "--- Operação (produtos) ---");
+    for (const line of productBlock.lines) {
+      pushLine(lines, line);
+    }
+  } else if (!rf?.productsTested && productBlock.testingNow) {
+    pushLine(lines, `PRODUTOS A TESTAR: ${productBlock.testingNow}`);
+    if (productBlock.testedList) {
+      pushLine(lines, `PRODUTOS JÁ TESTADOS: ${productBlock.testedList}`);
     }
   }
   pushIf(lines, obs != null, `OBS: ${obs}`);

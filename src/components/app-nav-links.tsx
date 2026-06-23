@@ -68,7 +68,7 @@ export function AppNavLinks({
   }
 
   return (
-    <nav key={linkKey} className="flex-1 space-y-1 p-3">
+    <nav key={linkKey} className="space-y-1 p-3">
       {nav.map((item) => {
         const active = isActive(pathname, item.href);
         const Icon = item.icon;

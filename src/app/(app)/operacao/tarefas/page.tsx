@@ -10,7 +10,12 @@ export const metadata: Metadata = { title: "Tarefas · Operação" };
 export default async function TarefasPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string; taskStore?: string; store?: string }>;
+  searchParams: Promise<{
+    filter?: string;
+    taskStore?: string;
+    store?: string;
+    assignee?: string;
+  }>;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
@@ -20,8 +25,17 @@ export default async function TarefasPage({
   const filter =
     filterRaw === "workspace" || filterRaw === "store" ? filterRaw : "all";
   const taskStore = params.taskStore ?? params.store ?? null;
+  const assigneeRaw = params.assignee ?? "all";
+  const assignee =
+    assigneeRaw === "mine" || assigneeRaw === "unassigned"
+      ? assigneeRaw
+      : "all";
 
-  const board = await buildOperationTaskBoard(user, filter, taskStore);
+  const board = await buildOperationTaskBoard(user, {
+    scope: filter,
+    storeId: taskStore,
+    assignee,
+  });
   const canEdit = roleRank(user.role) >= roleRank("editor");
 
   return (
@@ -30,6 +44,7 @@ export default async function TarefasPage({
       canEdit={canEdit}
       initialFilter={filter}
       initialStoreId={taskStore}
+      initialAssigneeFilter={assignee}
     />
   );
 }

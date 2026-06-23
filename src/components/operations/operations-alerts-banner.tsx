@@ -1,6 +1,5 @@
 import Link from "next/link";
 import type { CollectionReminder } from "@/lib/collection-schedule";
-import { STORE_OPERATION_LABEL } from "@/lib/operations-pipeline";
 import { cn } from "@/lib/utils";
 
 export function OperationsAlertsBanner({
@@ -15,10 +14,7 @@ export function OperationsAlertsBanner({
   className?: string;
 }) {
   const reminders = collectionReminders ?? [];
-  const hasScopedWarning =
-    scopedStoreStatus &&
-    scopedStoreStatus !== "running" &&
-    scopedStoreStatus in STORE_OPERATION_LABEL;
+  const hasScopedWarning = scopedStoreStatus === "killed";
   const hasContent =
     Boolean(exclusionNote) || reminders.length > 0 || hasScopedWarning;
 
@@ -41,11 +37,8 @@ export function OperationsAlertsBanner({
       )}
       {hasScopedWarning && (
         <p className="text-warning">
-          Esta loja está «
-          {STORE_OPERATION_LABEL[
-            scopedStoreStatus as keyof typeof STORE_OPERATION_LABEL
-          ]}
-          » no pipeline — métricas visíveis mas fora do consolidado «a rodar».
+          Loja matada — métricas limitadas aos dias até à data de matança. «Em
+          espera» continua no consolidado financeiro.
         </p>
       )}
       {reminders.length > 0 && (

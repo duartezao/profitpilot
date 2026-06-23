@@ -11,7 +11,16 @@ import { persistActiveStore } from "@/lib/scope-query";
 import { parsePortfolioParam } from "@/lib/portfolio-scope";
 import { cn } from "@/lib/utils";
 
-export type StoreOption = { id: string; name: string };
+import { storeActiveInFinancialPeriod } from "@/lib/operation-filters";
+import { periodFromSearchParams } from "@/lib/period";
+import type { StoreOperationStatus } from "@/lib/operations-pipeline";
+
+export type StoreOption = {
+  id: string;
+  name: string;
+  operationStatus?: StoreOperationStatus | null;
+  operationKilledAt?: string | null;
+};
 
 const menuPanelCls =
   "overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-none";
@@ -51,6 +60,18 @@ export function StoreSelector({
   const { workspaceId } = useWorkspace();
   const { mode: appViewMode } = useAppViewModeContext();
   const current = params.get("store");
+  const period = periodFromSearchParams(params);
+
+  const visibleStores = stores.filter((s) => {
+    if (appViewMode === "operations") return true;
+    return storeActiveInFinancialPeriod(
+      {
+        operationStatus: s.operationStatus ?? undefined,
+        operationKilledAt: s.operationKilledAt ?? undefined,
+      },
+      { start: period.start, end: period.end, specificDates: period.specificDates },
+    );
+  });
   const portfolioActive = parsePortfolioParam(params.get("portfolio")) !== null;
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -58,7 +79,7 @@ export function StoreSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const validStore =
-    current && stores.some((s) => s.id === current) ? current : null;
+    current && visibleStores.some((s) => s.id === current) ? current : null;
 
   useEffect(() => {
     setMounted(true);
@@ -108,7 +129,7 @@ export function StoreSelector({
   const currentName = portfolioActive
     ? "Multi-workspace"
     : validStore
-      ? (stores.find((s) => s.id === validStore)?.name ?? "Loja")
+      ? (visibleStores.find((s) => s.id === validStore)?.name ?? "Loja")
       : "Todas as lojas";
 
   if (portfolioActive) {
@@ -154,12 +175,12 @@ export function StoreSelector({
         <span>Todas as lojas</span>
         {!validStore && <Check className="h-4 w-4 text-accent" />}
       </button>
-      {stores.length === 0 && (
+      {visibleStores.length === 0 && (
         <p className="px-2.5 py-2 text-xs text-muted-foreground">
-          Sem lojas ligadas.
+          Nenhuma loja com dados neste período.
         </p>
       )}
-      {stores.map((s) => (
+      {visibleStores.map((s) => (
         <button
           key={s.id}
           type="button"

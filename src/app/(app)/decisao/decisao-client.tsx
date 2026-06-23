@@ -170,7 +170,7 @@ export function DecisaoClient() {
                   : "Por loja no período selecionado."}
               </p>
             </div>
-            <div className="hidden overflow-x-auto md:block">
+            <div className="hidden overflow-x-auto lg:block">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="text-left text-xs font-medium text-muted-foreground">
@@ -222,7 +222,7 @@ export function DecisaoClient() {
               </table>
             </div>
 
-            <div className="space-y-3 p-4 md:hidden">
+            <div className="space-y-3 p-4 lg:hidden">
               {data.rows.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">
                   Sem dados no período.
