@@ -73,8 +73,11 @@ export default async function DefinicoesPage() {
 
   const canEditWorkspace = ["owner", "admin"].includes(user?.role ?? "");
   const canEditStores = ["owner", "admin", "editor"].includes(user?.role ?? "");
-  const canManageTeam = canManageMembers(user?.role ?? "");
-  const canInvite = canInviteMembers(user?.role ?? "");
+  const isWorkspaceOwner =
+    Boolean(user?.id && workspace?.ownerId) &&
+    String(workspace!.ownerId) === user!.id;
+  const canManageTeam = canManageMembers(user?.role ?? "", isWorkspaceOwner);
+  const canInvite = canInviteMembers(user?.role ?? "", isWorkspaceOwner);
   const globalSyncLabel = formatGlobalSyncInterval();
   const canAssignStores = canEditWorkspace;
 
@@ -278,6 +281,7 @@ export default async function DefinicoesPage() {
             actorRole={user?.role ?? "viewer"}
             actorUserId={user?.id ?? ""}
             canManage={canManageTeam}
+            isWorkspaceOwner={isWorkspaceOwner}
             stores={inviteStores}
             sentInvitations={sentInvitations}
           />

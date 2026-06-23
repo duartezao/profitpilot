@@ -16,15 +16,21 @@ export function roleRank(role: string): number {
 }
 
 /** Só o proprietário gere membros (papéis, remoção). */
-export function canManageMembers(actorRole: string): boolean {
+export function canManageMembers(
+  actorRole: string,
+  isWorkspaceOwner = false,
+): boolean {
   if (!TEAM_MEMBERSHIP_ENABLED) return false;
-  return actorRole === "owner";
+  return actorRole === "owner" || isWorkspaceOwner;
 }
 
 /** Só o proprietário envia convites. */
-export function canInviteMembers(actorRole: string): boolean {
+export function canInviteMembers(
+  actorRole: string,
+  isWorkspaceOwner = false,
+): boolean {
   if (!TEAM_INVITES_ENABLED) return false;
-  return actorRole === "owner";
+  return actorRole === "owner" || isWorkspaceOwner;
 }
 
 export function isProtectedOwnerRole(role: string): boolean {
@@ -43,8 +49,9 @@ export function canModifyMember(
   targetRole: string,
   actorUserId: string,
   targetUserId: string,
+  isWorkspaceOwner = false,
 ): { ok: true } | { ok: false; error: string } {
-  if (!canManageMembers(actorRole)) {
+  if (!canManageMembers(actorRole, isWorkspaceOwner)) {
     return { ok: false, error: "Só o proprietário pode gerir membros." };
   }
   if (isProtectedOwnerRole(targetRole)) {
@@ -56,7 +63,8 @@ export function canModifyMember(
   if (actorUserId === targetUserId) {
     return { ok: false, error: "Não podes alterar o teu próprio acesso." };
   }
-  if (roleRank(targetRole) >= roleRank(actorRole)) {
+  const effectiveActorRole = isWorkspaceOwner ? "owner" : actorRole;
+  if (roleRank(targetRole) >= roleRank(effectiveActorRole)) {
     return {
       ok: false,
       error: "Só podes gerir membros com cargo inferior ao teu.",
@@ -66,17 +74,21 @@ export function canModifyMember(
 }
 
 /** Papéis que o ator pode atribuir (nunca `owner`). */
-export function assignableRoles(actorRole: string): WorkspaceRole[] {
-  if (!canManageMembers(actorRole)) return [];
-  const rank = roleRank(actorRole);
+export function assignableRoles(
+  actorRole: string,
+  isWorkspaceOwner = false,
+): WorkspaceRole[] {
+  if (!canManageMembers(actorRole, isWorkspaceOwner)) return [];
+  const rank = roleRank(isWorkspaceOwner ? "owner" : actorRole);
   return ASSIGNABLE_ROLES.filter((r) => roleRank(r) < rank);
 }
 
 export function canAssignRole(
   actorRole: string,
   newRole: string,
+  isWorkspaceOwner = false,
 ): { ok: true } | { ok: false; error: string } {
-  if (!canManageMembers(actorRole)) {
+  if (!canManageMembers(actorRole, isWorkspaceOwner)) {
     return { ok: false, error: "Só o proprietário pode alterar papéis." };
   }
   if (isProtectedOwnerRole(newRole)) {
@@ -85,7 +97,8 @@ export function canAssignRole(
   if (!ASSIGNABLE_ROLES.includes(newRole as WorkspaceRole)) {
     return { ok: false, error: "Papel inválido." };
   }
-  if (roleRank(newRole) >= roleRank(actorRole)) {
+  const effectiveActorRole = isWorkspaceOwner ? "owner" : actorRole;
+  if (roleRank(newRole) >= roleRank(effectiveActorRole)) {
     return {
       ok: false,
       error: "Só podes atribuir cargos inferiores ao teu.",

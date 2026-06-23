@@ -127,6 +127,8 @@ export async function setManualCostAction(
   revalidatePath("/cogs");
   revalidatePath("/dashboard");
   revalidatePath("/financas");
+  revalidatePath("/metricas");
+  revalidatePath("/decisao");
   return { ok: true };
 }
 
@@ -238,6 +240,8 @@ export async function importCogsCsvAction(
   revalidatePath("/cogs");
   revalidatePath("/dashboard");
   revalidatePath("/financas");
+  revalidatePath("/metricas");
+  revalidatePath("/decisao");
 
   return {
     ok: true,
@@ -320,6 +324,8 @@ export async function saveManualCogsDayAction(
   revalidatePath("/cogs");
   revalidatePath("/dashboard");
   revalidatePath("/financas");
+  revalidatePath("/metricas");
+  revalidatePath("/decisao");
   return { ok: true };
 }
 
@@ -377,6 +383,8 @@ export async function saveManualOrderCogsAction(
   revalidatePath("/cogs");
   revalidatePath("/dashboard");
   revalidatePath("/financas");
+  revalidatePath("/metricas");
+  revalidatePath("/decisao");
   return { ok: true };
 }
 

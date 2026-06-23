@@ -10,6 +10,7 @@ import { Workspace } from "@/models/Workspace";
 import { Membership } from "@/models/Membership";
 import { Session } from "@/models/Session";
 import { normalizeStoreAccess, type StoreAccess } from "@/lib/store-access";
+import { effectiveWorkspaceRole } from "@/lib/workspace-ownership";
 import {
   isEmailLike,
   normalizeUsername,
@@ -165,7 +166,7 @@ export async function listUserWorkspaces(userId: string): Promise<UserWorkspace[
       id: String(ws._id),
       name: ws.name,
       role: m.role,
-      isOwner: m.role === "owner",
+      isOwner: String(ws.ownerId) === userId,
     });
   }
   return result;
@@ -274,15 +275,18 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 
   if (!membership || !workspace) return null;
 
+  const ownsWorkspace = String(workspace.ownerId) === String(user._id);
+  const role = effectiveWorkspaceRole(membership.role ?? "viewer", ownsWorkspace);
+
   return {
     id: String(user._id),
     name: user.name,
     email: user.email ?? null,
     username: user.username ?? null,
-    workspaceId: workspace ? String(workspace._id) : "",
-    workspaceName: workspace?.name ?? "",
-    role: membership?.role ?? "viewer",
-    storeAccess: normalizeStoreAccess(membership?.storeAccess ?? "all"),
+    workspaceId: String(workspace._id),
+    workspaceName: workspace.name,
+    role,
+    storeAccess: normalizeStoreAccess(membership.storeAccess ?? "all"),
   };
 });
 

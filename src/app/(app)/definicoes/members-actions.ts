@@ -12,8 +12,17 @@ import {
   canModifyMember,
 } from "@/lib/rbac";
 import { parseStoreIdsFromForm } from "@/lib/store-access";
+import { isWorkspaceOwner } from "@/lib/workspace-ownership";
 
 export type MemberActionState = { ok?: boolean; error?: string };
+
+async function actorCanManageTeam(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
+  const ownsWorkspace = await isWorkspaceOwner(user.id, user.workspaceId);
+  return {
+    ownsWorkspace,
+    canManage: canManageMembers(user.role, ownsWorkspace),
+  };
+}
 
 async function loadMembership(
   membershipId: string,
@@ -38,7 +47,8 @@ export async function updateMemberRoleAction(
 ): Promise<MemberActionState> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (!canManageMembers(user.role)) {
+  const { ownsWorkspace, canManage } = await actorCanManageTeam(user);
+  if (!canManage) {
     return { error: "Só o proprietário pode alterar papéis." };
   }
 
@@ -50,7 +60,7 @@ export async function updateMemberRoleAction(
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
 
-  const assignCheck = canAssignRole(user.role, parsed.data.role);
+  const assignCheck = canAssignRole(user.role, parsed.data.role, ownsWorkspace);
   if (!assignCheck.ok) return { error: assignCheck.error };
 
   const membership = await loadMembership(
@@ -64,6 +74,7 @@ export async function updateMemberRoleAction(
     membership.role,
     user.id,
     String(membership.userId),
+    ownsWorkspace,
   );
   if (!modifyCheck.ok) return { error: modifyCheck.error };
 
@@ -86,7 +97,8 @@ export async function revokeMemberAction(
 ): Promise<MemberActionState> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (!canManageMembers(user.role)) {
+  const { ownsWorkspace, canManage } = await actorCanManageTeam(user);
+  if (!canManage) {
     return { error: "Só o proprietário pode remover membros." };
   }
 
@@ -108,6 +120,7 @@ export async function revokeMemberAction(
     membership.role,
     user.id,
     String(membership.userId),
+    ownsWorkspace,
   );
   if (!modifyCheck.ok) return { error: modifyCheck.error };
 
@@ -131,7 +144,8 @@ export async function updateMemberStoreAccessAction(
 ): Promise<MemberActionState> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (!canManageMembers(user.role)) {
+  const { ownsWorkspace, canManage } = await actorCanManageTeam(user);
+  if (!canManage) {
     return { error: "Só o proprietário pode alterar acesso às lojas." };
   }
 
@@ -162,6 +176,7 @@ export async function updateMemberStoreAccessAction(
     membership.role,
     user.id,
     String(membership.userId),
+    ownsWorkspace,
   );
   if (!modifyCheck.ok) return { error: modifyCheck.error };
 

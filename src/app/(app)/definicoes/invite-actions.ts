@@ -18,6 +18,7 @@ import {
 import { canInviteMembers } from "@/lib/rbac";
 import { parseStoreIdsFromForm } from "@/lib/store-access";
 import { validateInviteIdentifier } from "@/lib/username";
+import { isWorkspaceOwner } from "@/lib/workspace-ownership";
 
 export type InviteActionState = { ok?: boolean; error?: string };
 
@@ -41,7 +42,8 @@ export async function inviteMemberAction(
   if (!user) redirect("/login");
   const blocked = teamInvitesBlocked();
   if (blocked) return blocked;
-  if (!canInviteMembers(user.role)) {
+  const ownsWorkspace = await isWorkspaceOwner(user.id, user.workspaceId);
+  if (!canInviteMembers(user.role, ownsWorkspace)) {
     return { error: "Só o proprietário pode convidar membros." };
   }
 
@@ -136,7 +138,8 @@ export async function revokeInvitationAction(
   if (!user) redirect("/login");
   const blocked = teamInvitesBlocked();
   if (blocked) return blocked;
-  if (!canInviteMembers(user.role)) {
+  const ownsWorkspace = await isWorkspaceOwner(user.id, user.workspaceId);
+  if (!canInviteMembers(user.role, ownsWorkspace)) {
     return { error: "Só o proprietário pode revogar convites." };
   }
 
