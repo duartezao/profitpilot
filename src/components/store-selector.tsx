@@ -6,6 +6,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Store as StoreIcon, ChevronDown, Check } from "lucide-react";
 import { useWorkspace } from "@/components/workspace-context";
 import { Sensitive } from "@/components/privacy-mode";
+import { useAppViewModeContext } from "@/components/app-view-mode-provider";
 import { persistActiveStore } from "@/lib/scope-query";
 import { parsePortfolioParam } from "@/lib/portfolio-scope";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,7 @@ export function StoreSelector({
   const pathname = usePathname();
   const params = useSearchParams();
   const { workspaceId } = useWorkspace();
+  const { mode: appViewMode } = useAppViewModeContext();
   const current = params.get("store");
   const portfolioActive = parsePortfolioParam(params.get("portfolio")) !== null;
   const [open, setOpen] = useState(false);
@@ -133,10 +135,10 @@ export function StoreSelector({
       persistActiveStore(workspaceId, null);
     }
     let target = pathname;
-    if (id) {
-      target = "/dashboard";
-    } else if (!id && pathname !== "/dashboard") {
-      target = "/dashboard";
+    if (appViewMode === "financial") {
+      if (id || pathname !== "/dashboard") {
+        target = "/dashboard";
+      }
     }
     const qs = next.toString();
     router.push(qs ? `${target}?${qs}` : target);

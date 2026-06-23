@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { navItemsForStoreScope, type NavItem } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { hrefWithScope } from "@/lib/scope-query";
+import { useAppViewModeContext } from "@/components/app-view-mode-provider";
+import { homePathForMode } from "@/lib/app-view-mode";
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
@@ -18,13 +21,28 @@ export function AppNavLinks({
   variant?: "sidebar" | "horizontal";
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
-  const nav = items ?? navItemsForStoreScope(storeId);
+  const { mode } = useAppViewModeContext();
+  const nav = items ?? navItemsForStoreScope(storeId, mode);
 
+  const hrefs = useMemo(
+    () => nav.map((item) => hrefWithScope(item.href, searchParams)),
+    [nav, searchParams],
+  );
+
+  useEffect(() => {
+    router.prefetch(hrefWithScope(homePathForMode(mode), searchParams));
+    for (const href of hrefs) {
+      router.prefetch(href);
+    }
+  }, [hrefs, mode, router, searchParams]);
+
+  const linkKey = `${mode}-${storeId ?? "all"}`;
   if (variant === "horizontal") {
     return (
-      <nav className="flex items-center gap-0.5">
+      <nav key={linkKey} className="flex items-center gap-0.5">
         {nav.map((item) => {
           const active = isActive(pathname, item.href);
           const href = hrefWithScope(item.href, searchParams);
@@ -32,6 +50,8 @@ export function AppNavLinks({
             <Link
               key={item.href}
               href={href}
+              prefetch
+              scroll={false}
               className={cn(
                 "whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
                 active
@@ -48,7 +68,7 @@ export function AppNavLinks({
   }
 
   return (
-    <nav className="flex-1 space-y-1 p-3">
+    <nav key={linkKey} className="flex-1 space-y-1 p-3">
       {nav.map((item) => {
         const active = isActive(pathname, item.href);
         const Icon = item.icon;
@@ -57,6 +77,8 @@ export function AppNavLinks({
           <Link
             key={item.href}
             href={href}
+            prefetch
+            scroll={false}
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
               active

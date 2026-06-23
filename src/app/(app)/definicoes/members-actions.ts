@@ -12,7 +12,11 @@ import {
   canModifyMember,
 } from "@/lib/rbac";
 import { parseStoreIdsFromForm } from "@/lib/store-access";
-import { isWorkspaceOwner } from "@/lib/workspace-ownership";
+import {
+  isWorkspaceOwner,
+  syncWorkspaceOwnerMembership,
+} from "@/lib/workspace-ownership";
+import { Workspace } from "@/models/Workspace";
 
 export type MemberActionState = { ok?: boolean; error?: string };
 
@@ -69,12 +73,17 @@ export async function updateMemberRoleAction(
   );
   if (!membership) return { error: "Membro não encontrado." };
 
+  const targetIsOwner = await isWorkspaceOwner(
+    String(membership.userId),
+    user.workspaceId,
+  );
   const modifyCheck = canModifyMember(
     user.role,
     membership.role,
     user.id,
     String(membership.userId),
     ownsWorkspace,
+    targetIsOwner,
   );
   if (!modifyCheck.ok) return { error: modifyCheck.error };
 
@@ -115,12 +124,17 @@ export async function revokeMemberAction(
   );
   if (!membership) return { error: "Membro não encontrado." };
 
+  const targetIsOwner = await isWorkspaceOwner(
+    String(membership.userId),
+    user.workspaceId,
+  );
   const modifyCheck = canModifyMember(
     user.role,
     membership.role,
     user.id,
     String(membership.userId),
     ownsWorkspace,
+    targetIsOwner,
   );
   if (!modifyCheck.ok) return { error: modifyCheck.error };
 
@@ -130,6 +144,7 @@ export async function revokeMemberAction(
   );
 
   revalidatePath("/definicoes");
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -171,12 +186,17 @@ export async function updateMemberStoreAccessAction(
   );
   if (!membership) return { error: "Membro não encontrado." };
 
+  const targetIsOwner = await isWorkspaceOwner(
+    String(membership.userId),
+    user.workspaceId,
+  );
   const modifyCheck = canModifyMember(
     user.role,
     membership.role,
     user.id,
     String(membership.userId),
     ownsWorkspace,
+    targetIsOwner,
   );
   if (!modifyCheck.ok) return { error: modifyCheck.error };
 
@@ -184,6 +204,64 @@ export async function updateMemberStoreAccessAction(
     { _id: membership._id },
     { $set: { storeAccess } },
   );
+
+  revalidatePath("/definicoes");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+const transferOwnershipSchema = z.object({
+  membershipId: z.string().trim().min(1),
+});
+
+export async function transferWorkspaceOwnershipAction(
+  _prev: MemberActionState,
+  formData: FormData,
+): Promise<MemberActionState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
+  const ownsWorkspace = await isWorkspaceOwner(user.id, user.workspaceId);
+  if (!ownsWorkspace) {
+    return { error: "Só o proprietário pode transferir este workspace." };
+  }
+
+  const parsed = transferOwnershipSchema.safeParse({
+    membershipId: formData.get("membershipId"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const membership = await loadMembership(
+    parsed.data.membershipId,
+    user.workspaceId,
+  );
+  if (!membership) return { error: "Membro não encontrado." };
+
+  const newOwnerId = String(membership.userId);
+  if (newOwnerId === user.id) {
+    return { error: "Escolhe outro membro para ser proprietário." };
+  }
+
+  await connectToDatabase();
+  await Workspace.updateOne(
+    { _id: user.workspaceId },
+    { $set: { ownerId: membership.userId } },
+  );
+  await Membership.updateOne(
+    { _id: membership._id },
+    { $set: { role: "owner", storeAccess: "all" } },
+  );
+  await Membership.updateOne(
+    {
+      userId: user.id,
+      workspaceId: user.workspaceId,
+      status: "active",
+    },
+    { $set: { role: "admin" } },
+  );
+  await syncWorkspaceOwnerMembership(user.workspaceId);
 
   revalidatePath("/definicoes");
   revalidatePath("/", "layout");

@@ -5,7 +5,8 @@ import { PrivacyToggle } from "@/components/privacy-mode";
 import { StoreSelector, type StoreOption } from "@/components/store-selector";
 import { WorkspaceSelector } from "@/components/workspace-selector";
 import { PortfolioScopeSelector } from "@/components/portfolio-scope-selector";
-import { PeriodSelector } from "@/components/period-selector";
+import { TopbarPeriodSelector } from "@/components/topbar-period";
+import { AppViewModeToggle } from "@/components/app-view-mode-toggle";
 import { logoutAction } from "@/app/(app)/actions";
 import type { CurrentUser, UserWorkspace } from "@/lib/auth";
 
@@ -107,20 +108,17 @@ export function Topbar({
           <StoreSelector stores={stores} className="min-w-0" />
         </Suspense>
         <div className="flex min-w-0 items-center gap-2">
-          <Suspense
-            fallback={
-              <div className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-muted" />
-            }
-          >
-            <PeriodSelector className="min-w-0 flex-1" fullWidth />
+          <Suspense fallback={null}>
+            <AppViewModeToggle className="shrink-0" />
           </Suspense>
+          <TopbarPeriodSelector className="min-w-0 flex-1" fullWidth />
           <TopbarActions user={user} showLogout={false} showAvatar={false} />
         </div>
       </div>
 
-      {/* Desktop — linha única */}
-      <div className="hidden h-14 items-center justify-between gap-3 px-6 md:flex">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      {/* Desktop — flexível, quebra se necessário */}
+      <div className="hidden flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2 lg:px-6 md:flex">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <Suspense
             fallback={
               <span className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground">
@@ -128,41 +126,36 @@ export function Topbar({
               </span>
             }
           >
-            <StoreSelector stores={stores} />
+            <StoreSelector stores={stores} className="max-w-[min(100%,14rem)]" />
           </Suspense>
           <Suspense
             fallback={
-              <div className="h-9 w-40 rounded-lg border border-border bg-muted" />
+              <div className="h-9 w-32 rounded-lg border border-border bg-muted" />
             }
           >
             <PortfolioScopeSelector
               workspaces={workspaces}
               userId={user.id}
-              className="w-40 shrink-0"
+              className="w-32 shrink-0 lg:w-36"
             />
           </Suspense>
-          <Suspense
-            fallback={
-              <span className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground">
-                Período
-              </span>
-            }
-          >
-            <PeriodSelector />
-          </Suspense>
+          <TopbarPeriodSelector />
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 lg:gap-2">
+          <Suspense fallback={null}>
+            <AppViewModeToggle compact />
+          </Suspense>
           <Suspense
             fallback={
-              <div className="h-9 w-44 rounded-lg border border-border bg-muted" />
+              <div className="h-9 w-36 rounded-lg border border-border bg-muted" />
             }
           >
             <WorkspaceSelector
               workspaces={workspaces}
               currentId={user.workspaceId}
               menuPlacement="bottom"
-              className="w-44 shrink-0"
+              className="w-36 shrink-0 lg:w-40"
             />
           </Suspense>
           <TopbarActions user={user} />

@@ -58,6 +58,7 @@ export function AdSpendRow({
   }, [deleteState.ok, deleteState.conflict, onChanged]);
 
   const missing = row.amount === null;
+  const isZero = row.amount === 0;
   const hasExtra = (row.extraFee ?? 0) > 0;
   const { defaults, inputCurrency } = row.lines.length
     ? platformDefaultsFromLines(row.lines)
@@ -80,6 +81,8 @@ export function AdSpendRow({
         <td className="px-4 py-3">
           {missing ? (
             <span className="text-xs font-medium text-warning">Em falta</span>
+          ) : isZero ? (
+            <span className="text-xs text-muted-foreground">0€ confirmado</span>
           ) : (
             <span className="text-xs text-muted-foreground">Fechado</span>
           )}
@@ -123,23 +126,44 @@ export function AdSpendRow({
         </td>
         <td className="px-4 py-3">
           {canEdit && (
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
-            >
-              {open ? (
-                <>
-                  <ChevronUp className="h-3.5 w-3.5" />
-                  Fechar
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="h-3.5 w-3.5" />
-                  {missing ? "Preencher" : "Editar"}
-                </>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {missing && (
+                <form action={doSave} className="inline">
+                  <input type="hidden" name="storeId" value={storeId} />
+                  <input type="hidden" name="date" value={row.dateKey} />
+                  <input type="hidden" name="explicitZero" value="1" />
+                  <input
+                    type="hidden"
+                    name="inputCurrency"
+                    value={inputCurrency}
+                  />
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="rounded-lg border border-border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-60"
+                  >
+                    0€
+                  </button>
+                </form>
               )}
-            </button>
+              <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+              >
+                {open ? (
+                  <>
+                    <ChevronUp className="h-3.5 w-3.5" />
+                    Fechar
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3.5 w-3.5" />
+                    {missing ? "Preencher" : "Editar"}
+                  </>
+                )}
+              </button>
+            </div>
           )}
           {!canEdit && missing && (
             <span className="text-sm text-muted-foreground">—</span>
@@ -189,6 +213,7 @@ export function AdSpendRow({
                 defaults={defaults}
                 inputCurrency={inputCurrency}
                 compact
+                showZeroOption
               />
               {saveState.error && (
                 <p

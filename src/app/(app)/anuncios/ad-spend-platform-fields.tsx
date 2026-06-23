@@ -30,16 +30,38 @@ export function AdSpendPlatformFields({
   inputCurrency,
   disabled = false,
   compact = false,
+  showZeroOption = false,
 }: {
   defaults?: PlatformDefaults;
   inputCurrency?: string;
   disabled?: boolean;
   compact?: boolean;
+  showZeroOption?: boolean;
 }) {
   const fieldCls = compact ? compactInputCls : inputCls;
 
   return (
     <div className="space-y-4">
+      {showZeroOption && (
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+          <input
+            type="checkbox"
+            name="explicitZero"
+            value="1"
+            disabled={disabled}
+            className="mt-0.5 h-4 w-4 rounded border-border"
+          />
+          <span>
+            <span className="text-sm font-medium">
+              Sem gasto neste dia (0€ em todas as plataformas)
+            </span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              Usa quando não correu ads em lado nenhum — o dia fica fechado a
+              zero e deixa de aparecer em falta.
+            </span>
+          </span>
+        </label>
+      )}
       {AD_PLATFORMS.map((platform) => {
         const d = defaults[platform];
         return (
@@ -101,9 +123,8 @@ export function AdSpendPlatformFields({
         />
       </div>
       <p className="text-xs text-muted-foreground">
-        Preenche só as plataformas que usaste nesse dia. Fee fixa e % aplicam-se
-        sobre o gasto em ads de cada plataforma — convertem para a moeda base do
-        workspace e somam ao total do dia.
+        Preenche as plataformas que usaste ou marca «Sem gasto (0€)». Fee fixa
+        e % aplicam-se sobre o gasto em ads de cada plataforma.
       </p>
     </div>
   );

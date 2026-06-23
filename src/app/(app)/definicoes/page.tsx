@@ -45,6 +45,10 @@ import {
 } from "@/lib/store-timezone";
 import { listOwnedWorkspacesForUser } from "@/lib/workspaces";
 import { TEAM_INVITES_ENABLED, TEAM_MEMBERSHIP_ENABLED } from "@/lib/feature-flags";
+import {
+  getWorkspaceOwnerView,
+  syncWorkspaceOwnerMembership,
+} from "@/lib/workspace-ownership";
 import { InviteMemberForm } from "./invite-member-form";
 import { SentInvitations } from "./sent-invitations";
 
@@ -114,9 +118,22 @@ export default async function DefinicoesPage() {
     name: w.name,
   }));
 
+  if (user?.workspaceId && TEAM_MEMBERSHIP_ENABLED) {
+    await syncWorkspaceOwnerMembership(user.workspaceId);
+  }
+
+  const workspaceOwner =
+    user?.workspaceId && TEAM_MEMBERSHIP_ENABLED
+      ? await getWorkspaceOwnerView(user.workspaceId)
+      : null;
+
   const teamMembers =
     TEAM_MEMBERSHIP_ENABLED && user?.workspaceId
-      ? await listWorkspaceMembers(user.workspaceId, user.id)
+      ? await listWorkspaceMembers(
+          user.workspaceId,
+          user.id,
+          workspace?.ownerId ? String(workspace.ownerId) : null,
+        )
       : [];
 
   const pendingInvitations =
@@ -282,6 +299,7 @@ export default async function DefinicoesPage() {
             actorUserId={user?.id ?? ""}
             canManage={canManageTeam}
             isWorkspaceOwner={isWorkspaceOwner}
+            workspaceOwner={workspaceOwner}
             stores={inviteStores}
             sentInvitations={sentInvitations}
           />

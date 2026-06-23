@@ -4,6 +4,7 @@ import { MetricasClient } from "./metricas-client";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
 import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
+import { getMetricPanelPreferencesForUser } from "@/lib/metric-panel-prefs";
 
 export const metadata: Metadata = { title: "Métricas" };
 
@@ -24,6 +25,9 @@ export default async function MetricasPage({
   const { store: storeId } = await searchParams;
   const showReport =
     Boolean(user && storeId && canAccessStore(user.storeAccess, storeId));
+  const initialPanelPrefs = user
+    ? await getMetricPanelPreferencesForUser(user.id, user.workspaceId)
+    : undefined;
 
   return (
     <Suspense
@@ -43,7 +47,7 @@ export default async function MetricasPage({
     >
       <div className="mx-auto max-w-7xl space-y-6">
         {showReport && storeId && <ReportSection storeId={storeId} />}
-        <MetricasClient />
+        <MetricasClient initialPanelPrefs={initialPanelPrefs} />
       </div>
     </Suspense>
   );

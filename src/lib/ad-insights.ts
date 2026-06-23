@@ -103,3 +103,34 @@ export async function fetchStoreAdInsightsForDay(
     cpm: impressions > 0 ? (spend / impressions) * 1000 : null,
   };
 }
+
+/** Soma insights de vários dias (máx. 31) para o painel de métricas. */
+export async function aggregateStoreAdInsightsForPeriod(
+  storeId: string,
+  dayKeys: string[],
+): Promise<StoreAdInsights | null> {
+  if (!dayKeys.length) return null;
+
+  let spend = 0;
+  let impressions = 0;
+  let clicks = 0;
+
+  for (const dateKey of dayKeys.slice(0, 31)) {
+    const ins = await fetchStoreAdInsightsForDay(storeId, dateKey);
+    if (!ins) continue;
+    spend += ins.spend;
+    impressions += ins.impressions;
+    clicks += ins.clicks;
+  }
+
+  if (spend <= 0 && impressions <= 0 && clicks <= 0) return null;
+
+  return {
+    spend,
+    impressions,
+    clicks,
+    cpc: clicks > 0 ? spend / clicks : null,
+    ctr: impressions > 0 ? (clicks / impressions) * 100 : null,
+    cpm: impressions > 0 ? (spend / impressions) * 1000 : null,
+  };
+}
