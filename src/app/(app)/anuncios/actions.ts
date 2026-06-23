@@ -13,7 +13,7 @@ import { resolveAdSpendRange } from "@/lib/ad-spend";
 import { AD_INPUT_CURRENCIES, isAdInputCurrency } from "@/lib/ad-currencies";
 import { findStoreForUser } from "@/lib/store-scope";
 import { parsePlatformInputs } from "@/lib/ad-spend-platforms";
-import { buildAdSpendDayFromLines } from "@/lib/ad-spend-save";
+import { buildAdSpendDayFromLines, buildZeroAdSpendDay } from "@/lib/ad-spend-save";
 
 export type AdSpendState = {
   ok?: boolean;
@@ -71,10 +71,13 @@ export async function saveManualAdSpendAction(
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
   const { storeId, date, note, ifMatchUpdatedAt } = parsed.data;
+  const explicitZero = formData.get("explicitZero") === "1";
   const platformLines = parsePlatformInputs(formData);
-  if (platformLines.length === 0) {
+
+  if (!explicitZero && platformLines.length === 0) {
     return {
-      error: "Indica o gasto em ads em pelo menos uma plataforma (Meta, Google ou TikTok).",
+      error:
+        "Indica o gasto em ads ou marca «Sem gasto (0€)» se não houve ads nesse dia.",
     };
   }
 
@@ -109,12 +112,14 @@ export async function saveManualAdSpendAction(
 
   let built;
   try {
-    built = await buildAdSpendDayFromLines(
-      platformLines,
-      parsed.data.inputCurrency,
-      baseCurrency,
-      date,
-    );
+    built = explicitZero
+      ? buildZeroAdSpendDay(parsed.data.inputCurrency, baseCurrency)
+      : await buildAdSpendDayFromLines(
+          platformLines,
+          parsed.data.inputCurrency,
+          baseCurrency,
+          date,
+        );
   } catch (e) {
     return {
       error:

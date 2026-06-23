@@ -10,6 +10,13 @@ import {
   type StoreAccess,
 } from "@/lib/store-access";
 
+export type WorkspaceOwnerView = {
+  userId: string;
+  name: string;
+  email: string | null;
+  username: string | null;
+};
+
 export type WorkspaceMemberView = {
   membershipId: string;
   userId: string;
@@ -17,6 +24,7 @@ export type WorkspaceMemberView = {
   email: string | null;
   username: string | null;
   role: string;
+  isWorkspaceOwner: boolean;
   storeAccess: StoreAccess;
   storeAccessLabel: string;
   isSelf: boolean;
@@ -25,9 +33,11 @@ export type WorkspaceMemberView = {
 export async function listWorkspaceMembers(
   workspaceId: string,
   currentUserId: string,
+  workspaceOwnerId?: string | null,
 ): Promise<WorkspaceMemberView[]> {
   await connectToDatabase();
   const wsId = new mongoose.Types.ObjectId(workspaceId);
+  const ownerId = workspaceOwnerId ? String(workspaceOwnerId) : null;
 
   const memberships = await Membership.find({
     workspaceId: wsId,
@@ -52,13 +62,15 @@ export async function listWorkspaceMembers(
     const u = userById.get(String(m.userId));
     const userId = String(m.userId);
     const storeAccess = normalizeStoreAccess(m.storeAccess);
+    const isWorkspaceOwner = ownerId != null && userId === ownerId;
     return {
       membershipId: String(m._id),
       userId,
       name: u?.name ?? "—",
       email: u?.email ?? null,
       username: u?.username ?? null,
-      role: m.role,
+      role: isWorkspaceOwner ? "owner" : m.role,
+      isWorkspaceOwner,
       storeAccess,
       storeAccessLabel: storeAccessLabel(storeAccess, storeCount),
       isSelf: userId === currentUserId,

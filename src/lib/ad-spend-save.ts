@@ -16,6 +16,22 @@ export type BuiltAdSpendDay = {
   lines: AdSpendLineStored[];
 };
 
+/** Constrói um dia com 0€ em todas as plataformas (confirmado pelo utilizador). */
+export function buildZeroAdSpendDay(
+  inputCurrency: string,
+  baseCurrency: string,
+): BuiltAdSpendDay {
+  return {
+    amount: 0,
+    extraFee: 0,
+    inputAmount: 0,
+    inputCurrency,
+    fxRate: inputCurrency === baseCurrency ? 1 : null,
+    inputExtraFee: 0,
+    lines: [],
+  };
+}
+
 /** Converte linhas por plataforma para totais na moeda base do workspace. */
 export async function buildAdSpendDayFromLines(
   lines: AdSpendLineInput[],

@@ -162,6 +162,10 @@ export async function clearManualCostAction(
   await closeManualCostHistory(store._id, variantId);
 
   revalidatePath("/cogs");
+  revalidatePath("/dashboard");
+  revalidatePath("/financas");
+  revalidatePath("/metricas");
+  revalidatePath("/decisao");
   return { ok: true };
 }
 
@@ -417,5 +421,8 @@ export async function clearManualOrderCogsAction(
 
   revalidatePath("/cogs");
   revalidatePath("/dashboard");
+  revalidatePath("/financas");
+  revalidatePath("/metricas");
+  revalidatePath("/decisao");
   return { ok: true };
 }

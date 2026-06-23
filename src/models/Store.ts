@@ -67,6 +67,16 @@ const StoreSchema = new Schema(
       enum: ["active", "paused", "archived"],
       default: "active",
     },
+    /** Estado na operação (pipeline) — independente de active/paused/archived. */
+    operationStatus: {
+      type: String,
+      enum: ["running", "waiting", "killed"],
+      default: null,
+    },
+    /** Dias por ciclo de teste de coleções (modo operação). */
+    collectionTestCycleDays: { type: Number, default: 5, min: 1, max: 60 },
+    /** Avisar N dias antes do fim do ciclo / início agendado. */
+    collectionReminderDaysBefore: { type: Number, default: 2, min: 0, max: 14 },
     currency: { type: String, default: "EUR" },
     /** Como o COGS é preenchido nesta loja. */
     cogsMode: {

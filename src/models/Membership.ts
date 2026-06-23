@@ -20,6 +20,20 @@ const MembershipSchema = new Schema(
       enum: ["active", "revoked"],
       default: "active",
     },
+    metricsPanel: {
+      type: {
+        presetId: { type: String, default: "dropshipping" },
+        orderedIds: { type: [String], default: [] },
+      },
+      default: null,
+      _id: false,
+    },
+    /** Vista principal: financeira (métricas) ou operacional (pipeline). */
+    appViewMode: {
+      type: String,
+      enum: ["financial", "operations"],
+      default: "financial",
+    },
     expiresAt: { type: Date },
   },
   { timestamps: true },

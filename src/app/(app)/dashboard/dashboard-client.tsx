@@ -6,6 +6,7 @@ import { ProfitChart } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
+import { OperationsAlertsBanner } from "@/components/operations/operations-alerts-banner";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
 import {
   StoreDashboardView,
@@ -135,12 +136,20 @@ export function DashboardClient() {
         )}
 
         {portfolioData && (
-          <DataWarnings
-            cogsIncomplete={portfolioData.cogsIncomplete}
-            missingCogsCount={portfolioData.missingCogsCount}
-            missingCogsMessage={portfolioData.missingCogsMessage}
-            missingAdSpendDays={portfolioData.missingAdSpendDays}
-          />
+          <>
+            <OperationsAlertsBanner
+              exclusionNote={portfolioData.operationContext?.exclusionNote}
+              collectionReminders={
+                portfolioData.operationContext?.collectionReminders
+              }
+            />
+            <DataWarnings
+              cogsIncomplete={portfolioData.cogsIncomplete}
+              missingCogsCount={portfolioData.missingCogsCount}
+              missingCogsMessage={portfolioData.missingCogsMessage}
+              missingAdSpendDays={portfolioData.missingAdSpendDays}
+            />
+          </>
         )}
 
         <DashboardKpiSection
@@ -187,14 +196,27 @@ export function DashboardClient() {
               Não foi possível carregar os dados. A tentar novamente…
             </p>
           )}
-          <DataWarnings
-            cogsIncomplete={workspaceData.cogsIncomplete}
-            missingCogsCount={workspaceData.missingCogsCount}
-            missingCogsMessage={workspaceData.missingCogsMessage}
-            missingAdSpendDays={workspaceData.missingAdSpendDays}
-          />
-          {workspaceData.monthlyGoals && (
-            <MonthlyGoalsCard goals={workspaceData.monthlyGoals} />
+          {workspaceData && (
+            <>
+              <OperationsAlertsBanner
+                exclusionNote={workspaceData.operationContext?.exclusionNote}
+                scopedStoreStatus={
+                  workspaceData.operationContext?.scopedStoreStatus
+                }
+                collectionReminders={
+                  workspaceData.operationContext?.collectionReminders
+                }
+              />
+              <DataWarnings
+                cogsIncomplete={workspaceData.cogsIncomplete}
+                missingCogsCount={workspaceData.missingCogsCount}
+                missingCogsMessage={workspaceData.missingCogsMessage}
+                missingAdSpendDays={workspaceData.missingAdSpendDays}
+              />
+              {workspaceData.monthlyGoals && (
+                <MonthlyGoalsCard goals={workspaceData.monthlyGoals} />
+              )}
+            </>
           )}
           <StoreDashboardView data={workspaceData} />
         </>
@@ -226,12 +248,20 @@ export function DashboardClient() {
           )}
 
           {workspaceData && (
-            <DataWarnings
-              cogsIncomplete={workspaceData.cogsIncomplete}
-              missingCogsCount={workspaceData.missingCogsCount}
-              missingCogsMessage={workspaceData.missingCogsMessage}
-              missingAdSpendDays={workspaceData.missingAdSpendDays}
-            />
+            <>
+              <OperationsAlertsBanner
+                exclusionNote={workspaceData.operationContext?.exclusionNote}
+                collectionReminders={
+                  workspaceData.operationContext?.collectionReminders
+                }
+              />
+              <DataWarnings
+                cogsIncomplete={workspaceData.cogsIncomplete}
+                missingCogsCount={workspaceData.missingCogsCount}
+                missingCogsMessage={workspaceData.missingCogsMessage}
+                missingAdSpendDays={workspaceData.missingAdSpendDays}
+              />
+            </>
           )}
 
           <DashboardKpiSection

@@ -1,16 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ExportFormatLinks } from "@/components/export-format-links";
 import { StoreMetricsView } from "@/components/dashboard/store-metrics-view";
 import { StoreDashboardHeader } from "@/components/dashboard/store-dashboard-view";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
+import { OperationsAlertsBanner } from "@/components/operations/operations-alerts-banner";
+import { MetricsPanelConfig } from "@/components/dashboard/metrics-panel-config";
 import { useWorkspace } from "@/components/workspace-context";
+import { useMetricPanelPreferences } from "@/hooks/use-metric-panel-preferences";
 import {
   periodFromSearchParams,
   periodQueryFromSearchParams,
 } from "@/lib/period";
+import type { MetricPanelPreferences } from "@/lib/metric-panel";
 import type { DashboardSummary } from "@/lib/metrics";
 
 function summaryApiUrl(params: URLSearchParams): string {
@@ -27,11 +32,20 @@ async function fetchSummary(params: URLSearchParams): Promise<DashboardSummary> 
   return res.json();
 }
 
-export function MetricasClient() {
+export function MetricasClient({
+  initialPanelPrefs,
+}: {
+  initialPanelPrefs?: MetricPanelPreferences;
+}) {
   const { workspaceId } = useWorkspace();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
   const period = periodFromSearchParams(searchParams);
+  const { prefs, ready, save } = useMetricPanelPreferences(
+    workspaceId,
+    initialPanelPrefs,
+  );
+  const [saving, setSaving] = useState(false);
 
   const { data, isError } = useQuery({
     queryKey: ["metrics-summary", workspaceId, storeId, period.key],
@@ -62,9 +76,23 @@ export function MetricasClient() {
           periodLabel={periodLabel}
           prevPeriodLabel={prevPeriodLabel}
         />
-        <ExportFormatLinks
-          href={`/api/export/daily-metrics?store=${encodeURIComponent(storeId)}`}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <MetricsPanelConfig
+            prefs={prefs}
+            saving={saving}
+            onSave={async (next) => {
+              setSaving(true);
+              try {
+                await save(next);
+              } finally {
+                setSaving(false);
+              }
+            }}
+          />
+          <ExportFormatLinks
+            href={`/api/export/daily-metrics?store=${encodeURIComponent(storeId)}`}
+          />
+        </div>
       </div>
 
       {isError && (
@@ -74,16 +102,27 @@ export function MetricasClient() {
       )}
 
       {data && (
-        <DataWarnings
-          cogsIncomplete={data.cogsIncomplete}
-          missingCogsCount={data.missingCogsCount}
-          missingCogsMessage={data.missingCogsMessage}
-          missingAdSpendDays={data.missingAdSpendDays}
-        />
+        <>
+          <OperationsAlertsBanner
+            exclusionNote={data.operationContext?.exclusionNote}
+            scopedStoreStatus={data.operationContext?.scopedStoreStatus}
+            collectionReminders={data.operationContext?.collectionReminders}
+          />
+          <DataWarnings
+            cogsIncomplete={data.cogsIncomplete}
+            missingCogsCount={data.missingCogsCount}
+            missingCogsMessage={data.missingCogsMessage}
+            missingAdSpendDays={data.missingAdSpendDays}
+          />
+        </>
       )}
 
-      {data ? (
-        <StoreMetricsView data={data} storeId={storeId} />
+      {data && ready ? (
+        <StoreMetricsView
+          data={data}
+          storeId={storeId}
+          orderedMetricIds={prefs.orderedIds}
+        />
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">

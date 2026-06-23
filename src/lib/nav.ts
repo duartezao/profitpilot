@@ -16,8 +16,13 @@ import {
   Bell,
   ClipboardList,
   BarChart3,
+  Kanban,
+  Layers,
+  FlaskConical,
+  ListTodo,
   type LucideIcon,
 } from "lucide-react";
+import type { AppViewMode } from "@/lib/app-view-mode";
 
 export type NavItem = {
   label: string;
@@ -60,6 +65,18 @@ export const storeNavItems: NavItem[] = [
   { label: "Configurações", href: "/definicoes", icon: Settings },
 ];
 
+/**
+ * Modo operação — pipeline de lojas, coleções e produtos em teste.
+ */
+export const operationsNavItems: NavItem[] = [
+  { label: "Operação", href: "/operacao", icon: Kanban },
+  { label: "Tarefas", href: "/operacao/tarefas", icon: ListTodo },
+  { label: "Coleções", href: "/operacao/colecoes", icon: Layers },
+  { label: "Produtos teste", href: "/operacao/produtos", icon: FlaskConical },
+  { label: "Lojas", href: "/lojas", icon: Store },
+  { label: "Definições", href: "/definicoes", icon: Settings },
+];
+
 /** Rotas só com «Todas as lojas» (consolidado). */
 export const workspaceOnlyPaths = new Set(["/lojas"]);
 
@@ -72,7 +89,11 @@ export const storeRequiredPaths = new Set([
   "/chargebacks",
 ]);
 
-export function navItemsForStoreScope(storeId: string | null): NavItem[] {
+export function navItemsForStoreScope(
+  storeId: string | null,
+  viewMode: AppViewMode = "financial",
+): NavItem[] {
+  if (viewMode === "operations") return operationsNavItems;
   return storeId ? storeNavItems : workspaceNavItems;
 }
 
@@ -90,7 +111,18 @@ export function isMobileMoreNavItem(item: NavItem): boolean {
 }
 
 /** Itens fixos na barra inferior (telemóvel). */
-export function mobilePrimaryNavItems(storeId: string | null): NavItem[] {
+export function mobilePrimaryNavItems(
+  storeId: string | null,
+  viewMode: AppViewMode = "financial",
+): NavItem[] {
+  if (viewMode === "operations") {
+    return [
+      { label: "Operação", href: "/operacao", icon: Kanban },
+      { label: "Tarefas", href: "/operacao/tarefas", icon: ListTodo },
+      { label: "Coleções", href: "/operacao/colecoes", icon: Layers },
+      mobileMoreNavItem,
+    ];
+  }
   if (storeId) {
     return [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -108,18 +140,24 @@ export function mobilePrimaryNavItems(storeId: string | null): NavItem[] {
 }
 
 /** Restantes páginas da sidebar — acessíveis pelo menu «Mais». */
-export function mobileOverflowNavItems(storeId: string | null): NavItem[] {
-  const all = navItemsForStoreScope(storeId);
+export function mobileOverflowNavItems(
+  storeId: string | null,
+  viewMode: AppViewMode = "financial",
+): NavItem[] {
+  const all = navItemsForStoreScope(storeId, viewMode);
   const primaryHrefs = new Set(
-    mobilePrimaryNavItems(storeId)
+    mobilePrimaryNavItems(storeId, viewMode)
       .filter((i) => !isMobileMoreNavItem(i))
       .map((i) => i.href),
   );
   return all.filter((i) => !primaryHrefs.has(i.href));
 }
 
-export function mobileNavForStoreScope(storeId: string | null): NavItem[] {
-  return mobilePrimaryNavItems(storeId);
+export function mobileNavForStoreScope(
+  storeId: string | null,
+  viewMode: AppViewMode = "financial",
+): NavItem[] {
+  return mobilePrimaryNavItems(storeId, viewMode);
 }
 
 /** @deprecated usar mobilePrimaryNavItems */

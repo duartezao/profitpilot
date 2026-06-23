@@ -1227,6 +1227,9 @@ Lucro após taxas =
 * `name`
 * `platform`
 * `status` (active / paused / archived)
+* `operationStatus` (running / waiting / killed — pipeline operacional; `null` = inferido de `status`)
+* `collectionTestCycleDays` (dias por ciclo de teste de coleção; defeito 5)
+* `collectionReminderDaysBefore` (avisar N dias antes do fim/início; defeito 2)
 * `currency`
 * `groupTags` (array)
 * `shopDomain` (`xxx.myshopify.com` — ligação API Shopify, nunca mostrado na dashboard)
@@ -1244,6 +1247,52 @@ Lucro após taxas =
 * `syncState` — progresso do sync manual em passos (`status`, `phase`, `progress`, `orderCursor`, contagens, `message`)
 * `createdAt`
 * `deletedAt`
+
+## testCollections
+
+> Pipeline de coleções em teste (modo operação).
+
+* `_id`
+* `workspaceId`
+* `storeId`
+* `name`
+* `status` (queue / testing / skipped / winner / failed)
+* `scheduledStartDate` (início planeado, opcional)
+* `testStartedAt` / `testEndsAt` (preenchidos ao entrar em `testing`)
+* `cycleDays` (override por coleção; senão usa `Store.collectionTestCycleDays`)
+* `notes`
+* `deletedAt`
+* `createdAt` / `updatedAt`
+
+## testProducts
+
+> Pipeline de produtos em teste (modo operação).
+
+* `_id`
+* `workspaceId`
+* `storeId`
+* `name`
+* `collectionName` (opcional)
+* `status` (testing / tested / winner / failed)
+* `notes`
+* `deletedAt`
+* `createdAt` / `updatedAt`
+
+## operationTasks
+
+> Tarefas e lembretes no modo operação (quadro Kanban).
+
+* `_id`
+* `workspaceId`
+* `storeId` (opcional — null = tarefa ao nível do workspace)
+* `title`
+* `description`
+* `status` (todo / doing / done)
+* `position` (ordem na coluna)
+* `dueDate` (lembrete opcional)
+* `deletedAt`
+* `createdBy`
+* `createdAt` / `updatedAt`
 
 ## session_metrics_months
 
@@ -1391,11 +1440,38 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `endDate` (opcional — quando cancelas a subscrição)
 * `currency`
 
-## Modo empresarial (planeado — não implementado)
+## Modo financeiro vs modo operação
 
-> Visão futura acordada: uma **vista alternativa da dashboard** para quem gere várias lojas como um negócio único, com custos fixos mensais centralizados e lucro por loja após rateio. **Não construir até plano aprovado.** O painel actual em `/financas` (coleção `expenses`) é a solução intermédia.
+> Duas vistas da app, alternáveis no topo (**Modo financeiro** / **Modo operação**). Preferência guardada por utilizador/workspace (`Membership.appViewMode`).
 
-### Objectivo
+### Modo financeiro (actual)
+
+Dashboard, métricas, lucro, payouts, decisão, etc. — tudo o que já existia.
+
+### Modo operação (`/operacao`)
+
+Pipeline operacional de dropshipping — **influencia o consolidado financeiro** (métricas/dashboard excluem lojas «em espera» e «matadas»; loja scoped mostra aviso se não estiver «a rodar»):
+
+| Área | Estados |
+|---|---|
+| **Lojas** (`Store.operationStatus`) | A rodar · Em espera · Matada |
+| **Coleções** (`testCollections`) | Por testar · A testar · Não vai testar · Performou · Matada |
+| **Produtos** (`testProducts`) | A testar · Já testado · Performou · Falhou |
+
+* Rotas: `/operacao`, `/operacao/tarefas`, `/operacao/colecoes`, `/operacao/produtos`
+* **Ciclo de coleções**: por loja `collectionTestCycleDays` (defeito 5) e `collectionReminderDaysBefore` (defeito 2). Ao passar para «A testar» regista início/fim; lembretes 1–2 dias antes do fim ou do início agendado. Banner no dashboard/métricas + bloco automático no **relatório diário** da loja (`--- Operação (coleções) ---`).
+* **Tarefas** (`operationTasks`): quadro Kanban (Por fazer · Em progresso · Concluído), filtro workspace/loja, lembrete por data
+* **Ad spend 0€**: em Anúncios, checkbox «Sem gasto (0€)» ou botão rápido «0€» no calendário — fecha o dia sem gasto
+* Header: período oculto em modo operação; toggle compacto em ecrãs pequenos
+* Sidebar e barra inferior adaptam-se ao modo
+* Soft delete em coleções/produtos de teste
+* Editor+ pode alterar; viewer só consulta
+
+### Modo empresarial P&L (`/financas?mode=business`)
+
+> Visão de fixos mensais e EBITDA simplificado — ver toggle em Lucro & Finanças. Distinto do **modo operação** acima.
+
+### Objectivo futuro (P&L empresa)
 
 * Alternar entre **modo loja** (dashboard actual por loja / consolidado) e **modo empresarial** (P&L da empresa).
 * Registar **gastos fixos mensais** num só sítio (salários, contabilista, ferramentas partilhadas, renda, etc.).

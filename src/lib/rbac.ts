@@ -33,8 +33,9 @@ export function canInviteMembers(
   return actorRole === "owner" || isWorkspaceOwner;
 }
 
-export function isProtectedOwnerRole(role: string): boolean {
-  return role === "owner";
+/** Protege o proprietário real do workspace (`ownerId`), não qualquer membership "owner". */
+export function isProtectedWorkspaceOwner(isWorkspaceOwnerMember: boolean): boolean {
+  return isWorkspaceOwnerMember;
 }
 
 /**
@@ -50,11 +51,12 @@ export function canModifyMember(
   actorUserId: string,
   targetUserId: string,
   isWorkspaceOwner = false,
+  targetIsWorkspaceOwner = false,
 ): { ok: true } | { ok: false; error: string } {
   if (!canManageMembers(actorRole, isWorkspaceOwner)) {
     return { ok: false, error: "Só o proprietário pode gerir membros." };
   }
-  if (isProtectedOwnerRole(targetRole)) {
+  if (isProtectedWorkspaceOwner(targetIsWorkspaceOwner)) {
     return {
       ok: false,
       error: "Não é possível alterar ou remover o proprietário.",
@@ -91,7 +93,7 @@ export function canAssignRole(
   if (!canManageMembers(actorRole, isWorkspaceOwner)) {
     return { ok: false, error: "Só o proprietário pode alterar papéis." };
   }
-  if (isProtectedOwnerRole(newRole)) {
+  if (newRole === "owner") {
     return { ok: false, error: "Não é possível atribuir o papel de proprietário." };
   }
   if (!ASSIGNABLE_ROLES.includes(newRole as WorkspaceRole)) {

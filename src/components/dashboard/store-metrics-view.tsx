@@ -7,9 +7,11 @@ import { CollapsibleSection } from "@/components/collapsible-section";
 export function StoreMetricsView({
   data,
   storeId,
+  orderedMetricIds,
 }: {
   data: DashboardSummary;
   storeId: string;
+  orderedMetricIds?: string[];
 }) {
   const dashboard = data.storeDashboard;
 
@@ -21,7 +23,7 @@ export function StoreMetricsView({
         funnelError={dashboard?.funnelError}
         sessionCountryLabel={dashboard?.sessionCountryLabel}
         variant="store"
-        showExtended
+        orderedMetricIds={orderedMetricIds}
       />
 
       <CollapsibleSection

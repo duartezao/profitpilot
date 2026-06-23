@@ -11,6 +11,7 @@ import {
   type NavItem,
 } from "@/lib/nav";
 import { MobileNavMoreMenu } from "@/components/mobile-nav-more-menu";
+import { useAppViewModeContext } from "@/components/app-view-mode-provider";
 import { cn } from "@/lib/utils";
 import { hrefWithScope } from "@/lib/scope-query";
 
@@ -41,8 +42,9 @@ function BottomNavLinks() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
-  const items = mobileNavForStoreScope(storeId);
-  const overflowItems = mobileOverflowNavItems(storeId);
+  const { mode } = useAppViewModeContext();
+  const items = mobileNavForStoreScope(storeId, mode);
+  const overflowItems = mobileOverflowNavItems(storeId, mode);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const hrefs = useMemo(
@@ -71,7 +73,11 @@ function BottomNavLinks() {
     for (const item of overflowItems) {
       router.prefetch(hrefWithScope(item.href, searchParams));
     }
-  }, [hrefs, overflowItems, router, searchParams]);
+    router.prefetch(hrefWithScope(
+      mode === "operations" ? "/operacao" : "/dashboard",
+      searchParams,
+    ));
+  }, [hrefs, overflowItems, mode, router, searchParams]);
 
   useEffect(() => {
     setMoreOpen(false);

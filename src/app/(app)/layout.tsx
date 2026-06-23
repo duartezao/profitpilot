@@ -14,6 +14,9 @@ import { Store } from "@/models/Store";
 import { TEAM_INVITES_ENABLED } from "@/lib/feature-flags";
 import { listPendingInvitationsForUser } from "@/lib/invitations";
 import { PendingInvitesBanner } from "@/components/pending-invites-banner";
+import { AppViewModeShell } from "@/components/app-view-mode-shell";
+import { AppViewModePathSync } from "@/components/app-view-mode-path-sync";
+import { getAppViewModeForUser } from "@/lib/app-view-mode-prefs";
 
 export default async function AppLayout({
   children,
@@ -45,12 +48,22 @@ export default async function AppLayout({
         ).length
       : 0;
 
+  const initialAppViewMode = await getAppViewModeForUser(
+    user.id,
+    user.workspaceId,
+  );
+
   return (
     <WorkspaceProvider
       key={user.workspaceId}
       workspaceId={user.workspaceId}
       workspaceName={user.workspaceName}
     >
+      <AppViewModeShell
+        workspaceId={user.workspaceId}
+        initialMode={initialAppViewMode}
+      >
+      <AppViewModePathSync />
       <PrivacyModeProvider>
       <Suspense fallback={null}>
         <ScopeSync workspaceId={user.workspaceId} storeIds={storeIds} />
@@ -66,6 +79,7 @@ export default async function AppLayout({
         <BottomNav />
       </div>
       </PrivacyModeProvider>
+      </AppViewModeShell>
     </WorkspaceProvider>
   );
 }

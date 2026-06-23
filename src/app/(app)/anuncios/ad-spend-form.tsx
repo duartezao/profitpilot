@@ -103,6 +103,7 @@ export function AdSpendForm({
         defaults={platformDefaults}
         inputCurrency={defaultCurrency}
         disabled={!canEdit}
+        showZeroOption={canEdit}
       />
 
       <div>

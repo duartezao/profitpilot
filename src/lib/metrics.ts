@@ -24,15 +24,16 @@ import {
   formatMissingCogsWarning,
 } from "@/lib/manual-cogs";
 import {
-  ranksProductsByUnits,
-  type CogsMode,
-} from "@/lib/cogs-modes";
+  aggregateStoreAdInsightsForPeriod,
+  type StoreAdInsights,
+} from "@/lib/ad-insights";
 import {
   sumAdSpendForPeriod,
   buildStoreAdSpendSummaries,
   aggregateAdSpendForStores,
 } from "@/lib/ad-spend";
 import { countSoldVariantsMissingCost, countMissingCogsByDay } from "@/lib/cogs";
+import { ranksProductsByUnits, type CogsMode } from "@/lib/cogs-modes";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import {
   resolvePeriodForStore,
@@ -46,7 +47,13 @@ import {
   type StoreAccess,
 } from "@/lib/store-access";
 import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
-import { buildMonthlyGoalsProgress } from "@/lib/monthly-goals";
+import type { CollectionReminder } from "@/lib/collection-schedule";
+import { listCollectionRemindersForWorkspace } from "@/lib/collection-operations";
+import {
+  filterStoresForFinancialMetrics,
+  operationExclusionNote,
+  resolveStoreOperationStatus,
+} from "@/lib/operation-filters";
 import {
   resolvePeriod,
   orderDateMatch,
@@ -99,6 +106,7 @@ import {
   profitWindowNote,
   type ProfitWindowStatus,
 } from "@/lib/profit-window";
+import { buildMonthlyGoalsProgress } from "@/lib/monthly-goals";
 
 export type KpiIcon = "euro" | "percent" | "target" | "trending";
 
@@ -270,6 +278,14 @@ export type DashboardSummary = {
   generatedAt: string;
   /** Metas mensais (MTD vs objectivo), se configuradas. */
   monthlyGoals: import("@/lib/monthly-goals").MonthlyGoalsProgress | null;
+  /** Modo operação → impacto no financeiro (exclusões, lembretes). */
+  operationContext?: {
+    exclusionNote: string | null;
+    excludedWaiting: number;
+    excludedKilled: number;
+    scopedStoreStatus: string | null;
+    collectionReminders: CollectionReminder[];
+  };
 };
 
 type StoreAgg = {
@@ -448,6 +464,59 @@ function fmtRoasRatio(v: number | null): string {
   return v != null ? v.toFixed(2).replace(".", ",") : "—";
 }
 
+function buildAdInsightKpis(
+  cur: Pick<StoreAdInsights, "cpc" | "ctr" | "cpm"> | null,
+  prev: Pick<StoreAdInsights, "cpc" | "ctr" | "cpm"> | null,
+  deltaSuffix: string,
+  money: (v: number) => string,
+): SummaryKpi[] {
+  const pctDelta = (a: number | null, b: number | null) =>
+    a != null && b != null ? a - b : undefined;
+
+  return [
+    {
+      label: "CPC",
+      value: cur?.cpc != null ? money(cur.cpc) : "—",
+      title:
+        cur?.cpc == null
+          ? "Liga contas de ads em Anúncios para ver CPC"
+          : undefined,
+      delta:
+        cur?.cpc != null && prev?.cpc != null
+          ? deltaPct(cur.cpc, prev.cpc)
+          : undefined,
+      deltaLabel: cur?.cpc != null ? deltaSuffix : undefined,
+      icon: "euro",
+    },
+    {
+      label: "CTR %",
+      value: cur?.ctr != null ? formatPercent(cur.ctr) : "—",
+      title:
+        cur?.ctr == null
+          ? "Liga contas de ads em Anúncios para ver CTR"
+          : undefined,
+      delta: pctDelta(cur?.ctr ?? null, prev?.ctr ?? null),
+      deltaIsPoints: true,
+      deltaLabel: cur?.ctr != null ? deltaSuffix : undefined,
+      icon: "percent",
+    },
+    {
+      label: "CPM",
+      value: cur?.cpm != null ? money(cur.cpm) : "—",
+      title:
+        cur?.cpm == null
+          ? "Liga contas de ads em Anúncios para ver CPM"
+          : undefined,
+      delta:
+        cur?.cpm != null && prev?.cpm != null
+          ? deltaPct(cur.cpm, prev.cpm)
+          : undefined,
+      deltaLabel: cur?.cpm != null ? deltaSuffix : undefined,
+      icon: "euro",
+    },
+  ];
+}
+
 function buildExtendedStoreKpis(
   cur: StoreAgg,
   prev: StoreAgg,
@@ -459,6 +528,8 @@ function buildExtendedStoreKpis(
   prevOperatingExpenses: number,
   funnelCur: SessionFunnelMetrics,
   funnelPrev: SessionFunnelMetrics | null,
+  adInsightsCur: Pick<StoreAdInsights, "cpc" | "ctr" | "cpm"> | null,
+  adInsightsPrev: Pick<StoreAdInsights, "cpc" | "ctr" | "cpm"> | null,
   deltaSuffix: string,
   money: (v: number) => string,
   fmtMoney: (v: number) => string,
@@ -491,6 +562,14 @@ function buildExtendedStoreKpis(
       : null;
 
   const costKpis: SummaryKpi[] = [
+    {
+      label: "Revenue",
+      value: money(cur.revenue),
+      title: fmtMoney(cur.revenue),
+      delta: deltaPct(cur.revenue, prev.revenue),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
     {
       label: "Margem contrib. %",
       value: formatPercent(curCm),
@@ -591,7 +670,19 @@ function buildExtendedStoreKpis(
     },
   ];
 
-  return [...costKpis, ...buildFunnelKpis(funnelCur, funnelPrev, deltaSuffix)];
+  return [
+    ...costKpis,
+    ...buildFunnelKpis(funnelCur, funnelPrev, deltaSuffix),
+    {
+      label: "Despesas",
+      value: money(curOperatingExpenses),
+      title: fmtMoney(curOperatingExpenses),
+      delta: deltaPct(curOperatingExpenses, prevOperatingExpenses),
+      deltaLabel: deltaSuffix,
+      icon: "euro",
+    },
+    ...buildAdInsightKpis(adInsightsCur, adInsightsPrev, deltaSuffix, money),
+  ];
 }
 
 function buildExtendedWorkspaceKpis(
@@ -1885,7 +1976,7 @@ export async function buildWorkspaceSummary(
     ...NON_ARCHIVED_STORE_FILTER,
   })
     .select(
-      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry ianaTimezone lastSessionMetricsError cogsMode workspaceId",
+      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry ianaTimezone lastSessionMetricsError cogsMode workspaceId operationStatus status collectionTestCycleDays collectionReminderDaysBefore",
     )
     .lean();
 
@@ -1907,7 +1998,14 @@ export async function buildWorkspaceSummary(
       ? accessibleStores.find((s) => String(s._id) === storeId)
       : null;
   if (storeId && !scoped) return emptySummary(currency);
-  const stores = scoped ? [scoped] : accessibleStores;
+
+  const financialSplit = scoped
+    ? null
+    : filterStoresForFinancialMetrics(accessibleStores);
+
+  const stores = scoped
+    ? [scoped]
+    : (financialSplit?.included ?? accessibleStores);
   const scopeName = scoped ? scoped.name : null;
   const scopeDomain = scoped ? getStoreDisplayUrl(scoped) : null;
   const storeTz = scoped ? normalizeStoreTimezone(scoped.ianaTimezone) : null;
@@ -2529,6 +2627,16 @@ export async function buildWorkspaceSummary(
     }
 
     const prevForExtended = await aggregateOrders(prevSlice, scoped._id);
+    const [adInsightsCur, adInsightsPrev] = await Promise.all([
+      aggregateStoreAdInsightsForPeriod(
+        String(scoped._id),
+        dayKeysInSlice(currentSlice, storeTz),
+      ),
+      aggregateStoreAdInsightsForPeriod(
+        String(scoped._id),
+        dayKeysInSlice(prevSlice, storeTz),
+      ),
+    ]);
     extendedKpis = buildExtendedStoreKpis(
       cur,
       prevForExtended,
@@ -2540,6 +2648,8 @@ export async function buildWorkspaceSummary(
       prevOperatingExpenses,
       funnelCur,
       funnelPrev,
+      adInsightsCur,
+      adInsightsPrev,
       deltaSuffix,
       money,
       fmtMoney,
@@ -2573,6 +2683,26 @@ export async function buildWorkspaceSummary(
     profitChart = annotateProfitChartConsolidation(profitChart, refundWindowDays);
   }
 
+  const reminderStoreIds = stores.map((s) => s._id);
+  const collectionReminders = await listCollectionRemindersForWorkspace(
+    workspaceId,
+    reminderStoreIds,
+  );
+  const operationContext = {
+    exclusionNote: financialSplit
+      ? operationExclusionNote(
+          financialSplit.excludedWaiting,
+          financialSplit.excludedKilled,
+        )
+      : null,
+    excludedWaiting: financialSplit?.excludedWaiting ?? 0,
+    excludedKilled: financialSplit?.excludedKilled ?? 0,
+    scopedStoreStatus: scoped
+      ? resolveStoreOperationStatus(scoped)
+      : null,
+    collectionReminders,
+  };
+
   return {
     kpis,
     stores: sortedStores,
@@ -2599,6 +2729,7 @@ export async function buildWorkspaceSummary(
       storeId,
       storeAccess,
     ),
+    operationContext,
   };
 }
 

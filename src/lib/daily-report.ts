@@ -6,6 +6,7 @@ import { fetchStoreDailyNoteForDay } from "@/lib/daily-notes";
 import { fetchStoreAdInsightsForDay } from "@/lib/ad-insights";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { parseDateInput } from "@/lib/period";
+import { buildCollectionReportBlock } from "@/lib/collection-operations";
 import { assertStoreAccess, activeStoreQueryForUser, NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import type { StoreAccess } from "@/lib/store-access";
 
@@ -172,6 +173,36 @@ export async function buildDailyReportText(opts: {
   pushManualField(lines, "Quais coleções já testadas", rf?.collectionsTestedList);
   pushManualField(lines, "Qual a próxima coleção a testar", rf?.nextCollection);
   pushManualField(lines, "Coleção best-seller", rf?.bestSellerCollection);
+
+  const collectionBlock = await buildCollectionReportBlock(
+    opts.workspaceId,
+    opts.storeId,
+    opts.dateKey,
+  );
+  if (collectionBlock.lines.length) {
+    pushLine(lines, "");
+    pushLine(lines, "--- Operação (coleções) ---");
+    for (const line of collectionBlock.lines) {
+      pushLine(lines, line);
+    }
+  } else if (!rf?.collectionsTested && !rf?.nextCollection) {
+    // Preenche automaticamente se o utilizador não escreveu manualmente
+    if (collectionBlock.testingNow) {
+      pushLine(lines, `COLEÇÃO A TESTAR: ${collectionBlock.testingNow}`);
+    }
+    if (collectionBlock.nextCollection) {
+      pushLine(lines, `PRÓXIMA COLEÇÃO: ${collectionBlock.nextCollection}`);
+    }
+    if (collectionBlock.testedList) {
+      pushLine(lines, `COLEÇÕES JÁ TESTADAS: ${collectionBlock.testedList}`);
+    }
+    if (collectionBlock.skippedList) {
+      pushLine(lines, `NÃO VAI TESTAR: ${collectionBlock.skippedList}`);
+    }
+    if (collectionBlock.reminder) {
+      pushLine(lines, `LEMBRETE: ${collectionBlock.reminder}`);
+    }
+  }
   pushIf(lines, obs != null, `OBS: ${obs}`);
   pushIf(lines, storeNote?.didScale === true, "Scale hoje: Sim");
   pushManualField(lines, "Principais dificuldades", rf?.difficulties);
