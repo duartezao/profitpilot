@@ -432,6 +432,10 @@ export default async function DefinicoesPage() {
                     importStartDate={importStartDateStr}
                     importFloorKey={floorKey}
                     initialFees={normalizeFeeConfig(initialFeeEntry)}
+                    timezone={tz}
+                    timezoneSource={
+                      s.timezoneSource === "manual" ? "manual" : "shopify"
+                    }
                     canEdit={canEditStores}
                     canDelete={canEditWorkspace}
                   />

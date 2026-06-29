@@ -1,15 +1,37 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { RefreshCw, Trash2 } from "lucide-react";
+import { Clock, RefreshCw, Trash2 } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import {
   permanentlyDeleteStoreAction,
   reconfigureStoreImportAction,
+  updateStoreTimezoneAction,
   type StoreDataState,
 } from "./store-data-actions";
 import type { FeeConfig } from "@/lib/fee-schedule";
 import { DecimalInput } from "@/components/decimal-input";
+
+const COMMON_TIMEZONES = [
+  "Europe/Lisbon",
+  "Atlantic/Azores",
+  "Atlantic/Madeira",
+  "Europe/Madrid",
+  "Europe/Brussels",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/London",
+  "Europe/Rome",
+  "Europe/Amsterdam",
+  "Europe/Zurich",
+  "Europe/Athens",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Sao_Paulo",
+  "UTC",
+] as const;
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -23,6 +45,8 @@ export function StoreDataPanel({
   importStartDate,
   importFloorKey,
   initialFees,
+  timezone,
+  timezoneSource,
   canEdit,
   canDelete,
 }: {
@@ -31,17 +55,27 @@ export function StoreDataPanel({
   importStartDate: string;
   importFloorKey: string;
   initialFees: FeeConfig;
+  timezone: string;
+  timezoneSource: "shopify" | "manual";
   canEdit: boolean;
   canDelete: boolean;
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [ack, setAck] = useState(false);
+  const [tzValue, setTzValue] = useState(
+    timezoneSource === "manual" ? timezone : "",
+  );
 
   const [reconfigState, reconfigAction, reconfigPending] = useActionState<
     StoreDataState,
     FormData
   >(reconfigureStoreImportAction, {});
+
+  const [tzState, tzAction, tzPending] = useActionState<
+    StoreDataState,
+    FormData
+  >(updateStoreTimezoneAction, {});
 
   const [deleteState, deleteAction, deletePending] = useActionState<
     StoreDataState,
@@ -50,8 +84,78 @@ export function StoreDataPanel({
 
   const canSubmitDelete = ack && confirmName.trim() === storeName;
 
+  const tzOptions = COMMON_TIMEZONES.includes(
+    timezone as (typeof COMMON_TIMEZONES)[number],
+  )
+    ? COMMON_TIMEZONES
+    : [timezone, ...COMMON_TIMEZONES];
+
   return (
     <div className="space-y-4">
+      {canEdit && (
+        <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
+          <div className="flex items-start gap-2">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Fuso horário dos dias</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Define em que fuso os dias (hoje, ontem, períodos) são
+                contabilizados. Por omissão usa o fuso da Shopify; muda-o se
+                queres que «hoje» coincida com o teu calendário local.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Fuso atual:{" "}
+                <span className="font-medium text-foreground">{timezone}</span>{" "}
+                {timezoneSource === "manual"
+                  ? "(manual)"
+                  : "(automático da Shopify)"}
+              </p>
+            </div>
+          </div>
+
+          <form action={tzAction} className="mt-4 space-y-3">
+            <input type="hidden" name="storeId" value={storeId} />
+
+            {tzState.error && (
+              <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-xs text-negative">
+                {tzState.error}
+              </p>
+            )}
+            {tzState.ok && tzState.message && (
+              <p className="rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-xs text-positive">
+                {tzState.message}
+              </p>
+            )}
+
+            <div>
+              <label className={labelCls}>Fuso horário</label>
+              <select
+                name="timezone"
+                value={tzValue}
+                onChange={(e) => setTzValue(e.target.value)}
+                disabled={tzPending}
+                className={inputCls}
+              >
+                <option value="">Automático (Shopify)</option>
+                {tzOptions.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              disabled={tzPending}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
+            >
+              {tzPending ? "A guardar…" : "Guardar fuso horário"}
+            </button>
+          </form>
+        </div>
+      )}
+
       {canEdit && (
         <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
           <div className="flex items-start gap-2">

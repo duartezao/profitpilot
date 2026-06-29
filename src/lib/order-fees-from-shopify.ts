@@ -182,14 +182,20 @@ export type ApplyOrderFeesResult = {
   hasShopifyPayments: boolean;
 };
 
+export type ApplyOrderFeesOptions = {
+  /** Sync incremental: só BTs e encomendas desde esta data. */
+  since?: Date | null;
+};
+
 /**
- * Aplica taxas reais (balance transactions) ou estimadas (fallback) a todas as
- * encomendas importadas da loja.
+ * Aplica taxas reais (balance transactions) ou estimadas (fallback) às
+ * encomendas da loja. Com `since`, só processa o delta (sync rápida).
  */
 export async function applyOrderFeesFromShopify(
   store: StoreDoc,
   domain: string,
   token: string,
+  opts?: ApplyOrderFeesOptions,
 ): Promise<ApplyOrderFeesResult> {
   await connectToDatabase();
 
@@ -204,6 +210,10 @@ export async function applyOrderFeesFromShopify(
     dateKeyInTimezone(new Date(store.createdAt ?? Date.now()), tz);
   const floorDay = new Date(`${floorKey}T00:00:00.000Z`);
   const importFloorIso = floorDay.toISOString();
+  const incrementalSince = opts?.since ?? null;
+  const btSinceIso = incrementalSince
+    ? new Date(incrementalSince.getTime() - 2 * 60 * 60 * 1000).toISOString()
+    : importFloorIso;
 
   const feeSchedule = ensureFeeSchedule(
     store.feeSchedule as FeeScheduleEntry[] | undefined,
@@ -217,7 +227,7 @@ export async function applyOrderFeesFromShopify(
     const fetched = await fetchOrderFeeBalanceTransactions(
       domain,
       token,
-      importFloorIso,
+      btSinceIso,
     );
     nodes = fetched.nodes;
     hasAccount = fetched.hasAccount;
@@ -240,7 +250,16 @@ export async function applyOrderFeesFromShopify(
     storeFeeMap.set(orderId, (storeFeeMap.get(orderId) ?? 0) + inStore);
   }
 
-  const orders = await Order.find({ storeId: store._id })
+  const feeOrderIds = [...storeFeeMap.keys()];
+  const orderFilter: Record<string, unknown> = { storeId: store._id };
+  if (incrementalSince) {
+    orderFilter.$or = [
+      { orderDate: { $gte: incrementalSince } },
+      ...(feeOrderIds.length ? [{ shopifyId: { $in: feeOrderIds } }] : []),
+    ];
+  }
+
+  const orders = await Order.find(orderFilter)
     .select(
       "shopifyId orderDate totalPrice subtotal refunded shipping cogs manualCogs fees feesSource",
     )

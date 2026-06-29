@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildWorkspaceSummary } from "@/lib/metrics";
+import { getCachedWorkspaceSummary } from "@/lib/metrics-summary-cache";
 import {
   authErrorResponse,
   requireUser,
@@ -15,12 +15,17 @@ export async function GET(request: Request) {
     const storeId = params.get("store") ?? undefined;
     if (storeId) await requireWorkspaceStore(user, storeId, { activeOnly: true });
 
-    const summary = await buildWorkspaceSummary(user.workspaceId, storeId, {
-      period: params.get("period"),
-      from: params.get("from"),
-      to: params.get("to"),
-      dates: params.get("dates"),
-    }, user.storeAccess);
+    const summary = await getCachedWorkspaceSummary(
+      user.workspaceId,
+      storeId,
+      {
+        period: params.get("period"),
+        from: params.get("from"),
+        to: params.get("to"),
+        dates: params.get("dates"),
+      },
+      user.storeAccess,
+    );
 
     return NextResponse.json(summary, {
       headers: { "Cache-Control": "no-store" },

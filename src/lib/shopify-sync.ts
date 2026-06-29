@@ -3,7 +3,10 @@ import type { AnyBulkWriteOperation } from "mongoose";
 import { Types } from "mongoose";
 import { orderNetRevenue } from "@/lib/order-revenue";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
-import { backfillOrderLinePricesForStore } from "@/lib/order-price-backfill";
+import {
+  backfillOrderLinePricesForStore,
+  ordersNeedLinePriceBackfill,
+} from "@/lib/order-price-backfill";
 import {
   dateKeyInTimezone,
   normalizeStoreTimezone,
@@ -34,6 +37,7 @@ import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { syncDisputes } from "@/lib/dispute-sync";
 import { snapshotYesterdayMetrics, backfillDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
 import { syncApiAdSpendForStore } from "@/lib/ad-spend-sync";
+import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { buildOrderAmountsBase } from "@/lib/order-money";
@@ -256,6 +260,41 @@ export type OrdersPageResult = {
   hasMore: boolean;
 };
 
+const SYNC_LOOKBACK_MS = 2 * 60 * 60 * 1000;
+
+/** Sync subsequente (já houve sync completa antes). */
+export function isIncrementalSync(
+  store: Pick<StoreDoc, "lastSyncAt">,
+): boolean {
+  return Boolean(store.lastSyncAt);
+}
+
+/** Instantância desde quando importar/atualizar encomendas (com margem para refunds). */
+export function orderSyncSince(
+  store: Pick<StoreDoc, "lastSyncAt" | "importStartDate">,
+): Date {
+  if (store.lastSyncAt) {
+    return new Date(
+      new Date(store.lastSyncAt).getTime() - SYNC_LOOKBACK_MS,
+    );
+  }
+  return (
+    store.importStartDate ??
+    new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+  );
+}
+
+/** Query Shopify: incremental por `updated_at`; primeira sync por `created_at`. */
+export function orderSyncSearchQuery(
+  store: Pick<StoreDoc, "lastSyncAt" | "importStartDate">,
+): string {
+  const since = orderSyncSince(store);
+  if (store.lastSyncAt) {
+    return `updated_at:>=${since.toISOString()}`;
+  }
+  return `created_at:>=${since.toISOString()}`;
+}
+
 /** Uma página de encomendas (50) — taxas aplicadas depois via balance transactions. */
 export async function syncOrdersPage(
   store: StoreDoc,
@@ -272,12 +311,8 @@ export async function syncOrdersPage(
 
   const tz = normalizeStoreTimezone(store.ianaTimezone);
 
-  // Desde quando importar: data definida na loja, última sync, ou 90 dias.
-  const since =
-    store.lastSyncAt ??
-    store.importStartDate ??
-    new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-  const searchQuery = `created_at:>=${since.toISOString()}`;
+  // Desde quando importar: incremental (updated_at) ou primeira sync (created_at).
+  const searchQuery = orderSyncSearchQuery(store);
 
   const query = `query($cursor: String, $q: String) {
     orders(first: 50, after: $cursor, query: $q, sortKey: CREATED_AT) {
@@ -490,7 +525,9 @@ async function syncOrders(
   }
 
   await backfillOrderNetRevenueForStore(store._id);
-  await backfillOrderLinePricesForStore(store._id, domain, token);
+  if (await ordersNeedLinePriceBackfill(store._id)) {
+    await backfillOrderLinePricesForStore(store._id, domain, token);
+  }
 
   return count;
 }
@@ -504,6 +541,7 @@ export async function syncPayouts(
   store: StoreDoc,
   domain: string,
   token: string,
+  opts?: { maxPages?: number },
 ): Promise<number> {
   const query = `query($cursor: String) {
     shopifyPaymentsAccount {
@@ -553,10 +591,9 @@ export async function syncPayouts(
   let count = 0;
   let balanceSaved = false;
 
-  // Até 6 páginas (300 payouts) por execução.
-  // Nota: erros (ex.: falta de scope read_shopify_payments_payouts) propagam
-  // para serem registados em store.payoutsError, em vez de desaparecerem.
-  for (let page = 0; page < 6; page++) {
+  // Até N páginas por execução (2 em sync incremental, 6 na primeira sync).
+  const maxPages = opts?.maxPages ?? 6;
+  for (let page = 0; page < maxPages; page++) {
     const data: Resp = await shopifyGraphQL<Resp>(domain, token, query, {
       cursor,
     });
@@ -793,13 +830,16 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
     .filter(Boolean);
 
   let ianaTimezone = store.ianaTimezone ?? undefined;
-  try {
-    const shop = await testShopifyConnection(domain, accessToken);
-    if (shop.ianaTimezone) {
-      ianaTimezone = shop.ianaTimezone;
+  // Override manual do utilizador tem prioridade — não sobrescrever com o da Shopify.
+  if (store.timezoneSource !== "manual") {
+    try {
+      const shop = await testShopifyConnection(domain, accessToken);
+      if (shop.ianaTimezone) {
+        ianaTimezone = shop.ianaTimezone;
+      }
+    } catch {
+      /* sync continua se o ping da shop falhar */
     }
-  } catch {
-    /* sync continua se o ping da shop falhar */
   }
 
   await persistStoreSyncFields(store._id, {
@@ -817,16 +857,19 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
 /** Sincroniza uma loja: custos de produtos + orders. */
 export async function syncStore(storeId: string): Promise<SyncResult> {
   const { store, domain, accessToken } = await prepareShopifySyncContext(storeId);
+  const incremental = isIncrementalSync(store);
+  const feeSince = store.lastSyncAt ? orderSyncSince(store) : null;
 
   let products = 0;
-  if (syncsShopifyProductCosts(store.cogsMode)) {
+  if (!incremental && syncsShopifyProductCosts(store.cogsMode)) {
     const result = await syncProductCosts(store, domain, accessToken);
     products = result.count;
   }
   const assimilateCogs = assimilatesCogsOnSync(store.cogsMode);
-  const assimilatedBefore = assimilateCogs
-    ? await assimilatePendingCogsForStore(store._id)
-    : { ordersUpdated: 0, linesFilled: 0 };
+  const assimilatedBefore =
+    !incremental && assimilateCogs
+      ? await assimilatePendingCogsForStore(store._id)
+      : { ordersUpdated: 0, linesFilled: 0 };
   const orders = await syncOrders(store, domain, accessToken);
   const assimilatedAfter = assimilateCogs
     ? await assimilatePendingCogsForStore(store._id)
@@ -836,7 +879,9 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   let orderFeesReal = 0;
   let orderFeesEstimated = 0;
   try {
-    const fees = await applyOrderFeesFromShopify(store, domain, accessToken);
+    const fees = await applyOrderFeesFromShopify(store, domain, accessToken, {
+      since: feeSince,
+    });
     orderFeesReal = fees.real;
     orderFeesEstimated = fees.estimated;
   } catch (e) {
@@ -850,7 +895,9 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   let disputes = 0;
   let payoutsError: string | undefined;
   try {
-    payouts = await syncPayouts(store, domain, accessToken);
+    payouts = await syncPayouts(store, domain, accessToken, {
+      maxPages: incremental ? 2 : 6,
+    });
     balanceTransactions = await syncIncomingBalanceTransactions(
       store,
       domain,
@@ -882,7 +929,9 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
 
   try {
     await snapshotYesterdayMetrics(String(store.workspaceId), storeId);
-    await backfillDailyMetricsForStore(storeId, { maxDays: 30 });
+    await backfillDailyMetricsForStore(storeId, {
+      maxDays: incremental ? 3 : 30,
+    });
   } catch (e) {
     console.error("[sync] daily metrics snapshot", e);
   }
@@ -905,6 +954,8 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
         }
       : {}),
   });
+
+  invalidateWorkspaceMetricsCache(String(store.workspaceId));
 
   return {
     products,

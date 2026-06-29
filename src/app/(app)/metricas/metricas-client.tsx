@@ -51,7 +51,8 @@ export function MetricasClient({
     queryKey: ["metrics-summary", workspaceId, storeId, period.key],
     queryFn: () => fetchSummary(searchParams),
     enabled: Boolean(storeId),
-    refetchInterval: 15 * 1000,
+    placeholderData: (prev) => prev,
+    refetchInterval: 60 * 1000,
   });
 
   const periodLabel = data?.storeDashboard?.periodLabel ?? period.label;

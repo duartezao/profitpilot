@@ -62,7 +62,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * Tailwind CSS
 * Shadcn/UI
 * Recharts (ou Tremor para dashboards financeiros)
-* TanStack Query (cache e sincronização de dados no cliente; dashboard com `refetchInterval` + invalidação via live sync)
+* TanStack Query (cache 60 s, `placeholderData` ao mudar período; polling ~60 s + invalidação SSE targeted)
 * Zustand (estado global leve)
 * **PWA**: `manifest.json` + service worker (ex.: Serwist / next-pwa) para instalar no telemóvel e funcionar offline
 
@@ -136,8 +136,11 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 
 ## Velocidade (a app tem de ser rápida)
 
-* Tempo de carregamento percetível mínimo: **métricas pré-calculadas** (dailyMetrics) em vez de calcular em runtime.
-* **Cache** (Redis + TanStack Query) e dados servidos do servidor (RSC) quando possível.
+* Tempo de carregamento percetível mínimo: **métricas pré-calculadas** (`DailyMetric` — gráfico de lucro lê snapshots para dias históricos; só hoje/dias em falta agregam orders).
+* **Cache servidor** (`unstable_cache`, 60 s) em `/api/metrics/summary` — chave por workspace + loja + período; invalida após sync Shopify e alteração de ad spend manual (`revalidateTag`).
+* **Índices MongoDB** compostos em `orders`: `{ storeId, orderDate }` e `{ workspaceId, orderDate }` — agregações do dashboard mais rápidas.
+* **Sparklines consolidadas** — uma agregação batch (últimos 7 dias) em vez de N queries por loja.
+* **Cache cliente** (TanStack Query 60 s + `placeholderData`) e invalidação SSE targeted.
 * **Skeletons** em vez de spinners; nada de ecrãs em branco.
 * Paginação e virtualização em tabelas grandes.
 * Sem animações desnecessárias; transições subtis e rápidas.
@@ -176,8 +179,13 @@ Futuro:
 
 * **Webhooks** para eventos em tempo real (`orders/create`, `orders/updated`, `refunds/create`, `products/update`)
 * **Sincronização inicial histórica** ao adicionar uma loja — com opção de escolher o **dia de início** (importar tudo o disponível **ou** apenas a partir de uma data X, ex.: "só desde 01/01/2026")
-* **Sincronização incremental** agendada — **um único pedido Vercel Cron de 4 em 4 horas** (`/api/cron/sync`) sincroniza em lote todas as lojas ativas de todos os workspaces (orders, payouts, **sessões/funil Shopify**). Dias históricos de sessões ficam na BD (gzip); só dias em falta ou o dia atual voltam a ser pedidos à Shopify. Em dev local, `instrumentation.ts` só corre fora da Vercel.
-* **Sync manual** (`Sincronizar agora` em `/lojas`) — em passos via `POST /api/stores/[storeId]/sync` (50 encomendas por pedido) com **barra de progresso** e cancelar; evita timeout/crash em imports grandes. Estado intermédio em `store.syncState`.
+* **Sincronização incremental** agendada — **um único pedido Vercel Cron de 4 em 4 horas** (`/api/cron/sync`) sincroniza em lote todas as lojas ativas de todos os workspaces. **Depois da primeira sync**, cada execução só pede o **delta** à Shopify:
+  * **Encomendas**: `updated_at` desde `lastSyncAt` (−2 h de margem) — apanha vendas novas **e** refunds/alterações sem reimportar o histórico.
+  * **Taxas**: balance transactions e encomendas afetadas só desde o mesmo delta (não percorre todas as orders da loja).
+  * **Payouts**: 2 páginas (100 mais recentes) em vez de 6; **produtos/COGS Shopify** saltam em sync incremental (só na primeira sync ou manual completa).
+  * **Snapshots diários**: no máximo 3 dias em falta por execução (30 na primeira sync).
+  * Sessões/funil: dias históricos na BD (gzip); só dias em falta ou o dia atual voltam à Shopify.
+* **Sync manual** (`Sincronizar agora` em `/lojas`) — em passos via `POST /api/stores/[storeId]/sync` (50 encomendas por pedido) com **barra de progresso** e cancelar; usa as mesmas regras incrementais quando `lastSyncAt` já existe. Estado intermédio em `store.syncState`.
 * Estado de sincronização visível por loja (última sync, erros, atraso)
 
 ### Ligação à Shopify — Client ID + Chave secreta (Client Credentials Grant)
@@ -492,6 +500,13 @@ Cada loja deve ter:
 * **Este ano** / últimos 12 meses
 * **Período personalizado** (escolher datas)
 * Cada período mostra a **comparação com o anterior** (subiu/desceu).
+
+### Fuso horário dos dias (timezone)
+
+* Os dias (**Hoje**, **Ontem**, intervalos) são contabilizados no **fuso da loja** (`ianaTimezone`), alinhado com o admin da Shopify. Os limites de cada dia e o `$match` das orders (`orderDateMatchInTimezone`) usam esse fuso — nunca o fuso do servidor.
+* **Vista por loja**: usa o fuso dessa loja.
+* **Vista consolidada** (todas as lojas): usa o **fuso predominante** das lojas acessíveis (`dominantStoreTimezone`, fallback `Europe/Brussels`). É **determinístico** — não depende de onde o servidor corre (corrige desalinhamentos em produção UTC).
+* O fuso vem automaticamente da Shopify (`timezoneSource: shopify`). Se a loja Shopify estiver num fuso diferente do teu (ex. loja em `Europe/Brussels` UTC+2 e tu em Portugal UTC+1), perto da meia-noite a venda «de hoje» pode cair no dia seguinte. Resolve-se em **Definições → Lojas → Fuso horário dos dias**, definindo um override manual (ex. `Europe/Lisbon`); aí `timezoneSource` passa a `manual` e deixa de ser sobrescrito pelo sync.
 
 ## O que mostra
 
@@ -1256,6 +1271,8 @@ Lucro após taxas =
 * `startingBalance` (saldo inicial de caixa **desta loja**, na moeda base do workspace — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
 * `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
+* `ianaTimezone` (fuso IANA da loja, ex. `Europe/Lisbon` — define o dia civil de revenue/orders; default `Europe/Brussels`)
+* `timezoneSource` (`shopify` = sincronizado automaticamente da Shopify no sync; `manual` = override do utilizador em Definições → Lojas, **não é** sobrescrito pelo sync). Volta a `shopify` escolhendo «Automático (Shopify)».
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
 * `paymentsBalance` / `paymentsBalanceUpdatedAt` (saldo Shopify Payments ainda por pagar)
 * `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — intervalo automático **global** 4 h (`GLOBAL_SYNC_INTERVAL_MINUTES`, `vercel.json` cron); `syncIntervalMinutes` legado na BD
@@ -1513,7 +1530,7 @@ Pipeline operacional de dropshipping.
 
 * **SSE** `GET /api/live/stream` — stream autenticado; poll interno ~4 s a `getWorkspaceRevision(workspaceId)` (`src/lib/workspace-revision.ts`: `updatedAt` de stores, tarefas, coleções + assinatura de `operationStatus`/`operationKilledAt`).
 * **Cliente** `WorkspaceLiveSync` no layout `(app)` — `EventSource`; quando a revisão muda → `queryClient.invalidateQueries()` + `router.refresh()`.
-* Complementa o `refetchInterval` do dashboard (~15 s) e o registo do service worker (PWA).
+* Complementa o polling leve do dashboard (~60 s) e o registo do service worker (PWA). O SSE invalida só queries de métricas/tesouraria/anúncios (não invalida tudo). `placeholderData` mantém dados anteriores visíveis enquanto refresca.
 
 ### Modo empresarial P&L (`/financas?mode=business`)
 
@@ -1980,8 +1997,8 @@ Ideias para tornar a app realmente forte e diferenciada:
 ## Técnico
 
 19. **Filas (BullMQ)** para imports históricos pesados sem bloquear a app.
-20. **Camada de cache (Redis)** para dashboards rápidos.
-21. **Agregações pré-calculadas** (dailyMetrics) em vez de calcular tudo em runtime.
+20. ~~**Camada de cache (Redis)** para dashboards rápidos.~~ **Feito (v1):** cache Next.js `unstable_cache` 60 s no summary API; Redis opcional no futuro para multi-instância.
+21. ~~**Agregações pré-calculadas** (dailyMetrics) em vez de calcular tudo em runtime.~~ **Parcialmente feito:** gráfico de lucro usa `DailyMetric` para histórico; KPIs totais ainda agregam orders.
 22. **Idempotência nos webhooks** (evitar contar a mesma order duas vezes).
 23. **Testes** nos cálculos de lucro (é o cálculo mais crítico — um erro aqui destrói a confiança na app).
 

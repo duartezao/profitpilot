@@ -54,7 +54,7 @@ export function AnunciosClient() {
     queryKey: ["ad-spend-view", workspaceId, storeId],
     queryFn: () => fetchAdSpendView(storeId),
     staleTime: 5_000,
-    refetchInterval: 10_000,
+    refetchInterval: 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
