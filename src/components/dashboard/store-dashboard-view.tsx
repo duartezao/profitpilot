@@ -2,54 +2,68 @@ import { Calendar, Store } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import type { DashboardSummary } from "@/lib/metrics";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
+import { CostBreakdownPanel } from "@/components/dashboard/cost-breakdown-panel";
 import { WaterfallChart } from "@/components/dashboard/waterfall-chart";
 import { PayoutPreviewCard } from "@/components/dashboard/payout-preview-card";
 import { ProductsProfitTable } from "@/components/dashboard/products-profit-table";
-import { CollapsibleSection } from "@/components/collapsible-section";
 
 export function StoreDashboardView({ data }: { data: DashboardSummary }) {
   const dashboard = data.storeDashboard;
+  const productsDescription =
+    data.topProductsMode === "units"
+      ? "Ranking por unidades vendidas."
+      : "Ranking por lucro real.";
 
   return (
     <div className="space-y-6">
-      <DashboardKpiSection kpis={data.kpis} variant="store" />
+      <DashboardKpiSection
+        kpis={data.kpis}
+        extendedKpis={data.extendedKpis}
+        funnelError={dashboard?.funnelError}
+        sessionCountryLabel={dashboard?.sessionCountryLabel}
+        variant="workspace"
+        emphasizeLabel="Net Profit"
+      />
 
       {dashboard && (
-        <CollapsibleSection
-          title="Para onde vai o dinheiro"
-          description="Waterfall do período e próximo payout."
-        >
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-              <WaterfallChart steps={dashboard.waterfall} />
+        <div className="grid items-start gap-4 lg:grid-cols-3">
+          <section className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
+            <div>
+              <h2 className="text-lg font-semibold">Para onde vai o dinheiro</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Waterfall do período: receita líquida, custos e lucro final.
+              </p>
             </div>
+            <WaterfallChart steps={dashboard.waterfall} />
+          </section>
+
+          <div className="grid items-start gap-4">
+            <CostBreakdownPanel data={data.costBreakdown} />
             <PayoutPreviewCard payout={dashboard.payout} />
           </div>
-        </CollapsibleSection>
+        </div>
       )}
 
-      <CollapsibleSection
-        title="Produtos"
-        description={
-          data.topProductsMode === "units"
-            ? "Ranking por unidades vendidas."
-            : "Ranking por lucro real."
-        }
-        badge={
-          data.topProducts.length > 0 ? (
+      <section className="rounded-lg border border-border bg-surface">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
+          <div>
+            <h2 className="text-lg font-semibold">Produtos</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {productsDescription}
+            </p>
+          </div>
+          {data.topProducts.length > 0 && (
             <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
               {data.topProducts.length}
             </span>
-          ) : undefined
-        }
-        flush
-      >
+          )}
+        </div>
         <ProductsProfitTable
           products={data.topProducts}
           mode={data.topProductsMode}
           embedded
         />
-      </CollapsibleSection>
+      </section>
     </div>
   );
 }

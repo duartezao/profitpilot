@@ -266,10 +266,23 @@ Futuro:
 * Conversão de todas as moedas para a **moeda base**
 * Cartões de KPI agregados de todas as lojas selecionadas
 
+## Layout da dashboard consolidada
+
+Organização orientada ao lucro (alinhada com o design system — sóbria, sem cores neon):
+
+1. **KPIs principais** (grelha responsiva, até 6 por linha): **Faturamento**, **Net Profit** (card destacado — borda accent, valor maior), **Custos totais**, **Margem %**, **Ad Spend**, **ROAS**.
+2. **Gráfico «Lucro líquido» + painel «Repartição de custos»** lado a lado (`lg:grid-cols-3` — gráfico ocupa 2/3, painel 1/3; empilham no telemóvel).
+   * O painel mostra Faturamento, cada custo real (custo de produto, envio, taxas, anúncios, despesas operacionais) com barra proporcional e % da receita, **Custos totais** e **Lucro líquido** em destaque. Reembolsos aparecem em rodapé como informativo (já estão na receita líquida).
+3. **Metas do mês** (se configuradas) e **tabela comparativa loja a loja**.
+4. **Ver mais métricas** (painel expansível): BER, Margem contrib. %, COGS, Envio, Taxas, Refunds, Encomendas, AOV, MER, POAS, etc.
+
+`costBreakdown` no `DashboardSummary` traz os valores brutos + formatados (respeita modo apresentação e moeda base).
+
 ## Métricas principais (agregadas)
 
-* Revenue (vendas líquidas — subtotal após descontos, sem envio/IVA, menos reembolsos)
-* **Net Profit (lucro real)*** **Margem de lucro (%)**
+* Faturamento (vendas líquidas — subtotal após descontos, sem envio/IVA, menos reembolsos)
+* **Net Profit (lucro real)** · **Margem de lucro (%)**
+* **Custos totais** (produto + envio + taxas + anúncios + despesas operacionais)
 * Orders
 * AOV (Average Order Value)
 * Conversion Rate
@@ -277,6 +290,7 @@ Futuro:
 * **Ad Spend total**
 * **ROAS / POAS** (Profit on Ad Spend — mais honesto que ROAS para dropshipping)
 * **MER** (Marketing Efficiency Ratio = revenue / ad spend total)
+* **BER** (Break-even ROAS — no painel «Ver mais»)
 * CAC (Customer Acquisition Cost)
 * Novos clientes vs recorrentes
 
@@ -474,16 +488,17 @@ Exemplo:
 
 Cada loja deve ter:
 
-* Revenue, Orders, Customers
-* **Net Profit e margem da loja**
-* AOV, Conversion Rate, Refund Rate
-* Ad spend e ROAS/POAS da loja
+* A mesma linguagem visual da **Dashboard Consolidada**: KPIs principais em grelha responsiva, `Net Profit` destacado, cards sóbrios com borda e sem fundos coloridos.
+* KPIs principais: **Faturamento**, **Net Profit**, **Custos totais**, **Margem %**, **Ad Spend** e **ROAS**.
+* Painel «Ver mais métricas» com BER, POAS, MER, COGS, envio, taxas, encomendas, AOV, funil Shopify e métricas de ads.
+* Grid financeiro principal sempre visível: **Waterfall «Para onde vai o dinheiro»** à esquerda e, à direita, **Repartição de custos** + **A receber (payout)**.
+* O waterfall mostra a passagem de faturamento/custos até Net Profit; a repartição de custos mostra o peso de cada custo na receita.
 * **Top sellers / produtos mais vendidos** (por revenue **e** por lucro) — com seletor de período (ver secção dedicada)
 * Produtos sem vendas (candidatos a remover)
 * **Produtos que vendem mas dão prejuízo** (margem negativa)
 * Mapa/lista de vendas por país
 * Novos clientes vs recorrentes, LTV médio
-* **A receber (payout)**: saldo pendente e data do próximo pagamento da Shopify
+* **A receber (payout)**: saldo pendente e data do próximo pagamento da Shopify.
 
 ---
 
@@ -571,7 +586,9 @@ Cada loja deve ter:
 
 > Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
 
-**Estado (implementado):** em `/notas` e `/metricas` com loja seleccionada, cartão «Relatório diário» (ontem por defeito, `?date=YYYY-MM-DD` opcional) com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** quando a loja tem contas de ads ligadas por API (Meta/Google/TikTok). Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
+**Estado (implementado):** painel «Resumo» em `/notas`, `/metricas` (loja seleccionada) e na **Dashboard consolidada** (todas as lojas). Ontem por defeito, `?date=YYYY-MM-DD` opcional, com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** quando a loja tem contas de ads ligadas por API (Meta/Google/TikTok). Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
+
+**Diário ou semanal (toggle):** o painel «Resumo» tem dois modos. O **diário** gera para o dia escolhido (com campos manuais da nota). O **semanal** (`?period=week`) agrega os **7 dias até à data** escolhida (REV, refunds, ad spend, despesas, profit somados; funil e CPC/CTR/CPM recalculados sobre os totais da semana) — cabeçalho `SEMANA: dd/mm – dd/mm`. Em ambos, na vista consolidada/todas as lojas gera **um bloco por loja** (vista de texto por defeito) e por loja mostra também o cartão visual.
 
 ## Exemplo do template gerado
 

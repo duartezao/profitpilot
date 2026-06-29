@@ -25,7 +25,7 @@ export const METRIC_CATEGORY_LABEL: Record<MetricCategory, string> = {
 export const METRIC_CATALOG: MetricDefinition[] = [
   {
     id: "revenue",
-    label: "Revenue",
+    label: "Faturamento",
     category: "vendas",
     description: "Vendas líquidas no período",
   },
@@ -34,6 +34,12 @@ export const METRIC_CATALOG: MetricDefinition[] = [
     label: "Net Profit",
     category: "lucro",
     description: "Lucro real após todos os custos",
+  },
+  {
+    id: "total_costs",
+    label: "Custos totais",
+    category: "custos",
+    description: "Produto + envio + taxas + anúncios + despesas",
   },
   {
     id: "margin_pct",

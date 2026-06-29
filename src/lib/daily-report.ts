@@ -1,11 +1,17 @@
 import "server-only";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
-import { fetchStoreDayFinancials } from "@/lib/metrics";
+import {
+  fetchStoreDayFinancials,
+  fetchStoreRangeFinancials,
+} from "@/lib/metrics";
 import { fetchStoreDailyNoteForDay } from "@/lib/daily-notes";
-import { fetchStoreAdInsightsForDay } from "@/lib/ad-insights";
+import {
+  fetchStoreAdInsightsForDay,
+  aggregateStoreAdInsightsForPeriod,
+} from "@/lib/ad-insights";
 import { getStoreDisplayUrl } from "@/lib/store-display";
-import { parseDateInput } from "@/lib/period";
+import { parseDateInput, formatDateInput, addDays, startOfDay } from "@/lib/period";
 import { buildCollectionReportBlock } from "@/lib/collection-operations";
 import { buildProductReportBlock } from "@/lib/product-operations";
 import { assertStoreAccess, activeStoreQueryForUser, NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
@@ -281,5 +287,192 @@ export async function buildMultiStoreDailyReportText(opts: {
     dateKey: opts.dateKey,
     storeCount: blocks.length,
     dateLabel: day.toLocaleDateString("pt-PT"),
+  };
+}
+
+/** Lista de chaves de dia (YYYY-MM-DD) dos N dias que terminam em endKey (inclusive). */
+function weekDateKeys(endKey: string, days = 7): string[] {
+  const end = parseDateInput(endKey) ?? startOfDay(new Date());
+  const keys: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    keys.push(formatDateInput(addDays(end, -i)));
+  }
+  return keys;
+}
+
+export type WeeklyReportResult = {
+  text: string;
+  startKey: string;
+  endKey: string;
+  rangeLabel: string;
+  storeName: string;
+};
+
+/** Gera o texto do resumo semanal (7 dias até endKey) de uma loja. */
+export async function buildWeeklyReportText(opts: {
+  workspaceId: string;
+  storeId: string;
+  endKey: string;
+  storeAccess: StoreAccess;
+}): Promise<WeeklyReportResult | null> {
+  assertStoreAccess(opts.storeAccess, opts.storeId);
+  await connectToDatabase();
+
+  const store = await Store.findOne({
+    _id: opts.storeId,
+    workspaceId: opts.workspaceId,
+    deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
+  })
+    .select("name currency displayUrl shopDomain")
+    .lean();
+  if (!store) return null;
+
+  const keys = weekDateKeys(opts.endKey);
+  const financials = await fetchStoreRangeFinancials(
+    opts.workspaceId,
+    opts.storeId,
+    keys,
+  );
+  if (!financials) return null;
+
+  const startDate = parseDateInput(financials.startKey);
+  const endDate = parseDateInput(financials.endKey);
+  const rangeLabel =
+    startDate && endDate
+      ? `${startDate.toLocaleDateString("pt-PT")} – ${endDate.toLocaleDateString("pt-PT")}`
+      : "";
+  const displayUrl = getStoreDisplayUrl(store) ?? store.shopDomain ?? store.name;
+  const currency = store.currency ?? "EUR";
+
+  const profitLine =
+    financials.missingCogs > 0
+      ? `${fmtReportNumber(financials.profit)}   (COGS em falta em ${financials.missingCogs} dia(s))`
+      : fmtReportNumber(financials.profit);
+
+  const lines: string[] = [];
+  pushLine(lines, `SEMANA: ${rangeLabel}`);
+  pushLine(lines, `LOJA: ${displayUrl}`);
+
+  pushIf(lines, financials.revenue > 0, `REV: ${fmtReportNumber(financials.revenue)}`);
+  pushIf(
+    lines,
+    financials.refunds > 0,
+    `REFUNDS: ${fmtReportMoney(financials.refunds, currency)}`,
+  );
+  pushIf(
+    lines,
+    financials.adSpend != null,
+    financials.adSpend != null
+      ? `ADSPEND: ${fmtReportNumber(financials.adSpend)}`
+      : "",
+  );
+  pushIf(
+    lines,
+    financials.operatingExpenses > 0,
+    `DESPESAS: ${fmtReportNumber(financials.operatingExpenses)}`,
+  );
+  pushIf(
+    lines,
+    financials.revenue > 0 ||
+      financials.adSpend != null ||
+      financials.profit !== 0 ||
+      financials.missingCogs > 0,
+    `PROFIT: ${profitLine}`,
+  );
+
+  pushIf(
+    lines,
+    financials.atcPct != null,
+    `ATC %: ${fmtReportPct(financials.atcPct)}`,
+  );
+  pushIf(
+    lines,
+    financials.checkoutPct != null,
+    `REACHED CHECKOUT %: ${fmtReportPct(financials.checkoutPct)}`,
+  );
+  pushIf(
+    lines,
+    financials.cvrPct != null,
+    `CVR %: ${fmtReportPct(financials.cvrPct)}`,
+  );
+
+  const adInsights = await aggregateStoreAdInsightsForPeriod(opts.storeId, keys);
+  if (adInsights) {
+    if (adInsights.cpc != null) {
+      pushLine(lines, `CPC: ${fmtReportMoney(adInsights.cpc, currency)}`);
+    }
+    if (adInsights.ctr != null) {
+      pushLine(lines, `CTR %: ${fmtReportPct(adInsights.ctr)}`);
+    }
+    if (adInsights.cpm != null) {
+      pushLine(lines, `CPM: ${fmtReportMoney(adInsights.cpm, currency)}`);
+    }
+  }
+
+  return {
+    text: lines.join("\n"),
+    startKey: financials.startKey,
+    endKey: financials.endKey,
+    rangeLabel,
+    storeName: store.name,
+  };
+}
+
+export type MultiWeeklyReportResult = {
+  text: string;
+  startKey: string;
+  endKey: string;
+  rangeLabel: string;
+  storeCount: number;
+};
+
+/** Resumo semanal — um bloco por loja acessível. */
+export async function buildMultiStoreWeeklyReportText(opts: {
+  workspaceId: string;
+  endKey: string;
+  storeAccess: StoreAccess;
+}): Promise<MultiWeeklyReportResult | null> {
+  await connectToDatabase();
+
+  const stores = await Store.find(
+    activeStoreQueryForUser({
+      workspaceId: opts.workspaceId,
+      storeAccess: opts.storeAccess,
+    }),
+  )
+    .select("_id")
+    .sort({ name: 1 })
+    .lean();
+
+  if (!stores.length) return null;
+
+  const blocks: string[] = [];
+  let rangeLabel = "";
+  let startKey = opts.endKey;
+  let endKey = opts.endKey;
+  for (const store of stores) {
+    const report = await buildWeeklyReportText({
+      workspaceId: opts.workspaceId,
+      storeId: String(store._id),
+      endKey: opts.endKey,
+      storeAccess: opts.storeAccess,
+    });
+    if (report?.text.trim()) {
+      blocks.push(report.text.trim());
+      rangeLabel = report.rangeLabel;
+      startKey = report.startKey;
+      endKey = report.endKey;
+    }
+  }
+
+  if (!blocks.length) return null;
+
+  return {
+    text: blocks.join("\n\n"),
+    startKey,
+    endKey,
+    rangeLabel,
+    storeCount: blocks.length,
   };
 }

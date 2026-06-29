@@ -26,6 +26,8 @@ function formatDelta(delta: number, isPoints?: boolean) {
 type DashboardKpiCardProps = SummaryKpi & {
   /** Vista loja — ícone canto superior direito + comparação com período anterior */
   layout?: "store" | "workspace";
+  /** Realça o card (borda accent + valor maior) — usado no KPI principal. */
+  emphasis?: boolean;
 };
 
 export function DashboardKpiCard({
@@ -39,6 +41,7 @@ export function DashboardKpiCard({
   icon,
   trend,
   layout = "workspace",
+  emphasis = false,
 }: DashboardKpiCardProps) {
   const Icon = icon ? iconMap[icon] : null;
   const isStore = layout === "store";
@@ -107,7 +110,12 @@ export function DashboardKpiCard({
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-col rounded-lg border border-border bg-surface p-3.5 sm:p-4 lg:p-5">
+    <div
+      className={cn(
+        "flex h-full min-w-0 flex-col rounded-lg border bg-surface p-3.5 sm:p-4 lg:p-5",
+        emphasis ? "border-accent/40 ring-1 ring-accent/15" : "border-border",
+      )}
+    >
       <div className={cn("flex min-w-0 gap-2.5 sm:gap-3", Icon && "items-start")}>
         {Icon && (
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 sm:h-10 sm:w-10">
@@ -116,12 +124,22 @@ export function DashboardKpiCard({
         )}
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium text-muted-foreground sm:text-[13px]">
+          <p
+            className={cn(
+              "truncate text-xs font-medium sm:text-[13px]",
+              emphasis ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
             {label}
           </p>
           <Sensitive
             title={title ?? value}
-            className="mt-0.5 block truncate text-lg font-semibold tabular-nums leading-tight sm:mt-1 sm:text-xl md:text-2xl xl:text-3xl"
+            className={cn(
+              "mt-0.5 block truncate font-semibold tabular-nums leading-tight sm:mt-1",
+              emphasis
+                ? "text-2xl sm:text-3xl xl:text-4xl"
+                : "text-lg sm:text-xl md:text-2xl xl:text-3xl",
+            )}
           >
             {value}
           </Sensitive>

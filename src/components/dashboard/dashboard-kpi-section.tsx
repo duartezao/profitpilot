@@ -15,6 +15,7 @@ export function DashboardKpiSection({
   variant = "store",
   showExtended,
   orderedMetricIds,
+  emphasizeLabel,
 }: {
   kpis: SummaryKpi[];
   extendedKpis?: SummaryKpi[];
@@ -25,6 +26,8 @@ export function DashboardKpiSection({
   showExtended?: boolean;
   /** Painel personalizado — filtra e ordena numa única grelha. */
   orderedMetricIds?: string[];
+  /** Realça o card com este label (ex. "Net Profit"). */
+  emphasizeLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const isStore = variant === "store";
@@ -152,6 +155,7 @@ export function DashboardKpiSection({
             key={k.label}
             {...k}
             layout={isStore ? "store" : "workspace"}
+            emphasis={emphasizeLabel === k.label}
           />
         ))}
       </div>
