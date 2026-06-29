@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ProfitChart } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
-import { CollapsibleSection } from "@/components/collapsible-section";
+import { CostBreakdownPanel } from "@/components/dashboard/cost-breakdown-panel";
+import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
 import { OperationsAlertsBanner } from "@/components/operations/operations-alerts-banner";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
@@ -157,23 +158,29 @@ export function DashboardClient() {
           kpis={portfolioData?.kpis ?? []}
           extendedKpis={portfolioData?.extendedKpis ?? []}
           variant="workspace"
+          emphasizeLabel="Net Profit"
         />
 
-        <CollapsibleSection
-          title="Lucro líquido"
-          description={
-            <>
-              Total agregado em {periodLabel}.
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold">Lucro líquido</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Total agregado em {periodLabel}.
+              </p>
               {portfolioData?.profitWindowStatus !== "consolidated" && (
-                <span className="mt-1 block text-xs">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {portfolioData?.profitWindowNote}
-                </span>
+                </p>
               )}
-            </>
-          }
-        >
-          <ProfitChart data={portfolioData?.profitChart ?? []} />
-        </CollapsibleSection>
+            </div>
+            <ProfitChart data={portfolioData?.profitChart ?? []} />
+          </div>
+
+          {portfolioData?.costBreakdown && (
+            <CostBreakdownPanel data={portfolioData.costBreakdown} />
+          )}
+        </div>
 
         <WorkspacesComparisonTable
           workspaces={portfolioData?.workspaces ?? []}
@@ -269,32 +276,40 @@ export function DashboardClient() {
             kpis={workspaceData?.kpis ?? []}
             extendedKpis={workspaceData?.extendedKpis ?? []}
             variant="workspace"
+            emphasizeLabel="Net Profit"
           />
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold">Lucro líquido</h2>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Evolução em {periodLabel}.
+                </p>
+                {workspaceData?.profitWindowStatus !== "consolidated" && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {workspaceData?.profitWindowNote}
+                  </p>
+                )}
+              </div>
+              <ProfitChart
+                data={workspaceData?.profitChart ?? []}
+                series={workspaceData?.profitChartSeries}
+              />
+            </div>
+
+            {workspaceData?.costBreakdown && (
+              <CostBreakdownPanel data={workspaceData.costBreakdown} />
+            )}
+          </div>
 
           {workspaceData?.monthlyGoals && (
             <MonthlyGoalsCard goals={workspaceData.monthlyGoals} />
           )}
 
-          <CollapsibleSection
-            title="Lucro líquido"
-            description={
-              <>
-                Evolução em {periodLabel}.
-                {workspaceData?.profitWindowStatus !== "consolidated" && (
-                  <span className="mt-1 block text-xs">
-                    {workspaceData?.profitWindowNote}
-                  </span>
-                )}
-              </>
-            }
-          >
-            <ProfitChart
-              data={workspaceData?.profitChart ?? []}
-              series={workspaceData?.profitChartSeries}
-            />
-          </CollapsibleSection>
-
           <StoresComparisonTable stores={workspaceData?.stores ?? []} />
+
+          <DailyReportPanel />
         </>
       )}
     </div>

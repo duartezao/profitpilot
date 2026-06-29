@@ -6,6 +6,7 @@ import { Workspace } from "@/models/Workspace";
 import { listUserWorkspaces } from "@/lib/auth";
 import { normalizeStoreAccess, type StoreAccess } from "@/lib/store-access";
 import {
+  buildCostBreakdown,
   buildWorkspacePnl,
   buildWorkspaceSummary,
   type DashboardSummary,
@@ -331,8 +332,17 @@ export async function buildPortfolioSummary(
         : undefined,
     },
     {
-      label: "Revenue",
+      label: "Faturamento",
       value: money(totalAgg.revenue),
+    },
+    {
+      label: "Custos totais",
+      value: money(
+        totalAgg.cogs +
+          totalAgg.shipping +
+          totalAgg.fees +
+          totalAgg.adSpend,
+      ),
     },
     {
       label: "Margem",
@@ -386,6 +396,14 @@ export async function buildPortfolioSummary(
     missingAdSpendDays,
     profitChart,
     dailyMetrics: [],
+    costBreakdown: buildCostBreakdown(
+      totalAgg,
+      totalAgg.adSpend,
+      true,
+      0,
+      netProfit,
+      fmtMoney,
+    ),
     refundWindowDays: 30,
     profitWindowStatus: "provisional",
     profitWindowNote: "Lucro provisório — período dentro da janela de 30 dias; reembolsos ainda podem alterar o resultado.",

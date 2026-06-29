@@ -41,7 +41,7 @@ export function DailyReportVisualCard({
   reportPdfHref?: string;
 }) {
   const fields = parseReportLines(reportText);
-  const dayLabel = fields.get("DIA") ?? dateLabel;
+  const dayLabel = fields.get("DIA") ?? fields.get("SEMANA") ?? dateLabel;
   const loja = fields.get("LOJA") ?? storeName;
 
   const kpis = KPI_ORDER.filter((k) => fields.has(k)).map((k) => ({

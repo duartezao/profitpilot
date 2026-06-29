@@ -137,6 +137,26 @@ export type SummaryKpi = {
   deltaInverted?: boolean;
 };
 
+export type CostBreakdownItem = {
+  key: string;
+  label: string;
+  value: number;
+  valueFmt: string;
+  /** Informativo (não soma ao total de custos, ex. refunds já na REV líquida). */
+  informative?: boolean;
+};
+
+export type CostBreakdown = {
+  totalCosts: number;
+  totalCostsFmt: string;
+  revenue: number;
+  revenueFmt: string;
+  netProfit: number;
+  netProfitFmt: string;
+  items: CostBreakdownItem[];
+  adSpendKnown: boolean;
+};
+
 export type SummaryStore = {
   storeId: string;
   name: string;
@@ -280,6 +300,8 @@ export type DashboardSummary = {
   dailyMetrics: StoreDailyMetricRow[];
   /** Métricas extra (custos, funil, encomendas…) — painel «Ver mais». */
   extendedKpis: SummaryKpi[];
+  /** Repartição de custos do período (painel lateral da dashboard). */
+  costBreakdown: CostBreakdown;
   /** Janela de refunds do workspace (dias). */
   refundWindowDays: number;
   /** Estado do lucro no período seleccionado. */
@@ -2119,13 +2141,77 @@ export async function buildWorkspacePnl(
 }
 
 /** Resumo vazio quando o workspace ainda não tem lojas ligadas. */
+function emptyCostBreakdown(currency = "EUR"): CostBreakdown {
+  const zero = formatCurrency(0, currency);
+  return {
+    totalCosts: 0,
+    totalCostsFmt: zero,
+    revenue: 0,
+    revenueFmt: zero,
+    netProfit: 0,
+    netProfitFmt: zero,
+    items: [],
+    adSpendKnown: false,
+  };
+}
+
+/** Repartição de custos do período (painel lateral + KPI «Custos totais»). */
+export function buildCostBreakdown(
+  agg: StoreAgg,
+  adSpend: number,
+  adSpendKnown: boolean,
+  operatingExpenses: number,
+  netProfit: number,
+  fmtMoney: (v: number) => string,
+): CostBreakdown {
+  const items: CostBreakdownItem[] = [
+    { key: "cogs", label: "Custo de produto", value: agg.cogs },
+    { key: "shipping", label: "Envio", value: agg.shipping },
+    { key: "fees", label: "Taxas", value: agg.fees },
+    ...(adSpendKnown
+      ? [{ key: "adspend", label: "Anúncios", value: adSpend }]
+      : []),
+    ...(operatingExpenses > 0
+      ? [{ key: "opex", label: "Despesas operacionais", value: operatingExpenses }]
+      : []),
+  ]
+    .filter((i) => i.value > 0)
+    .map((i) => ({ ...i, valueFmt: fmtMoney(i.value) }));
+
+  if (agg.refunds > 0) {
+    items.push({
+      key: "refunds",
+      label: "Reembolsos",
+      value: agg.refunds,
+      valueFmt: fmtMoney(agg.refunds),
+      informative: true,
+    });
+  }
+
+  const totalCosts = items
+    .filter((i) => !i.informative)
+    .reduce((s, i) => s + i.value, 0);
+
+  return {
+    totalCosts,
+    totalCostsFmt: fmtMoney(totalCosts),
+    revenue: agg.revenue,
+    revenueFmt: fmtMoney(agg.revenue),
+    netProfit,
+    netProfitFmt: fmtMoney(netProfit),
+    items,
+    adSpendKnown,
+  };
+}
+
 function emptySummary(currency = "EUR"): DashboardSummary {
   const zero = formatCurrency(0, currency);
   const zeroCompact = formatCurrencyCompact(0, currency);
   return {
     kpis: [
-      { label: "Revenue", value: zeroCompact, title: zero },
+      { label: "Faturamento", value: zeroCompact, title: zero },
       { label: "Net Profit", value: zeroCompact, title: zero },
+      { label: "Custos totais", value: zeroCompact, title: zero },
       { label: "Margem %", value: "0,0%" },
       { label: "Ad Spend", value: zeroCompact, title: zero },
       { label: "ROAS", value: "—" },
@@ -2146,6 +2232,7 @@ function emptySummary(currency = "EUR"): DashboardSummary {
     profitChart: [],
     dailyMetrics: [],
     extendedKpis: [],
+    costBreakdown: emptyCostBreakdown(currency),
     refundWindowDays: 30,
     profitWindowStatus: "provisional",
     profitWindowNote: profitWindowNote("provisional", 30),
@@ -2558,15 +2645,34 @@ export async function buildWorkspaceSummary(
     const curBer = berRoas(cur);
     const prevBer = berRoas(prev);
     const curCm = contributionMarginPct(cur);
-    const prevCm = contributionMarginPct(prev);
     const curRoas =
       scopedAdSpendKnown && curAdSpend > 0 ? cur.revenue / curAdSpend : null;
     const prevRoas =
       scopedPrevAdSpendKnown && prevAdSpend > 0
         ? prev.revenue / prevAdSpend
         : null;
+    const totalCostsStore =
+      cur.cogs +
+      cur.shipping +
+      cur.fees +
+      (scopedAdSpendKnown ? curAdSpend : 0) +
+      curOperatingExpenses;
+    const prevTotalCostsStore =
+      prev.cogs +
+      prev.shipping +
+      prev.fees +
+      (scopedPrevAdSpendKnown ? prevAdSpend : 0) +
+      prevOperatingExpenses;
 
     kpis = [
+      {
+        label: "Faturamento",
+        value: money(cur.revenue),
+        title: fmtMoney(cur.revenue),
+        delta: deltaPct(cur.revenue, prev.revenue),
+        deltaLabel: deltaSuffix,
+        icon: "euro",
+      },
       {
         label: "Net Profit",
         value: money(curProfit),
@@ -2581,12 +2687,33 @@ export async function buildWorkspaceSummary(
         icon: "euro",
       },
       {
+        label: "Custos totais",
+        value: money(totalCostsStore),
+        title: `Produto + envio + taxas${scopedAdSpendKnown ? " + anúncios" : ""}${curOperatingExpenses > 0 ? " + despesas" : ""} = ${fmtMoney(totalCostsStore)}`,
+        delta: deltaPct(totalCostsStore, prevTotalCostsStore),
+        deltaLabel: deltaSuffix,
+        icon: "euro",
+      },
+      {
         label: "Margem %",
         value: formatPercent(curMargin),
         delta: curMargin - prevMargin,
         deltaLabel: deltaSuffix,
         deltaIsPoints: true,
         icon: "percent",
+      },
+      {
+        label: "Ad Spend",
+        value: scopedAdSpendKnown ? money(curAdSpend) : "—",
+        title: scopedAdSpendKnown
+          ? fmtMoney(curAdSpend)
+          : "Por preencher em Anúncios — não entra no lucro até registares",
+        delta:
+          scopedAdSpendKnown && scopedPrevAdSpendKnown
+            ? deltaPct(curAdSpend, prevAdSpend)
+            : undefined,
+        deltaLabel: scopedAdSpendKnown ? deltaSuffix : undefined,
+        icon: "euro",
       },
       {
         label: "ROAS",
@@ -2598,25 +2725,20 @@ export async function buildWorkspaceSummary(
         deltaLabel: curRoas != null ? deltaSuffix : undefined,
         icon: "target",
       },
-      {
-        label: "BER",
-        value: fmtRoasRatio(curBer),
-        title:
-          curBer != null
-            ? `Break-even ROAS — abaixo disto há prejuízo (margem contrib. ${formatPercent(curCm)})`
-            : "Sem margem de contribuição positiva",
-        delta:
-          curBer != null && prevBer != null
-            ? deltaPct(curBer, prevBer)
-            : undefined,
-        deltaLabel: curBer != null ? deltaSuffix : undefined,
-        deltaInverted: true,
-        icon: "trending",
-      },
     ];
   } else {
+    const totalCostsWorkspace =
+      totals.cogs +
+      totals.shipping +
+      totals.fees +
+      (curAdSpendKnownWorkspace ? adSpend : 0) +
+      curOperatingExpenses;
     kpis = [
-      { label: "Revenue", value: money(totals.revenue), title: fmtMoney(totals.revenue) },
+      {
+        label: "Faturamento",
+        value: money(totals.revenue),
+        title: fmtMoney(totals.revenue),
+      },
       {
         label: "Net Profit",
         value: money(netProfit),
@@ -2626,6 +2748,11 @@ export async function buildWorkspaceSummary(
               adSpendKnown: curAdSpendKnownWorkspace,
               operatingExpenses: curOperatingExpenses,
             }),
+      },
+      {
+        label: "Custos totais",
+        value: money(totalCostsWorkspace),
+        title: `Produto + envio + taxas${curAdSpendKnownWorkspace ? " + anúncios" : ""}${curOperatingExpenses > 0 ? " + despesas" : ""} = ${fmtMoney(totalCostsWorkspace)}`,
       },
       { label: "Margem %", value: formatPercent(margin) },
       {
@@ -2641,14 +2768,6 @@ export async function buildWorkspaceSummary(
           curAdSpendKnownWorkspace && adSpend > 0
             ? (totals.revenue / adSpend).toFixed(2).replace(".", ",")
             : "—",
-      },
-      {
-        label: "BER",
-        value: fmtRoasRatio(curBer),
-        title:
-          curBer != null
-            ? "Break-even ROAS — ROAS mínimo para não perder dinheiro"
-            : "Sem margem de contribuição positiva",
       },
     ];
     const curAll = totals;
@@ -2678,19 +2797,37 @@ export async function buildWorkspaceSummary(
         orders: 0,
       },
     );
-    extendedKpis = buildExtendedWorkspaceKpis(
-      curAll,
-      prevAll,
-      adSpend,
-      prevAdSpend,
-      curAdSpendKnownWorkspace,
-      prevAdSpendKnownWorkspace,
-      curOperatingExpenses,
-      prevOperatingExpenses,
-      deltaSuffix,
-      money,
-      fmtMoney,
-    );
+    const prevBerWorkspace = berRoas(prevAll);
+    extendedKpis = [
+      {
+        label: "BER",
+        value: fmtRoasRatio(curBer),
+        title:
+          curBer != null
+            ? "Break-even ROAS — ROAS mínimo para não perder dinheiro"
+            : "Sem margem de contribuição positiva",
+        delta:
+          curBer != null && prevBerWorkspace != null
+            ? deltaPct(curBer, prevBerWorkspace)
+            : undefined,
+        deltaLabel: curBer != null ? deltaSuffix : undefined,
+        deltaInverted: true,
+        icon: "trending",
+      },
+      ...buildExtendedWorkspaceKpis(
+        curAll,
+        prevAll,
+        adSpend,
+        prevAdSpend,
+        curAdSpendKnownWorkspace,
+        prevAdSpendKnownWorkspace,
+        curOperatingExpenses,
+        prevOperatingExpenses,
+        deltaSuffix,
+        money,
+        fmtMoney,
+      ),
+    ];
   }
 
   if (profitWindowStatus !== "consolidated") {
@@ -2923,23 +3060,43 @@ export async function buildWorkspaceSummary(
         dayKeysInSlice(effectivePrevSlice, storeTz),
       ),
     ]);
-    extendedKpis = buildExtendedStoreKpis(
-      cur,
-      prevForExtended,
-      curAdSpend,
-      prevAdSpend,
-      scopedAdSpendKnown,
-      scopedPrevAdSpendKnown,
-      curOperatingExpenses,
-      prevOperatingExpenses,
-      funnelCur,
-      funnelPrev,
-      adInsightsCur,
-      adInsightsPrev,
-      deltaSuffix,
-      money,
-      fmtMoney,
-    );
+    const curBerExtended = berRoas(cur);
+    const prevBerExtended = berRoas(prevForExtended);
+    const curContributionMarginExtended = contributionMarginPct(cur);
+    extendedKpis = [
+      {
+        label: "BER",
+        value: fmtRoasRatio(curBerExtended),
+        title:
+          curBerExtended != null
+            ? `Break-even ROAS — abaixo disto há prejuízo (margem contrib. ${formatPercent(curContributionMarginExtended)})`
+            : "Sem margem de contribuição positiva",
+        delta:
+          curBerExtended != null && prevBerExtended != null
+            ? deltaPct(curBerExtended, prevBerExtended)
+            : undefined,
+        deltaLabel: curBerExtended != null ? deltaSuffix : undefined,
+        deltaInverted: true,
+        icon: "trending",
+      },
+      ...buildExtendedStoreKpis(
+        cur,
+        prevForExtended,
+        curAdSpend,
+        prevAdSpend,
+        scopedAdSpendKnown,
+        scopedPrevAdSpendKnown,
+        curOperatingExpenses,
+        prevOperatingExpenses,
+        funnelCur,
+        funnelPrev,
+        adInsightsCur,
+        adInsightsPrev,
+        deltaSuffix,
+        money,
+        fmtMoney,
+      ),
+    ];
 
     storeDashboard = {
       waterfall,
@@ -2991,6 +3148,18 @@ export async function buildWorkspaceSummary(
     collectionReminders,
   };
 
+  const costBreakdownAdKnown = scoped
+    ? scopedAdSpendKnown
+    : curAdSpendKnownWorkspace;
+  const costBreakdown = buildCostBreakdown(
+    scopedCurAgg ?? totals,
+    costBreakdownAdKnown ? adSpend : 0,
+    costBreakdownAdKnown,
+    curOperatingExpenses,
+    netProfit,
+    fmtMoney,
+  );
+
   return {
     kpis,
     stores: sortedStores,
@@ -3008,6 +3177,7 @@ export async function buildWorkspaceSummary(
     profitChartSeries,
     dailyMetrics,
     extendedKpis,
+    costBreakdown,
     refundWindowDays,
     profitWindowStatus,
     profitWindowNote: profitWindowNoteText,
@@ -3194,5 +3364,143 @@ export async function fetchStoreDayFinancials(
     atcPct: sess ? pctFromCounts(sess.cart, sess.sessions) : null,
     checkoutPct: sess ? pctFromCounts(sess.checkout, sess.sessions) : null,
     cvrPct: sess ? pctFromCounts(sess.completed, sess.sessions) : null,
+  };
+}
+
+export type StoreRangeFinancials = StoreDayFinancials & {
+  startKey: string;
+  endKey: string;
+  dayCount: number;
+};
+
+/** Métricas financeiras e funil agregadas num intervalo de dias (relatório semanal). */
+export async function fetchStoreRangeFinancials(
+  workspaceId: string,
+  storeId: string,
+  dateKeys: string[],
+): Promise<StoreRangeFinancials | null> {
+  if (!dateKeys.length) return null;
+  await connectToDatabase();
+  const wsId = new mongoose.Types.ObjectId(workspaceId);
+  const store = await Store.findOne({
+    _id: storeId,
+    workspaceId: wsId,
+    deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
+  })
+    .select("ianaTimezone analyticsSessionCountry cogsMode")
+    .lean();
+  if (!store) return null;
+
+  const cogsMode = (store.cogsMode ?? "shopify") as CogsMode;
+  const sortedKeys = [...dateKeys].sort();
+  const startKey = sortedKeys[0]!;
+  const endKey = sortedKeys[sortedKeys.length - 1]!;
+  const start = parseDateInput(startKey);
+  const end = parseDateInput(endKey);
+  if (!start || !end) return null;
+
+  const storeTz = normalizeStoreTimezone(store.ianaTimezone);
+  const slice: PeriodSlice = {
+    start,
+    end,
+    specificDates: sortedKeys,
+  };
+
+  const storeOid = store._id;
+  const expenseRows = await loadWorkspaceExpensesLean(wsId);
+  const operatingExpenses = sortedKeys.reduce(
+    (sum, key) => sum + sumLoadedExpensesForDay(expenseRows, key, storeId),
+    0,
+  );
+
+  const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
+    await Promise.all([
+      aggregateDailyOrders(wsId, [storeOid], slice, storeTz, cogsMode),
+      aggregateDailyAdSpend([storeOid], slice, storeTz),
+      loadDailySessionCountsForSlice(
+        storeOid,
+        store.analyticsSessionCountry,
+        slice,
+        storeTz,
+      ),
+      cogsMode === "order" || cogsMode === "day"
+        ? Promise.resolve(new Map<string, number>())
+        : countMissingCogsByDay([storeOid], slice, storeTz),
+    ]);
+
+  const totals: StoreAgg = {
+    revenue: 0,
+    cogs: 0,
+    shipping: 0,
+    fees: 0,
+    refunds: 0,
+    orders: 0,
+  };
+  let adSpend = 0;
+  let adSpendHasEntry = false;
+  let missingCogs = 0;
+  const sessTotals = { sessions: 0, cart: 0, checkout: 0, completed: 0 };
+  let hasSessions = false;
+
+  for (const key of sortedKeys) {
+    const o = orderByDay.get(key);
+    if (o) {
+      totals.revenue += o.revenue;
+      totals.cogs += o.cogs;
+      totals.shipping += o.shipping;
+      totals.fees += o.fees;
+      totals.refunds += o.refunds;
+      totals.orders += o.orders;
+    }
+    const { amount, hasEntry } = resolveDailyAdSpend(adByDay, key);
+    if (hasEntry) {
+      adSpend += amount;
+      adSpendHasEntry = true;
+    }
+    const sess = sessionsByDay.get(key);
+    if (sess) {
+      sessTotals.sessions += sess.sessions;
+      sessTotals.cart += sess.cart;
+      sessTotals.checkout += sess.checkout;
+      sessTotals.completed += sess.completed;
+      hasSessions = true;
+    }
+    missingCogs += missingCogsByDay.get(key) ?? 0;
+  }
+
+  if (cogsMode === "order") {
+    missingCogs = await countOrdersMissingManualCogs([storeOid], slice, storeTz);
+  } else if (cogsMode === "day") {
+    missingCogs = totals.orders > 0 && totals.cogs === 0 ? 1 : 0;
+  }
+
+  const profit = calcProfit(
+    totals,
+    adSpendHasEntry ? adSpend : 0,
+    operatingExpenses,
+  );
+
+  return {
+    revenue: totals.revenue,
+    cogs: totals.cogs,
+    refunds: totals.refunds,
+    shipping: totals.shipping,
+    fees: totals.fees,
+    adSpend: adSpendHasEntry ? adSpend : null,
+    operatingExpenses,
+    profit,
+    missingCogs,
+    sessions: hasSessions ? sessTotals.sessions : null,
+    atcPct: hasSessions ? pctFromCounts(sessTotals.cart, sessTotals.sessions) : null,
+    checkoutPct: hasSessions
+      ? pctFromCounts(sessTotals.checkout, sessTotals.sessions)
+      : null,
+    cvrPct: hasSessions
+      ? pctFromCounts(sessTotals.completed, sessTotals.sessions)
+      : null,
+    startKey,
+    endKey,
+    dayCount: sortedKeys.length,
   };
 }

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import {
   buildDailyReportText,
   buildMultiStoreDailyReportText,
+  buildWeeklyReportText,
+  buildMultiStoreWeeklyReportText,
 } from "@/lib/daily-report";
 import { formatDateInput, addDays, startOfDay } from "@/lib/period";
 import {
@@ -39,8 +41,49 @@ export async function GET(req: Request) {
     const allStores = url.searchParams.get("all") === "1";
     const format = dailyReportFormatFromParams(url.searchParams);
     const dateKey = resolveDateKey(url.searchParams.get("date")?.trim());
+    const isWeekly = url.searchParams.get("period")?.toLowerCase() === "week";
+    const periodTitle = isWeekly ? "Resumo semanal" : "Relatório diário";
+    const filePrefix = isWeekly ? "resumo-semanal" : "relatorio";
 
     if (allStores) {
+      if (isWeekly) {
+        const report = await buildMultiStoreWeeklyReportText({
+          workspaceId: user.workspaceId,
+          endKey: dateKey,
+          storeAccess: user.storeAccess,
+        });
+        if (!report) {
+          return NextResponse.json(
+            { error: "Resumo indisponível." },
+            { status: 404 },
+          );
+        }
+        if (format === "txt") {
+          return new NextResponse(report.text, {
+            headers: {
+              "Content-Type": "text/plain; charset=utf-8",
+              "Content-Disposition": `attachment; filename="${filePrefix}-${report.endKey}.txt"`,
+            },
+          });
+        }
+        if (format === "pdf") {
+          return buildTextPdfResponse({
+            title: `${periodTitle} · ${report.rangeLabel}`,
+            body: report.text,
+            filename: `${filePrefix}-${report.endKey}`,
+          });
+        }
+        return NextResponse.json({
+          text: report.text,
+          storeName: `${report.storeCount} lojas`,
+          dateKey: report.endKey,
+          dateLabel: report.rangeLabel,
+          storeCount: report.storeCount,
+          multiStore: true,
+          period: "week",
+        });
+      }
+
       const report = await buildMultiStoreDailyReportText({
         workspaceId: user.workspaceId,
         dateKey,
@@ -78,6 +121,7 @@ export async function GET(req: Request) {
         dateLabel: report.dateLabel,
         storeCount: report.storeCount,
         multiStore: true,
+        period: "day",
       });
     }
 
@@ -85,6 +129,45 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Loja em falta." }, { status: 400 });
     }
     await requireWorkspaceStore(user, storeId, { activeOnly: true });
+
+    if (isWeekly) {
+      const report = await buildWeeklyReportText({
+        workspaceId: user.workspaceId,
+        storeId,
+        endKey: dateKey,
+        storeAccess: user.storeAccess,
+      });
+      if (!report) {
+        return NextResponse.json(
+          { error: "Resumo indisponível." },
+          { status: 404 },
+        );
+      }
+      const safeName = safeExportFilename(report.storeName || "loja");
+      if (format === "txt") {
+        return new NextResponse(report.text, {
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": `attachment; filename="${filePrefix}-${safeName}-${report.endKey}.txt"`,
+          },
+        });
+      }
+      if (format === "pdf") {
+        return buildTextPdfResponse({
+          title: `${periodTitle} · ${report.storeName}`,
+          body: report.text,
+          filename: `${filePrefix}-${safeName}-${report.endKey}`,
+        });
+      }
+      return NextResponse.json({
+        text: report.text,
+        storeName: report.storeName,
+        dateKey: report.endKey,
+        dateLabel: report.rangeLabel,
+        multiStore: false,
+        period: "week",
+      });
+    }
 
     const report = await buildDailyReportText({
       workspaceId: user.workspaceId,
@@ -126,6 +209,7 @@ export async function GET(req: Request) {
       dateKey: report.dateKey,
       dateLabel,
       multiStore: false,
+      period: "day",
     });
   } catch (e) {
     return authErrorResponse(e);
