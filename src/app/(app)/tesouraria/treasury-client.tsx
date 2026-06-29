@@ -59,7 +59,8 @@ export function TreasuryClient() {
   const { data, isError, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["treasury", workspaceId, storeId],
     queryFn: () => fetchTreasury(storeId),
-    refetchInterval: 15 * 1000,
+    placeholderData: (prev) => prev,
+    refetchInterval: 60 * 1000,
   });
 
   const scopeStore = storeId

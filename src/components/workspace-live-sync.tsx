@@ -24,7 +24,19 @@ export function WorkspaceLiveSync() {
         const { rev } = JSON.parse(event.data) as { rev?: string };
         if (!rev) return;
         if (lastRev.current !== null && rev !== lastRev.current) {
-          void queryClient.invalidateQueries();
+          void queryClient.invalidateQueries({
+            predicate: (q) => {
+              const key = q.queryKey[0];
+              return (
+                key === "metrics-summary" ||
+                key === "portfolio-summary" ||
+                key === "treasury" ||
+                key === "metrics-treasury" ||
+                key === "ad-spend-view" ||
+                key === "decision-summary"
+              );
+            },
+          });
           router.refresh();
         }
         lastRev.current = rev;

@@ -120,6 +120,12 @@ const StoreSchema = new Schema(
     lastSessionMetricsError: { type: String, default: null },
     // Fuso IANA da loja (ex. Europe/Brussels) — dias de revenue/orders alinhados com Shopify.
     ianaTimezone: { type: String, default: null },
+    // Origem do fuso: "shopify" (auto, sobrescrito no sync) ou "manual" (override do utilizador).
+    timezoneSource: {
+      type: String,
+      enum: ["shopify", "manual"],
+      default: "shopify",
+    },
     /** Progresso do sync manual em passos (evita timeout em imports grandes). */
     syncState: { type: SyncStateSchema, default: () => ({ status: "idle" }) },
     deletedAt: { type: Date, default: null },

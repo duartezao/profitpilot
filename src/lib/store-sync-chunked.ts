@@ -1,6 +1,6 @@
 import "server-only";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
-import { backfillOrderLinePricesForStore } from "@/lib/order-price-backfill";
+import { backfillOrderLinePricesForStore, ordersNeedLinePriceBackfill } from "@/lib/order-price-backfill";
 import { assimilatePendingCogsForStore } from "@/lib/cogs";
 import {
   assimilatesCogsOnSync,
@@ -12,6 +12,8 @@ import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { Store } from "@/models/Store";
 import { applyOrderFeesFromShopify } from "@/lib/order-fees-from-shopify";
 import {
+  isIncrementalSync,
+  orderSyncSince,
   persistStoreSyncFields,
   prepareShopifySyncContext,
   syncIncomingBalanceTransactions,
@@ -294,21 +296,27 @@ export async function runChunkedSyncStep(
 
     if (phase === "post_orders") {
       await backfillOrderNetRevenueForStore(freshStore._id);
-      await backfillOrderLinePricesForStore(
-        freshStore._id,
-        domain,
-        accessToken,
-      );
+      if (await ordersNeedLinePriceBackfill(freshStore._id)) {
+        await backfillOrderLinePricesForStore(
+          freshStore._id,
+          domain,
+          accessToken,
+        );
+      }
       if (assimilatesCogsOnSync(freshStore.cogsMode)) {
         await assimilatePendingCogsForStore(freshStore._id);
       }
 
+      const feeSince = freshStore.lastSyncAt
+        ? orderSyncSince(freshStore)
+        : null;
       let feesMessage = "";
       try {
         const fees = await applyOrderFeesFromShopify(
           freshStore,
           domain,
           accessToken,
+          { since: feeSince },
         );
         feesMessage =
           fees.real > 0
@@ -332,7 +340,10 @@ export async function runChunkedSyncStep(
       let payoutsError: string | undefined;
 
       try {
-        payouts = await syncPayouts(freshStore, domain, accessToken);
+        const incremental = isIncrementalSync(freshStore);
+        payouts = await syncPayouts(freshStore, domain, accessToken, {
+          maxPages: incremental ? 2 : 6,
+        });
         balanceTransactions = await syncIncomingBalanceTransactions(
           freshStore,
           domain,

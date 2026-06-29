@@ -47,6 +47,21 @@ const deleteSchema = z.object({
   acknowledge: z.literal("yes"),
 });
 
+function isValidIanaTimezone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const timezoneSchema = z.object({
+  storeId: z.string().trim().min(1),
+  // "" = voltar ao fuso automático da Shopify.
+  timezone: z.string().trim().max(64),
+});
+
 function revalidateStorePaths() {
   revalidatePath("/definicoes");
   revalidatePath("/lojas");
@@ -183,6 +198,54 @@ export async function reconfigureStoreImportAction(
   }
 
   return { ok: true, message: parts.join(" ") };
+}
+
+export async function updateStoreTimezoneAction(
+  _prev: StoreDataState,
+  formData: FormData,
+): Promise<StoreDataState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão para alterar o fuso horário." };
+  }
+
+  const parsed = timezoneSchema.safeParse({
+    storeId: formData.get("storeId"),
+    timezone: formData.get("timezone") ?? "",
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+  const { storeId, timezone } = parsed.data;
+
+  await connectToDatabase();
+  const store = await findStoreForUser(user, storeId, "name ianaTimezone");
+  if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
+  if (timezone.length === 0) {
+    // Voltar ao fuso automático da Shopify (re-sincroniza no próximo sync).
+    await Store.updateOne(
+      { _id: store._id },
+      { $set: { timezoneSource: "shopify" } },
+    );
+    revalidateStorePaths();
+    return {
+      ok: true,
+      message: "Fuso horário automático (Shopify) reativado.",
+    };
+  }
+
+  if (!isValidIanaTimezone(timezone)) {
+    return { error: "Fuso horário inválido. Usa um identificador IANA (ex. Europe/Lisbon)." };
+  }
+
+  await Store.updateOne(
+    { _id: store._id },
+    { $set: { ianaTimezone: timezone, timezoneSource: "manual" } },
+  );
+  revalidateStorePaths();
+  return { ok: true, message: `Fuso horário definido para ${timezone}.` };
 }
 
 export async function permanentlyDeleteStoreAction(

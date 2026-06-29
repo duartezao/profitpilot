@@ -71,7 +71,8 @@ export function DashboardClient() {
       isPortfolio
         ? fetchPortfolio(searchParams)
         : fetchSummary(searchParams),
-    refetchInterval: 15 * 1000,
+    placeholderData: (prev) => prev,
+    refetchInterval: 60 * 1000,
   });
 
   const portfolioData =

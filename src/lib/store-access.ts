@@ -19,6 +19,12 @@ export function canAccessStore(
   return storeAccess.includes(storeId);
 }
 
+/** Chave estável para cache (lojas ordenadas). */
+export function serializeStoreAccess(storeAccess: StoreAccess): string {
+  if (storeAccess === "all") return "all";
+  return [...storeAccess].sort().join(",");
+}
+
 /** Filtro MongoDB extra para `Store.find` (null = sem restrição). */
 export function storeAccessMongoFilter(
   storeAccess: StoreAccess,

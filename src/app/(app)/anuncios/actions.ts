@@ -3,6 +3,7 @@
 import mongoose from "mongoose";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import { z } from "zod";
 import { connectToDatabase } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
@@ -206,6 +207,7 @@ export async function saveManualAdSpendAction(
   revalidatePath("/dashboard");
   revalidatePath("/financas");
   revalidatePath("/decisao");
+  invalidateWorkspaceMetricsCache(user.workspaceId);
   return { ok: true };
 }
 
@@ -253,5 +255,6 @@ export async function deleteManualAdSpendAction(
   revalidatePath("/anuncios");
   revalidatePath("/dashboard");
   revalidatePath("/financas");
+  invalidateWorkspaceMetricsCache(user.workspaceId);
   return { ok: true };
 }

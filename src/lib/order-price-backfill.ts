@@ -93,6 +93,34 @@ async function fetchShopifyOrderLinePrices(
   return out;
 }
 
+const ORDER_LINE_PRICE_FILTER = {
+  lineItems: {
+    $elemMatch: {
+      $or: [
+        { unitPrice: { $exists: false } },
+        { unitPrice: null },
+        { unitPrice: 0 },
+      ],
+    },
+  },
+};
+
+/** Há encomendas com preço de linha por corrigir? */
+export async function ordersNeedLinePriceBackfill(
+  storeId: mongoose.Types.ObjectId | string,
+): Promise<boolean> {
+  await connectToDatabase();
+  const storeOid =
+    storeId instanceof Types.ObjectId
+      ? storeId
+      : new mongoose.Types.ObjectId(storeId);
+  const n = await Order.countDocuments({
+    storeId: storeOid,
+    ...ORDER_LINE_PRICE_FILTER,
+  });
+  return n > 0;
+}
+
 export type OrderLinePriceBackfillResult = {
   ordersChecked: number;
   ordersUpdated: number;
@@ -123,7 +151,10 @@ export async function backfillOrderLinePricesForStore(
   let lastId: Types.ObjectId | null = null;
 
   while (true) {
-    const filter: Record<string, unknown> = { storeId: storeOid };
+    const filter: Record<string, unknown> = {
+      storeId: storeOid,
+      ...ORDER_LINE_PRICE_FILTER,
+    };
     if (lastId) filter._id = { $gt: lastId };
 
     const orders = await Order.find(filter)

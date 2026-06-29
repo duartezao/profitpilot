@@ -35,12 +35,17 @@ import {
 import { countSoldVariantsMissingCost, countMissingCogsByDay } from "@/lib/cogs";
 import { ranksProductsByUnits, type CogsMode } from "@/lib/cogs-modes";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
+import { DailyMetric } from "@/models/DailyMetric";
 import {
   resolvePeriodForStore,
   orderDateMatchInTimezone,
   normalizeStoreTimezone,
   dayKeysBetweenInTimezone,
   importDateKey,
+  dateKeyInTimezone,
+  zonedStartOfDay,
+  zonedEndOfDay,
+  DEFAULT_STORE_TIMEZONE,
 } from "@/lib/store-timezone";
 import {
   canAccessStore,
@@ -62,7 +67,6 @@ import {
   aggregateStoreAggsWithKillClip,
 } from "@/lib/operation-metrics";
 import {
-  resolvePeriod,
   orderDateMatch,
   periodDayCount,
   periodIsSingleDay,
@@ -70,6 +74,7 @@ import {
   parseDateInput,
   addDays,
   startOfDay,
+  endOfDay,
   clampSliceToImportFloor,
   earliestImportFloor,
   resolveImportFloor,
@@ -96,7 +101,6 @@ import {
   fmtPoas,
   formatProfitBreakdown,
 } from "@/lib/profit";
-import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
 import { buildStoreColorMap } from "@/lib/store-colors";
 import {
   sumOperatingExpensesByStore,
@@ -1316,6 +1320,47 @@ function dayKeysInSlice(slice: PeriodSlice, storeTimeZone?: string | null): stri
   return keys;
 }
 
+async function loadSnapshotProfitsByDay(
+  storeOids: mongoose.Types.ObjectId[],
+  dateKeys: string[],
+  todayKey: string,
+): Promise<Map<string, number>> {
+  const histKeys = dateKeys.filter((k) => k < todayKey);
+  if (!histKeys.length || !storeOids.length) return new Map();
+
+  const rows = await DailyMetric.find({
+    storeId: storeOids.length === 1 ? storeOids[0] : { $in: storeOids },
+    dateKey: { $in: histKeys },
+  })
+    .select("dateKey netProfit storeId")
+    .lean();
+
+  const out = new Map<string, number>();
+  if (storeOids.length === 1) {
+    for (const r of rows) {
+      out.set(r.dateKey, r.netProfit ?? 0);
+    }
+    return out;
+  }
+  for (const r of rows) {
+    out.set(r.dateKey, (out.get(r.dateKey) ?? 0) + (r.netProfit ?? 0));
+  }
+  return out;
+}
+
+function sliceFromDateKeys(
+  dateKeys: string[],
+  storeTimeZone: string,
+): PeriodSlice {
+  const sorted = [...dateKeys].sort();
+  const start = zonedStartOfDay(sorted[0], storeTimeZone);
+  const end = zonedEndOfDay(sorted[sorted.length - 1], storeTimeZone);
+  if (sorted.length <= 31) {
+    return { start, end, specificDates: sorted };
+  }
+  return { start, end };
+}
+
 async function buildDailyProfitSeries(
   wsId: mongoose.Types.ObjectId,
   storeOids: mongoose.Types.ObjectId[],
@@ -1326,10 +1371,49 @@ async function buildDailyProfitSeries(
   expenseRows: ExpenseLeanRow[] = [],
   expenseStoreId?: string | null,
 ): Promise<ProfitChartPoint[]> {
-  const [orderByDay, adByDay] = await Promise.all([
-    aggregateDailyOrders(wsId, storeOids, slice, storeTimeZone, cogsMode),
-    aggregateDailyAdSpend(storeOids, slice, storeTimeZone),
-  ]);
+  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const dateKeys = dayKeysInSlice(slice, storeTimeZone);
+  const todayKey = tz
+    ? dateKeyInTimezone(new Date(), tz)
+    : formatDateInput(new Date());
+
+  const snapshots = tz
+    ? await loadSnapshotProfitsByDay(storeOids, dateKeys, todayKey)
+    : new Map<string, number>();
+
+  const missingKeys = dateKeys.filter(
+    (k) => k >= todayKey || !snapshots.has(k),
+  );
+
+  let orderByDay = new Map<
+    string,
+    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds" | "orders">
+  >();
+  let adByDay = new Map<string, number>();
+  if (missingKeys.length && tz) {
+    const missingSlice = sliceFromDateKeys(missingKeys, tz);
+    [orderByDay, adByDay] = await Promise.all([
+      aggregateDailyOrders(
+        wsId,
+        storeOids,
+        missingSlice,
+        storeTimeZone,
+        cogsMode,
+      ),
+      aggregateDailyAdSpend(storeOids, missingSlice, storeTimeZone),
+    ]);
+  } else if (missingKeys.length) {
+    [orderByDay, adByDay] = await Promise.all([
+      aggregateDailyOrders(
+        wsId,
+        storeOids,
+        slice,
+        storeTimeZone,
+        cogsMode,
+      ),
+      aggregateDailyAdSpend(storeOids, slice, storeTimeZone),
+    ]);
+  }
 
   const periodOpEx =
     expenseRows.length > 0
@@ -1338,14 +1422,38 @@ async function buildDailyProfitSeries(
   const dayCount = Math.max(dayKeysInSlice(slice, storeTimeZone).length, 1);
   const dayOpEx = periodOpEx / dayCount;
 
-  return dayKeysInSlice(slice, storeTimeZone).map((dateKey) => {
-    const o = orderByDay.get(dateKey) ?? {
-      revenue: 0,
-      cogs: 0,
-      shipping: 0,
-      fees: 0,
-      refunds: 0,
-    };
+  const zeroAgg = {
+    revenue: 0,
+    cogs: 0,
+    shipping: 0,
+    fees: 0,
+    refunds: 0,
+  };
+
+  return dateKeys.map((dateKey) => {
+    const snapProfit = snapshots.get(dateKey);
+    if (snapProfit != null && dateKey < todayKey) {
+      const d = parseDateInput(dateKey);
+      const label = d
+        ? d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })
+        : dateKey;
+      const dateLabel = d
+        ? d.toLocaleDateString("pt-PT", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          })
+        : dateKey;
+      return {
+        dateKey,
+        label,
+        dateLabel,
+        profit: snapProfit,
+        profitFmt: fmtMoney(snapProfit),
+      };
+    }
+
+    const o = orderByDay.get(dateKey) ?? zeroAgg;
     const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
     const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx);
     const d = parseDateInput(dateKey);
@@ -1486,6 +1594,58 @@ async function buildStoreDailyMetrics(
       };
     })
     .reverse();
+}
+
+async function buildStoreSparklinesBatch(
+  wsId: mongoose.Types.ObjectId,
+  stores: StoreCogsCtx[],
+  slice: PeriodSlice,
+  storeTimeZone?: string | null,
+  points = 7,
+): Promise<Map<string, number[]>> {
+  const out = new Map<string, number[]>();
+  if (!stores.length) return out;
+
+  const allKeys = dayKeysInSlice(slice, storeTimeZone);
+  const tailKeys = allKeys.slice(-points);
+  if (!tailKeys.length) {
+    for (const s of stores) out.set(String(s._id), []);
+    return out;
+  }
+
+  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const clippedSlice: PeriodSlice = tz
+    ? sliceFromDateKeys(tailKeys, tz)
+    : {
+        start: startOfDay(parseDateInput(tailKeys[0])!),
+        end: endOfDay(parseDateInput(tailKeys[tailKeys.length - 1])!),
+        specificDates: tailKeys,
+      };
+
+  const storeOids = stores.map((s) => s._id);
+  const [ordersByStoreDay, adByStoreDay] = await Promise.all([
+    aggregateDailyOrdersByStore(wsId, stores, clippedSlice, storeTimeZone),
+    aggregateDailyAdSpendByStore(storeOids, clippedSlice, storeTimeZone),
+  ]);
+
+  const zeroRow = () => ({
+    revenue: 0,
+    cogs: 0,
+    shipping: 0,
+    fees: 0,
+    refunds: 0,
+  });
+
+  for (const s of stores) {
+    const sid = String(s._id);
+    const profits = tailKeys.map((dateKey) => {
+      const o = ordersByStoreDay.get(storeDayKey(dateKey, sid)) ?? zeroRow();
+      const { amount: ad, hasEntry } = resolveDailyAdSpend(adByStoreDay, dateKey);
+      return calcProfit(o, hasEntry ? ad : 0, 0);
+    });
+    out.set(sid, profits);
+  }
+  return out;
 }
 
 async function buildStoreSparkline(
@@ -1750,6 +1910,29 @@ export type WorkspacePnl = {
 };
 
 /**
+ * Fuso para a vista consolidada: o mais comum entre as lojas acessíveis
+ * (determinístico, independente do fuso do servidor). Fallback: default.
+ */
+function dominantStoreTimezone(
+  stores: Array<{ ianaTimezone?: string | null }>,
+): string {
+  const counts = new Map<string, number>();
+  for (const s of stores) {
+    const tz = normalizeStoreTimezone(s.ianaTimezone);
+    counts.set(tz, (counts.get(tz) ?? 0) + 1);
+  }
+  let best = DEFAULT_STORE_TIMEZONE;
+  let bestCount = -1;
+  for (const [tz, n] of counts) {
+    if (n > bestCount) {
+      best = tz;
+      bestCount = n;
+    }
+  }
+  return best;
+}
+
+/**
  * P&L (lucro real) por workspace a partir das orders sincronizadas.
  * Lucro = revenue líquida − COGS − envio − taxas − ad spend.
  */
@@ -1808,10 +1991,10 @@ export async function buildWorkspacePnl(
       ? accessibleStores.find((s) => String(s._id) === storeId)
       : null;
   if (storeId && !scoped) return { ...empty, currency };
-  const storeTz = scoped ? normalizeStoreTimezone(scoped.ianaTimezone) : null;
-  const period = storeTz
-    ? resolvePeriodForStore(periodInput, storeTz)
-    : resolvePeriod(periodInput);
+  const storeTz = scoped
+    ? normalizeStoreTimezone(scoped.ianaTimezone)
+    : dominantStoreTimezone(accessibleStores);
+  const period = resolvePeriodForStore(periodInput, storeTz);
   const days = periodDayCount(period);
   const pnlSlice: PeriodSlice = {
     start: period.start,
@@ -2021,15 +2204,15 @@ export async function buildWorkspaceSummary(
 
   const scopeName = scoped ? scoped.name : null;
   const scopeDomain = scoped ? getStoreDisplayUrl(scoped) : null;
-  const storeTz = scoped ? normalizeStoreTimezone(scoped.ianaTimezone) : null;
+  const storeTz = scoped
+    ? normalizeStoreTimezone(scoped.ianaTimezone)
+    : dominantStoreTimezone(accessibleStores);
   const scopedCogsMode = (scoped?.cogsMode ?? "shopify") as CogsMode;
   const topProductsMode: "profit" | "units" = ranksProductsByUnits(scopedCogsMode)
     ? "units"
     : "profit";
 
-  const period = storeTz
-    ? resolvePeriodForStore(periodInput, storeTz)
-    : resolvePeriod(periodInput);
+  const period = resolvePeriodForStore(periodInput, storeTz);
   const {
     start,
     end,
@@ -2117,9 +2300,7 @@ export async function buildWorkspaceSummary(
   ): Promise<StoreAgg> {
     const match: Record<string, unknown> = {
       workspaceId: wsId,
-      ...(storeTz
-        ? orderDateMatchInTimezone(slice, storeTz)
-        : orderDateMatch(slice)),
+      ...orderDateMatchInTimezone(slice, storeTz),
     };
     if (storeOid) match.storeId = storeOid;
 
@@ -2232,8 +2413,18 @@ export async function buildWorkspaceSummary(
     ? formatMissingCogsWarning(missingCogsCount, scopedCogsMode)
     : formatMissingCogsWarning(missingCogsCount);
 
-  const summaryStores = await Promise.all(
-    stores.map(async (s) => {
+  const sparklinesByStore =
+    !scoped && stores.length > 0
+      ? await buildStoreSparklinesBatch(
+          wsId,
+          stores,
+          effectiveCurrentSlice,
+          storeTz,
+        )
+      : null;
+
+  const summaryStores: SummaryStore[] = stores
+    .map((s) => {
       const a = byStore.get(String(s._id)) ?? {
         revenue: 0,
         cogs: 0,
@@ -2258,12 +2449,7 @@ export async function buildWorkspaceSummary(
         storeAdKnown && storeAd > 0 ? a.revenue / storeAd : null;
       const roas =
         roasNum != null ? roasNum.toFixed(2).replace(".", ",") : "—";
-      const trend = await buildStoreSparkline(
-        wsId,
-        s._id,
-        currentSlice,
-        storeTz,
-      );
+      const trend = sparklinesByStore?.get(String(s._id)) ?? [];
       return {
         storeId: String(s._id),
         name: s.name,
@@ -2283,12 +2469,10 @@ export async function buildWorkspaceSummary(
           roas: roasNum,
         },
       };
-    }),
-  );
+    })
+    .sort((x, y) => y.sort.revenue - x.sort.revenue);
 
-  const sortedStores: SummaryStore[] = summaryStores.sort(
-    (x, y) => y.sort.revenue - x.sort.revenue,
-  );
+  const sortedStores: SummaryStore[] = summaryStores;
 
   const totals = [...byStore.values()].reduce(
     (acc, a) => {
@@ -2315,16 +2499,45 @@ export async function buildWorkspaceSummary(
     formatCurrencyCompact(v, currency);
   const deltaSuffix = `var. % vs ${prevPeriodLabel}`;
 
-  if (scoped) {
-    await backfillOrderNetRevenueForStore(scoped._id);
-  }
+  const profitChartTask = (async (): Promise<{
+    points: ProfitChartPoint[];
+    series?: ProfitChartSeries[];
+  }> => {
+    if (!scoped && stores.length > 1) {
+      const consolidated = await buildConsolidatedDailyProfitSeries(
+        wsId,
+        stores,
+        storeColorMap,
+        chartSlice,
+        fmtMoney,
+        storeTz,
+        expenseRows,
+      );
+      return { points: consolidated.points, series: consolidated.series };
+    }
+    const points = await buildDailyProfitSeries(
+      wsId,
+      storeOids,
+      scoped ? effectiveChartSlice : chartSlice,
+      fmtMoney,
+      storeTz,
+      scoped ? scopedCogsMode : null,
+      expenseRows,
+      scopedStoreId,
+    );
+    return { points };
+  })();
 
   let kpis: SummaryKpi[];
   let extendedKpis: SummaryKpi[] = [];
+  let scopedCurAgg: StoreAgg | null = null;
 
   if (scoped) {
-    const cur = await aggregateOrders(effectiveCurrentSlice, scoped._id);
-    const prev = await aggregateOrders(effectivePrevSlice, scoped._id);
+    const [cur, prev] = await Promise.all([
+      aggregateOrders(effectiveCurrentSlice, scoped._id),
+      aggregateOrders(effectivePrevSlice, scoped._id),
+    ]);
+    scopedCurAgg = cur;
     const curAdSpend = adSpend;
     const curAdSpendForProfit = scopedAdSpendKnown ? curAdSpend : 0;
     const prevAdSpendForProfit = scopedPrevAdSpendKnown ? prevAdSpend : 0;
@@ -2496,30 +2709,9 @@ export async function buildWorkspaceSummary(
   let profitChart: ProfitChartPoint[];
   let profitChartSeries: ProfitChartSeries[] | undefined;
 
-  if (!scoped && stores.length > 1) {
-    const consolidated = await buildConsolidatedDailyProfitSeries(
-      wsId,
-      stores,
-      storeColorMap,
-      chartSlice,
-      fmtMoney,
-      storeTz,
-      expenseRows,
-    );
-    profitChart = consolidated.points;
-    profitChartSeries = consolidated.series;
-  } else {
-    profitChart = await buildDailyProfitSeries(
-      wsId,
-      storeOids,
-      scoped ? effectiveChartSlice : chartSlice,
-      fmtMoney,
-      storeTz,
-      scoped ? scopedCogsMode : null,
-      expenseRows,
-      scopedStoreId,
-    );
-  }
+  const chartBuilt = await profitChartTask;
+  profitChart = chartBuilt.points;
+  profitChartSeries = chartBuilt.series;
 
   // Vista por loja: produtos por lucro + waterfall + payout + métricas diárias.
   let topProducts: TopProduct[] = [];
@@ -2527,26 +2719,76 @@ export async function buildWorkspaceSummary(
   let dailyNotes: StoreDailyNoteView[] = [];
   let dailyMetrics: StoreDailyMetricRow[] = [];
 
-  if (scoped) {
-    const cur = await aggregateOrders(effectiveCurrentSlice, scoped._id);
+  if (scoped && scopedCurAgg) {
+    const cur = scopedCurAgg;
     const curAdSpend = adSpend;
 
-    topProducts =
+    const storeImportFloorKey = importDateKey(
+      scoped.importStartDate,
+      scoped.createdAt,
+      storeTz,
+    );
+
+    const [
+      topProductsResult,
+      storePayouts,
+      dailyNotesResult,
+      funnelCur,
+      funnelPrev,
+      dailyRows,
+    ] = await Promise.all([
       topProductsMode === "units"
-        ? await buildTopProductsByUnits(
+        ? buildTopProductsByUnits(
             scoped._id,
             effectiveCurrentSlice,
             fmtMoney,
             5,
             storeTz,
           )
-        : await buildTopProductsByProfit(
+        : buildTopProductsByProfit(
             scoped._id,
             effectiveCurrentSlice,
             fmtMoney,
             5,
             storeTz,
-          );
+          ),
+      Payout.find({
+        workspaceId: wsId,
+        storeId: scoped._id,
+      }).lean(),
+      fetchStoreDailyNotesForPeriod(
+        wsId,
+        scoped._id,
+        effectiveCurrentSlice,
+      ),
+      aggregateSessionFunnelFromDb(
+        scoped._id,
+        scoped.analyticsSessionCountry,
+        effectiveCurrentSlice,
+        storeImportFloorKey,
+        storeTz,
+      ),
+      aggregateSessionFunnelFromDb(
+        scoped._id,
+        scoped.analyticsSessionCountry,
+        effectivePrevSlice,
+        storeImportFloorKey,
+        storeTz,
+      ),
+      buildStoreDailyMetrics(
+        wsId,
+        scoped._id,
+        effectiveCurrentSlice,
+        fmtMoney,
+        scoped.analyticsSessionCountry,
+        storeTz,
+        scopedCogsMode,
+        expenseRows,
+      ),
+    ]);
+
+    topProducts = topProductsResult;
+    dailyNotes = dailyNotesResult;
 
     const grossRevenue = cur.revenue + cur.refunds;
     const adSpendForWaterfall = scopedAdSpendKnown ? curAdSpend : 0;
@@ -2628,10 +2870,6 @@ export async function buildWorkspaceSummary(
     ];
 
     const payoutAmount = scoped.paymentsBalance ?? 0;
-    const storePayouts = await Payout.find({
-      workspaceId: wsId,
-      storeId: scoped._id,
-    }).lean();
 
     const incomingStatuses = new Set([
       "scheduled",
@@ -2653,44 +2891,9 @@ export async function buildWorkspaceSummary(
       ? new Date(nextPayout.issuedAt)
       : null;
 
-    dailyNotes = await fetchStoreDailyNotesForPeriod(
-      wsId,
-      scoped._id,
-      effectiveCurrentSlice,
-    );
     profitChart = annotateProfitChartNotes(profitChart, dailyNotes);
     profitChart = annotateProfitChartConsolidation(profitChart, refundWindowDays);
 
-    const storeImportFloorKey = scoped
-      ? importDateKey(scoped.importStartDate, scoped.createdAt, storeTz)
-      : null;
-
-    const [funnelCur, funnelPrev, dailyRows] = await Promise.all([
-      aggregateSessionFunnelFromDb(
-        scoped._id,
-        scoped.analyticsSessionCountry,
-        effectiveCurrentSlice,
-        storeImportFloorKey,
-        storeTz,
-      ),
-      aggregateSessionFunnelFromDb(
-        scoped._id,
-        scoped.analyticsSessionCountry,
-        effectivePrevSlice,
-        storeImportFloorKey,
-        storeTz,
-      ),
-      buildStoreDailyMetrics(
-        wsId,
-        scoped._id,
-        effectiveCurrentSlice,
-        fmtMoney,
-        scoped.analyticsSessionCountry,
-        storeTz,
-        scopedCogsMode,
-        expenseRows,
-      ),
-    ]);
     const noteByDate = new Map(dailyNotes.map((n) => [n.date, n]));
     dailyMetrics = dailyRows.map((row) => {
       const note = noteByDate.get(row.dateKey);
