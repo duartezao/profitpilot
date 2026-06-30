@@ -4,7 +4,6 @@ import type { DashboardSummary } from "@/lib/metrics";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
 import { CostBreakdownPanel } from "@/components/dashboard/cost-breakdown-panel";
 import { WaterfallChart } from "@/components/dashboard/waterfall-chart";
-import { PayoutPreviewCard } from "@/components/dashboard/payout-preview-card";
 import { ProductsProfitTable } from "@/components/dashboard/products-profit-table";
 
 export function StoreDashboardView({ data }: { data: DashboardSummary }) {
@@ -37,10 +36,7 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
             <WaterfallChart steps={dashboard.waterfall} />
           </section>
 
-          <div className="grid items-start gap-4">
-            <CostBreakdownPanel data={data.costBreakdown} />
-            <PayoutPreviewCard payout={dashboard.payout} />
-          </div>
+          <CostBreakdownPanel data={data.costBreakdown} />
         </div>
       )}
 

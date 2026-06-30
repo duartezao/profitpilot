@@ -99,7 +99,7 @@ export function DashboardKpiCard({
           </p>
           <Sensitive
             title={title ?? value}
-            className="mt-1 block truncate text-xl font-semibold tabular-nums sm:text-2xl lg:text-3xl"
+            className="mt-1 block text-xl font-semibold tabular-nums leading-tight sm:text-2xl lg:text-3xl"
           >
             {value}
           </Sensitive>
@@ -135,10 +135,10 @@ export function DashboardKpiCard({
           <Sensitive
             title={title ?? value}
             className={cn(
-              "mt-0.5 block truncate font-semibold tabular-nums leading-tight sm:mt-1",
+              "mt-0.5 block font-semibold tabular-nums leading-tight sm:mt-1",
               emphasis
-                ? "text-2xl sm:text-3xl xl:text-4xl"
-                : "text-lg sm:text-xl md:text-2xl xl:text-3xl",
+                ? "text-xl sm:text-2xl lg:text-3xl"
+                : "text-lg sm:text-xl lg:text-2xl",
             )}
           >
             {value}
