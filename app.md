@@ -498,7 +498,7 @@ Cada loja deve ter:
 * **Produtos que vendem mas dão prejuízo** (margem negativa)
 * Mapa/lista de vendas por país
 * Novos clientes vs recorrentes, LTV médio
-* **A receber (payout)**: saldo pendente e data do próximo pagamento da Shopify.
+* Payouts e saldo a receber: página **/payouts** e **/tesouraria** (não na dashboard da loja).
 
 ---
 
@@ -1872,7 +1872,7 @@ Pipeline operacional de dropshipping.
 * **Header**: URL público da loja + período (seletor na topbar).
 * **KPIs**: Net Profit, Margem %, ROAS, BER (com comparação ao período anterior).
 * **Waterfall "Para onde vai o dinheiro"**: Revenue → −COGS → −Envio → −Taxas → −Ad Spend → −Refunds → = Net Profit (barra final verde).
-* **Card "A receber (payout)"**: valor + data do próximo pagamento.
+* **Waterfall** + **Repartição de custos** (sem card de payout na dashboard).
 * **Tabela "Produtos por lucro"**: vendas, margem (vermelho se negativa), lucro.
 
 ## Métricas por loja (`/metricas`)
