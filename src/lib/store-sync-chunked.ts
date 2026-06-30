@@ -1,7 +1,7 @@
 import "server-only";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
 import { backfillOrderLinePricesForStore, ordersNeedLinePriceBackfill } from "@/lib/order-price-backfill";
-import { assimilatePendingCogsForStore } from "@/lib/cogs";
+import { assimilatePendingCogsForStore, countDistinctSoldVariants } from "@/lib/cogs";
 import {
   assimilatesCogsOnSync,
   syncsShopifyProductCosts,
@@ -241,13 +241,18 @@ export async function runChunkedSyncStep(
       );
       const productsImported =
         (store.syncState.productsImported ?? 0) + page.count;
+      const soldTotal = await countDistinctSoldVariants(freshStore._id);
+      const costMsg =
+        soldTotal > 0
+          ? `Custos Shopify: ${productsImported}/${soldTotal} variantes vendidas`
+          : `Custos Shopify: ${productsImported} variantes`;
 
       if (page.hasMore) {
         await patchSyncState(storeId, {
           phase: "products",
           productsImported,
-          progress: Math.min(83, 82 + productsImported / 20),
-          message: `${productsImported} variantes vendidas com custo…`,
+          progress: Math.min(83, 82 + (soldTotal > 0 ? (productsImported / soldTotal) * 8 : 2)),
+          message: `${costMsg}…`,
         });
         return getChunkedSyncStatus(storeId);
       }
