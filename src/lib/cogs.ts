@@ -368,8 +368,8 @@ export async function closeManualCostHistory(
 const SOLD_VARIANT_BATCH = 50;
 
 /**
- * Variantes que aparecem em encomendas mas ainda não têm custo Shopify/manual na BD.
- * Só estas precisam de ser importadas — o catálogo completo não entra no lucro.
+ * Variantes vendidas que ainda não foram consultadas na Shopify (sem registo em ProductCost).
+ * Se já existe registo com custo 0, não voltamos a pedir — evita loop e contador inflado.
  */
 export async function listVariantIdsNeedingCostSync(
   storeId: Types.ObjectId,
@@ -388,16 +388,33 @@ export async function listVariantIdsNeedingCostSync(
   const variantIds = sold.map((r) => String(r._id)).filter(Boolean);
   if (!variantIds.length) return [];
 
-  const withCost = await ProductCost.find({
+  const alreadySynced = await ProductCost.find({
     storeId,
     variantId: { $in: variantIds },
-    $or: [{ unitCost: { $gt: 0 } }, { manualCost: { $gt: 0 } }],
   })
     .select("variantId")
     .lean();
 
-  const satisfied = new Set(withCost.map((c) => String(c.variantId)));
-  return variantIds.filter((id) => !satisfied.has(id)).slice(0, limit);
+  const synced = new Set(alreadySynced.map((c) => String(c.variantId)));
+  return variantIds.filter((id) => !synced.has(id)).slice(0, limit);
+}
+
+/** Total de variantes distintas nas encomendas da loja. */
+export async function countDistinctSoldVariants(
+  storeId: Types.ObjectId,
+): Promise<number> {
+  const rows = await Order.aggregate<{ total: number }>([
+    { $match: { storeId } },
+    { $unwind: "$lineItems" },
+    {
+      $match: {
+        "lineItems.variantId": { $exists: true, $nin: ["", null] },
+      },
+    },
+    { $group: { _id: "$lineItems.variantId" } },
+    { $count: "total" },
+  ]);
+  return rows[0]?.total ?? 0;
 }
 
 /** Carrega resolver para uma loja (sync de encomendas). */
