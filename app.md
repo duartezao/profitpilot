@@ -182,7 +182,7 @@ Futuro:
 * **Sincronização incremental** agendada — **um único pedido Vercel Cron diário às 01:00 UTC** (`/api/cron/sync`) sincroniza em lote todas as lojas ativas de todos os workspaces (compatível com o limite do plano Vercel Hobby). **Depois da primeira sync**, cada execução só pede o **delta** à Shopify:
   * **Encomendas**: `updated_at` desde `lastSyncAt` (−2 h de margem) — apanha vendas novas **e** refunds/alterações sem reimportar o histórico.
   * **Taxas**: balance transactions e encomendas afetadas só desde o mesmo delta (não percorre todas as orders da loja).
-  * **Payouts**: 2 páginas (100 mais recentes) em vez de 6; **produtos/COGS Shopify** saltam em sync incremental (só na primeira sync ou manual completa).
+  * **Payouts**: 2 páginas (100 mais recentes) em vez de 6; **COGS Shopify** só para **variantes vendidas** (não o catálogo inteiro).
   * **Snapshots diários**: no máximo 3 dias em falta por execução (30 na primeira sync).
   * Sessões/funil: dias históricos na BD (gzip); só dias em falta ou o dia atual voltam à Shopify.
 * **Sync manual** (`Sincronizar agora` em `/lojas`) — em passos via `POST /api/stores/[storeId]/sync` (50 encomendas por pedido) com **barra de progresso** e cancelar; usa as mesmas regras incrementais quando `lastSyncAt` já existe. Estado intermédio em `store.syncState`.
