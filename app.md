@@ -185,7 +185,7 @@ Futuro:
   * **Payouts**: 2 páginas (100 mais recentes) em vez de 6; **COGS Shopify** só para **variantes vendidas** (não o catálogo inteiro).
   * **Snapshots diários**: no máximo 3 dias em falta por execução (30 na primeira sync).
   * Sessões/funil: dias históricos na BD (gzip); só dias em falta ou o dia atual voltam à Shopify.
-* **Sync manual** (`Sincronizar agora` em `/lojas`) — em passos via `POST /api/stores/[storeId]/sync` (50 encomendas por pedido) com **barra de progresso** e cancelar; usa as mesmas regras incrementais quando `lastSyncAt` já existe. Estado intermédio em `store.syncState`.
+* **Sync manual** (`Sincronizar agora` em `/lojas`) — em passos via `POST /api/stores/[storeId]/sync` (20 encomendas por pedido) com **barra de progresso** e cancelar. **Primeira sync**: importação completa desde `importStartDate`. **Syncs seguintes** (`lastSyncAt` definido): só encomendas **novas/alteradas** (`updated_at` desde última sync), custos só de **variantes vendidas em falta**, payouts recentes, sessões em falta + hoje. **Retoma** importação interrompida (mantém cursor/fase). Botão mostra «Atualizar dados» quando já houve sync concluída.
 * Estado de sincronização visível por loja (última sync, erros, atraso)
 
 ### Ligação à Shopify — Client ID + Chave secreta (Client Credentials Grant)
