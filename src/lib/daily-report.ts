@@ -267,18 +267,20 @@ export async function buildMultiStoreDailyReportText(opts: {
   const day = parseDateInput(opts.dateKey);
   if (!day) return null;
 
-  const blocks: string[] = [];
-  for (const store of stores) {
-    const report = await buildDailyReportText({
-      workspaceId: opts.workspaceId,
-      storeId: String(store._id),
-      dateKey: opts.dateKey,
-      storeAccess: opts.storeAccess,
-    });
-    if (report?.text.trim()) {
-      blocks.push(report.text.trim());
-    }
-  }
+  const blocks = (
+    await Promise.all(
+      stores.map((store) =>
+        buildDailyReportText({
+          workspaceId: opts.workspaceId,
+          storeId: String(store._id),
+          dateKey: opts.dateKey,
+          storeAccess: opts.storeAccess,
+        }),
+      ),
+    )
+  )
+    .map((report) => report?.text.trim())
+    .filter((text): text is string => Boolean(text));
 
   if (!blocks.length) return null;
 
@@ -447,17 +449,22 @@ export async function buildMultiStoreWeeklyReportText(opts: {
 
   if (!stores.length) return null;
 
+  const reports = await Promise.all(
+    stores.map((store) =>
+      buildWeeklyReportText({
+        workspaceId: opts.workspaceId,
+        storeId: String(store._id),
+        endKey: opts.endKey,
+        storeAccess: opts.storeAccess,
+      }),
+    ),
+  );
+
   const blocks: string[] = [];
   let rangeLabel = "";
   let startKey = opts.endKey;
   let endKey = opts.endKey;
-  for (const store of stores) {
-    const report = await buildWeeklyReportText({
-      workspaceId: opts.workspaceId,
-      storeId: String(store._id),
-      endKey: opts.endKey,
-      storeAccess: opts.storeAccess,
-    });
+  for (const report of reports) {
     if (report?.text.trim()) {
       blocks.push(report.text.trim());
       rangeLabel = report.rangeLabel;

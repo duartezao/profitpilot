@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildWorkspaceTreasury } from "@/lib/treasury";
+import { getCachedWorkspaceTreasury } from "@/lib/treasury-cache";
 import {
   authErrorResponse,
   requireUser,
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const storeId = new URL(request.url).searchParams.get("store") ?? undefined;
     if (storeId) await requireWorkspaceStore(user, storeId, { activeOnly: true });
 
-    const treasury = await buildWorkspaceTreasury(
+    const treasury = await getCachedWorkspaceTreasury(
       user.workspaceId,
       storeId,
       user.storeAccess,

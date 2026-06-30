@@ -87,20 +87,34 @@ export function DashboardKpiCard({
     </Sensitive>
   );
 
-  if (isStore && Icon) {
+  const valueClassName = cn(
+    "mt-1 block font-semibold tabular-nums leading-tight",
+    emphasis
+      ? "text-xl sm:text-2xl"
+      : "text-lg sm:text-xl",
+  );
+
+  if (Icon) {
     return (
-      <div className="relative flex h-full min-w-0 flex-col rounded-lg border border-border bg-surface p-4 sm:p-5">
-        <div className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 sm:right-5 sm:top-5">
-          <Icon className="h-5 w-5 text-accent" />
+      <div
+        className={cn(
+          "relative flex h-full flex-col rounded-lg border bg-surface p-4 sm:p-5",
+          emphasis ? "border-accent/40 ring-1 ring-accent/15" : "border-border",
+        )}
+      >
+        <div className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-accent/10 sm:right-5 sm:top-5 sm:h-10 sm:w-10">
+          <Icon className="h-4 w-4 text-accent sm:h-5 sm:w-5" />
         </div>
-        <div className="min-w-0 pr-12">
-          <p className="truncate text-[13px] font-medium text-muted-foreground">
+        <div className="pr-11 sm:pr-12">
+          <p
+            className={cn(
+              "truncate text-xs font-medium sm:text-[13px]",
+              emphasis ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
             {label}
           </p>
-          <Sensitive
-            title={title ?? value}
-            className="mt-1 block text-xl font-semibold tabular-nums leading-tight sm:text-2xl lg:text-3xl"
-          >
+          <Sensitive title={title ?? value} className={valueClassName}>
             {value}
           </Sensitive>
           {deltaBlock}
@@ -112,40 +126,22 @@ export function DashboardKpiCard({
   return (
     <div
       className={cn(
-        "flex h-full min-w-0 flex-col rounded-lg border bg-surface p-3.5 sm:p-4 lg:p-5",
+        "flex h-full flex-col rounded-lg border bg-surface p-3.5 sm:p-4 lg:p-5",
         emphasis ? "border-accent/40 ring-1 ring-accent/15" : "border-border",
       )}
     >
-      <div className={cn("flex min-w-0 gap-2.5 sm:gap-3", Icon && "items-start")}>
-        {Icon && (
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/10 sm:h-10 sm:w-10">
-            <Icon className="h-4 w-4 text-accent sm:h-5 sm:w-5" />
-          </div>
+      <p
+        className={cn(
+          "truncate text-xs font-medium sm:text-[13px]",
+          emphasis ? "text-foreground" : "text-muted-foreground",
         )}
-
-        <div className="min-w-0 flex-1">
-          <p
-            className={cn(
-              "truncate text-xs font-medium sm:text-[13px]",
-              emphasis ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {label}
-          </p>
-          <Sensitive
-            title={title ?? value}
-            className={cn(
-              "mt-0.5 block font-semibold tabular-nums leading-tight sm:mt-1",
-              emphasis
-                ? "text-xl sm:text-2xl lg:text-3xl"
-                : "text-lg sm:text-xl lg:text-2xl",
-            )}
-          >
-            {value}
-          </Sensitive>
-          {!isStore && deltaBlock}
-        </div>
-      </div>
+      >
+        {label}
+      </p>
+      <Sensitive title={title ?? value} className={valueClassName}>
+        {value}
+      </Sensitive>
+      {!isStore && deltaBlock}
 
       {showSparkline && trend && (
         <div className="mt-2 flex justify-end sm:mt-3" data-sensitive-chart>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/components/workspace-context";
 
@@ -10,7 +9,6 @@ import { useWorkspace } from "@/components/workspace-context";
  * (estado operação, sync, tarefas, etc.) sem recarregar o browser.
  */
 export function WorkspaceLiveSync() {
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { workspaceId } = useWorkspace();
   const lastRev = useRef<string | null>(null);
@@ -37,7 +35,6 @@ export function WorkspaceLiveSync() {
               );
             },
           });
-          router.refresh();
         }
         lastRev.current = rev;
       } catch {
@@ -52,7 +49,7 @@ export function WorkspaceLiveSync() {
     return () => {
       es.close();
     };
-  }, [workspaceId, queryClient, router]);
+  }, [workspaceId, queryClient]);
 
   return null;
 }

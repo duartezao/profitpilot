@@ -20,7 +20,7 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
         extendedKpis={data.extendedKpis}
         funnelError={dashboard?.funnelError}
         sessionCountryLabel={dashboard?.sessionCountryLabel}
-        variant="workspace"
+        variant="store"
         emphasizeLabel="Net Profit"
       />
 

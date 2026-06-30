@@ -8,18 +8,17 @@ import { normalizeStoreAccess, type StoreAccess } from "@/lib/store-access";
 import {
   buildCostBreakdown,
   buildWorkspacePnl,
-  buildWorkspaceSummary,
   type DashboardSummary,
   type ProfitChartPoint,
   type SummaryKpi,
 } from "@/lib/metrics";
+import { getCachedWorkspaceSummary } from "@/lib/metrics-summary-cache";
 import { parsePortfolioParam } from "@/lib/portfolio-scope";
 import { resolvePeriod, formatDateInput, type PeriodInput } from "@/lib/period";
 import { convertToBaseCurrency } from "@/lib/fx";
 import { berRoas, calcNetProfit } from "@/lib/profit";
 import {
   formatCurrency,
-  formatCurrencyCompact,
   formatPercent,
 } from "@/lib/utils";
 import { buildStoreColorMap } from "@/lib/store-colors";
@@ -149,7 +148,7 @@ async function mergePortfolioProfitChart(
       const storeAccess = await membershipStoreAccess(userId, workspaceId);
       const ws = await Workspace.findById(workspaceId).select("baseCurrency").lean();
       const from = ws?.baseCurrency ?? "EUR";
-      const summary = await buildWorkspaceSummary(
+      const summary = await getCachedWorkspaceSummary(
         workspaceId,
         undefined,
         periodInput,
@@ -212,7 +211,7 @@ export async function buildPortfolioSummary(
   const fxDateKey = formatDateInput(period.end);
   const fmtMoney = (v: number) => formatCurrency(v, displayCurrency);
   const money = (v: number): SummaryKpi["value"] =>
-    formatCurrencyCompact(v, displayCurrency);
+    formatCurrency(v, displayCurrency);
 
   const rows: SummaryWorkspace[] = [];
   let totalAgg: MoneyAgg = {
@@ -229,86 +228,99 @@ export async function buildPortfolioSummary(
   let missingCogsMessage = "";
   let missingAdSpendDays = 0;
 
-  for (const workspaceId of workspaceIds) {
-    const meta = wsMeta.get(workspaceId);
-    if (!meta) continue;
+  const workspaceRows = await Promise.all(
+    workspaceIds.map(async (workspaceId) => {
+      const meta = wsMeta.get(workspaceId);
+      if (!meta) return null;
 
-    const storeAccess = await membershipStoreAccess(userId, workspaceId);
-    const pnl = await buildWorkspacePnl(
-      workspaceId,
-      periodInput,
-      undefined,
-      storeAccess,
-    );
+      const storeAccess = await membershipStoreAccess(userId, workspaceId);
+      const [pnl, storeCount] = await Promise.all([
+        buildWorkspacePnl(
+          workspaceId,
+          periodInput,
+          undefined,
+          storeAccess,
+        ),
+        Store.countDocuments({
+          workspaceId: new mongoose.Types.ObjectId(workspaceId),
+          deletedAt: null,
+          ...NON_ARCHIVED_STORE_FILTER,
+        }),
+      ]);
 
-    const storeCount = await Store.countDocuments({
-      workspaceId: new mongoose.Types.ObjectId(workspaceId),
-      deletedAt: null,
-      ...NON_ARCHIVED_STORE_FILTER,
-    });
+      const converted = await convertAgg(
+        {
+          revenue: pnl.totals.revenue,
+          cogs: pnl.totals.cogs,
+          shipping: pnl.totals.shipping,
+          fees: pnl.totals.fees,
+          refunds: pnl.totals.refunds,
+          adSpend: pnl.totals.adSpend,
+          orders: pnl.totals.orders,
+        },
+        pnl.currency,
+        displayCurrency,
+        fxDateKey,
+      );
 
-    const converted = await convertAgg(
-      {
-        revenue: pnl.totals.revenue,
-        cogs: pnl.totals.cogs,
-        shipping: pnl.totals.shipping,
-        fees: pnl.totals.fees,
-        refunds: pnl.totals.refunds,
-        adSpend: pnl.totals.adSpend,
-        orders: pnl.totals.orders,
-      },
-      pnl.currency,
-      displayCurrency,
-      fxDateKey,
-    );
+      const profit = calcNetProfit(converted, converted.adSpend);
+      const marginPct =
+        converted.revenue > 0 ? (profit / converted.revenue) * 100 : 0;
+      const roasNum =
+        converted.adSpend > 0 ? converted.revenue / converted.adSpend : null;
 
-    const profit = calcNetProfit(converted, converted.adSpend);
-    const marginPct =
-      converted.revenue > 0 ? (profit / converted.revenue) * 100 : 0;
-    const roasNum =
-      converted.adSpend > 0 ? converted.revenue / converted.adSpend : null;
+      return {
+        row: {
+          workspaceId,
+          name: meta.name,
+          color: colorMap.get(workspaceId) ?? "#2563EB",
+          revenue: fmtMoney(converted.revenue),
+          profit: fmtMoney(profit),
+          margin: formatPercent(marginPct),
+          adSpend:
+            pnl.missingAdSpendDays > 0 && converted.adSpend === 0
+              ? "—"
+              : fmtMoney(converted.adSpend),
+          roas:
+            roasNum != null ? roasNum.toFixed(2).replace(".", ",") : "—",
+          storeCount,
+          positive: profit >= 0,
+          sort: {
+            revenue: converted.revenue,
+            profit,
+            margin: marginPct,
+            adSpend: converted.adSpend,
+            roas: roasNum,
+          },
+        } satisfies SummaryWorkspace,
+        converted,
+        pnl,
+      };
+    }),
+  );
 
-    rows.push({
-      workspaceId,
-      name: meta.name,
-      color: colorMap.get(workspaceId) ?? "#2563EB",
-      revenue: fmtMoney(converted.revenue),
-      profit: fmtMoney(profit),
-      margin: formatPercent(marginPct),
-      adSpend: pnl.missingAdSpendDays > 0 && converted.adSpend === 0
-        ? "—"
-        : fmtMoney(converted.adSpend),
-      roas:
-        roasNum != null ? roasNum.toFixed(2).replace(".", ",") : "—",
-      storeCount,
-      positive: profit >= 0,
-      sort: {
-        revenue: converted.revenue,
-        profit,
-        margin: marginPct,
-        adSpend: converted.adSpend,
-        roas: roasNum,
-      },
-    });
+  for (const entry of workspaceRows) {
+    if (!entry) continue;
+    rows.push(entry.row);
 
     totalAgg = {
-      revenue: totalAgg.revenue + converted.revenue,
-      cogs: totalAgg.cogs + converted.cogs,
-      shipping: totalAgg.shipping + converted.shipping,
-      fees: totalAgg.fees + converted.fees,
-      refunds: totalAgg.refunds + converted.refunds,
-      adSpend: totalAgg.adSpend + converted.adSpend,
-      orders: totalAgg.orders + converted.orders,
+      revenue: totalAgg.revenue + entry.converted.revenue,
+      cogs: totalAgg.cogs + entry.converted.cogs,
+      shipping: totalAgg.shipping + entry.converted.shipping,
+      fees: totalAgg.fees + entry.converted.fees,
+      refunds: totalAgg.refunds + entry.converted.refunds,
+      adSpend: totalAgg.adSpend + entry.converted.adSpend,
+      orders: totalAgg.orders + entry.converted.orders,
     };
 
-    if (pnl.cogsIncomplete) cogsIncomplete = true;
-    missingCogsCount += pnl.missingCogsCount;
-    if (pnl.missingCogsMessage) {
+    if (entry.pnl.cogsIncomplete) cogsIncomplete = true;
+    missingCogsCount += entry.pnl.missingCogsCount;
+    if (entry.pnl.missingCogsMessage) {
       missingCogsMessage = missingCogsMessage
-        ? `${missingCogsMessage} ${pnl.missingCogsMessage}`
-        : pnl.missingCogsMessage;
+        ? `${missingCogsMessage} ${entry.pnl.missingCogsMessage}`
+        : entry.pnl.missingCogsMessage;
     }
-    missingAdSpendDays += pnl.missingAdSpendDays;
+    missingAdSpendDays += entry.pnl.missingAdSpendDays;
   }
 
   const sorted = rows.sort((a, b) => b.sort.profit - a.sort.profit);

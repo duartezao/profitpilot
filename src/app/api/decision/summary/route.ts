@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildDecisionSummary } from "@/lib/decision";
+import { getCachedDecisionSummary } from "@/lib/decision-summary-cache";
 import {
   authErrorResponse,
   requireUser,
@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     const storeId = params.get("store") ?? undefined;
     if (storeId) await requireWorkspaceStore(user, storeId, { activeOnly: true });
 
-    const data = await buildDecisionSummary(
+    const data = await getCachedDecisionSummary(
       user.workspaceId,
       storeId,
       {

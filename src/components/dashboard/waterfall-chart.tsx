@@ -16,7 +16,7 @@ export function WaterfallChart({ steps }: { steps: WaterfallStep[] }) {
               className="flex min-w-0 flex-1 flex-col items-center gap-2"
             >
               <span
-                className="max-w-full truncate text-[10px] tabular-nums text-muted-foreground sm:text-xs"
+                className="max-w-full whitespace-normal break-words text-center text-[10px] leading-tight tabular-nums text-muted-foreground sm:text-xs"
                 title={step.display}
               >
                 {step.display}

@@ -73,7 +73,7 @@ export function DashboardClient() {
         ? fetchPortfolio(searchParams)
         : fetchSummary(searchParams),
     placeholderData: (prev) => prev,
-    refetchInterval: 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 
   const portfolioData =
