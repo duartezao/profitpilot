@@ -9,6 +9,7 @@ import {
   serializeStoreAccess,
   type StoreAccess,
 } from "@/lib/store-access";
+import { invalidatePortfolioCachesForWorkspace } from "@/lib/portfolio-summary-cache";
 
 const SUMMARY_TTL_SEC = 60;
 
@@ -28,6 +29,7 @@ export function workspaceMetricsCacheTag(workspaceId: string): string {
 /** Invalida cache de summary após sync ou alterações financeiras. */
 export function invalidateWorkspaceMetricsCache(workspaceId: string): void {
   revalidateTag(workspaceMetricsCacheTag(workspaceId), { expire: 0 });
+  invalidatePortfolioCachesForWorkspace(workspaceId);
 }
 
 /**

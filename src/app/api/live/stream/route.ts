@@ -4,7 +4,7 @@ import { getWorkspaceRevision } from "@/lib/workspace-revision";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const POLL_MS = 4_000;
+const POLL_MS = 15_000;
 
 export async function GET(request: Request) {
   try {

@@ -56,7 +56,7 @@ export function DecisaoClient() {
   const { data, isError, isLoading } = useQuery({
     queryKey: ["decision-summary", workspaceId, storeId, periodFromSearchParams(searchParams).key],
     queryFn: () => fetchDecision(searchParams),
-    refetchInterval: 60 * 1000,
+    refetchInterval: 120 * 1000,
   });
 
   const isStore = Boolean(data?.scopeName);

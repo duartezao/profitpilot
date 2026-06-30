@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { buildPortfolioSummary, resolvePortfolioWorkspaceIds } from "@/lib/portfolio-metrics";
+import { resolvePortfolioWorkspaceIds } from "@/lib/portfolio-metrics";
+import { getCachedPortfolioSummary } from "@/lib/portfolio-summary-cache";
 import {
   authErrorResponse,
   requireUser,
@@ -30,16 +31,19 @@ export async function GET(request: Request) {
       );
     }
 
-    const summary = await buildPortfolioSummary(
+    const periodInput = {
+      period: params.get("period"),
+      from: params.get("from"),
+      to: params.get("to"),
+      dates: params.get("dates"),
+    };
+
+    const summary = await getCachedPortfolioSummary(
       user.id,
       user.workspaceId,
       portfolio,
-      {
-        period: params.get("period"),
-        from: params.get("from"),
-        to: params.get("to"),
-        dates: params.get("dates"),
-      },
+      periodInput,
+      ids,
     );
 
     if (!summary) {

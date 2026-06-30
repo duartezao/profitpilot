@@ -2,8 +2,8 @@ import "server-only";
 import { berRoas } from "@/lib/profit";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import {
+  buildStoreProductRanking,
   buildWorkspacePnl,
-  buildWorkspaceSummary,
   type TopProduct,
 } from "@/lib/metrics";
 import { buildWorkspaceTreasury, type WorkspaceTreasury } from "@/lib/treasury";
@@ -207,15 +207,17 @@ export async function buildDecisionSummary(
   periodInput?: PeriodInput,
   storeAccess: StoreAccess = "all",
 ): Promise<DecisionSummary> {
-  const [summary, pnl, treasury] = await Promise.all([
-    buildWorkspaceSummary(workspaceId, storeId, periodInput, storeAccess),
+  const [pnl, treasury, productRanking] = await Promise.all([
     buildWorkspacePnl(workspaceId, periodInput, storeId, storeAccess),
     buildWorkspaceTreasury(workspaceId, storeId, storeAccess).catch(() => null),
+    storeId
+      ? buildStoreProductRanking(workspaceId, storeId, periodInput, 20)
+      : Promise.resolve(null),
   ]);
 
   let rows: DecisionRow[];
-  if (storeId && summary.topProducts.length > 0) {
-    rows = buildProductRows(summary.topProducts);
+  if (storeId && productRanking && productRanking.products.length > 0) {
+    rows = buildProductRows(productRanking.products);
   } else {
     const adMap = new Map(pnl.stores.map((s) => [s.name, s.adSpend]));
     rows = buildStoreRows(pnl.currency, pnl.stores, adMap);
@@ -230,13 +232,15 @@ export async function buildDecisionSummary(
     rows,
     treasury,
     storeId,
-    missingAdSpendDays: summary.missingAdSpendDays,
-    cogsIncomplete: summary.cogsIncomplete,
+    missingAdSpendDays: pnl.missingAdSpendDays,
+    cogsIncomplete: pnl.cogsIncomplete,
   });
 
   return {
-    scopeName: summary.scopeName,
-    periodLabel: summary.storeDashboard?.periodLabel ?? pnl.periodLabel,
+    scopeName: storeId
+      ? (productRanking?.storeName ?? pnl.stores[0]?.name ?? null)
+      : null,
+    periodLabel: productRanking?.periodLabel ?? pnl.periodLabel,
     actions,
     rows,
     treasury: treasury ? treasuryCard(treasury, storeId) : null,

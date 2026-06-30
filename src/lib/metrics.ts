@@ -2583,7 +2583,7 @@ export async function buildWorkspaceSummary(
   const curBer = berRoas(totals);
 
   const money = (v: number): SummaryKpi["value"] =>
-    formatCurrencyCompact(v, currency);
+    formatCurrency(v, currency);
   const deltaSuffix = `var. % vs ${prevPeriodLabel}`;
 
   const profitChartTask = (async (): Promise<{
@@ -2618,6 +2618,7 @@ export async function buildWorkspaceSummary(
   let kpis: SummaryKpi[];
   let extendedKpis: SummaryKpi[] = [];
   let scopedCurAgg: StoreAgg | null = null;
+  let scopedPrevAgg: StoreAgg | null = null;
 
   if (scoped) {
     const [cur, prev] = await Promise.all([
@@ -2625,6 +2626,7 @@ export async function buildWorkspaceSummary(
       aggregateOrders(effectivePrevSlice, scoped._id),
     ]);
     scopedCurAgg = cur;
+    scopedPrevAgg = prev;
     const curAdSpend = adSpend;
     const curAdSpendForProfit = scopedAdSpendKnown ? curAdSpend : 0;
     const prevAdSpendForProfit = scopedPrevAdSpendKnown ? prevAdSpend : 0;
@@ -3049,7 +3051,14 @@ export async function buildWorkspaceSummary(
       funnelError = `${funnelCur.error} (${sessionErr})`;
     }
 
-    const prevForExtended = await aggregateOrders(effectivePrevSlice, scoped._id);
+    const prevForExtended = scopedPrevAgg ?? {
+      revenue: 0,
+      cogs: 0,
+      shipping: 0,
+      fees: 0,
+      refunds: 0,
+      orders: 0,
+    };
     const [adInsightsCur, adInsightsPrev] = await Promise.all([
       aggregateStoreAdInsightsForPeriod(
         String(scoped._id),

@@ -17,28 +17,54 @@ async function latestUpdatedAt(
   return row?.updatedAt?.getTime() ?? 0;
 }
 
+type StoreRevisionAgg = {
+  maxUpdated?: Date;
+  ops?: string[];
+};
+
 /** Assinatura leve para detectar alterações no workspace (SSE live sync). */
 export async function getWorkspaceRevision(workspaceId: string): Promise<string> {
   await connectToDatabase();
   const wsOid = new mongoose.Types.ObjectId(workspaceId);
   const base = { workspaceId: wsOid, deletedAt: null };
 
-  const [storeTs, taskTs, collectionTs, storeOps] = await Promise.all([
+  const [storeTs, taskTs, collectionTs, storeAgg] = await Promise.all([
     latestUpdatedAt(Store, base),
     latestUpdatedAt(OperationTask, base),
     latestUpdatedAt(TestCollection, base),
-    Store.find(base)
-      .select("operationStatus operationKilledAt updatedAt")
-      .lean(),
+    Store.aggregate<StoreRevisionAgg>([
+      { $match: base },
+      { $sort: { _id: 1 } },
+      {
+        $group: {
+          _id: null,
+          maxUpdated: { $max: "$updatedAt" },
+          ops: {
+            $push: {
+              $concat: [
+                { $toString: "$_id" },
+                ":",
+                { $ifNull: ["$operationStatus", ""] },
+                ":",
+                {
+                  $toString: {
+                    $ifNull: [{ $toLong: "$operationKilledAt" }, 0],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    ]),
   ]);
 
-  const opsSig = storeOps
-    .map(
-      (s) =>
-        `${s._id}:${s.operationStatus ?? ""}:${s.operationKilledAt?.getTime() ?? 0}`,
-    )
-    .sort()
-    .join("|");
+  const storeRow = storeAgg[0];
+  const storeRevisionTs = Math.max(
+    storeTs,
+    storeRow?.maxUpdated?.getTime() ?? 0,
+  );
+  const opsSig = storeRow?.ops?.join("|") ?? "";
 
-  return `${storeTs}-${taskTs}-${collectionTs}-${opsSig}`;
+  return `${storeRevisionTs}-${taskTs}-${collectionTs}-${opsSig}`;
 }
