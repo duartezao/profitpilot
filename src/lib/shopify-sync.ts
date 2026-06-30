@@ -254,6 +254,131 @@ export async function syncProductCosts(
   return { count, changedVariantIds };
 }
 
+/** Uma página de variantes (sync em passos — evita timeout em serverless). */
+export async function syncProductCostsPage(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+  cursor: string | null,
+): Promise<{
+  count: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+  changedVariantIds: string[];
+}> {
+  const query = `query($cursor: String) {
+    productVariants(first: 50, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        title
+        price
+        product { id title }
+        inventoryItem { unitCost { amount } }
+      }
+    }
+  }`;
+
+  type Resp = {
+    productVariants: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      nodes: Array<{
+        id: string;
+        title: string;
+        price: string;
+        product: { id: string; title: string } | null;
+        inventoryItem: { unitCost: { amount: string } | null } | null;
+      }>;
+    };
+  };
+
+  const existing = await ProductCost.find({ storeId: store._id })
+    .select("variantId unitCost price")
+    .lean();
+  const prevCosts = new Map(
+    existing.map((c) => [String(c.variantId), num(c.unitCost)]),
+  );
+  const prevPrices = new Map(
+    existing.map((c) => [String(c.variantId), num(c.price)]),
+  );
+
+  const data: Resp = await shopifyGraphQL<Resp>(domain, token, query, {
+    cursor,
+  });
+  const conn = data.productVariants;
+  const changedVariantIds: string[] = [];
+
+  const ops = conn.nodes.map((v) => {
+    const newCost = num(v.inventoryItem?.unitCost?.amount);
+    const newPrice = num(v.price);
+    return {
+      updateOne: {
+        filter: { storeId: store._id, variantId: v.id },
+        update: {
+          $set: {
+            storeId: store._id,
+            variantId: v.id,
+            productId: v.product?.id,
+            title: v.product?.title
+              ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
+              : v.title,
+            price: newPrice,
+            unitCost: newCost,
+            currency: store.currency,
+          },
+        },
+        upsert: true,
+      },
+      newCost,
+      newPrice,
+      productId: v.product?.id,
+      variantId: v.id,
+    };
+  });
+
+  if (ops.length) {
+    const effectiveFrom = new Date();
+    await ProductCost.bulkWrite(
+      ops.map(({ updateOne }) => ({ updateOne })),
+      { ordered: false },
+    );
+    for (const op of ops) {
+      const variantId = String(op.variantId);
+      const prevCost = prevCosts.get(variantId);
+      const costChanged = prevCost === undefined || prevCost !== op.newCost;
+      if (costChanged) {
+        await recordShopifyCostChange(
+          store._id,
+          variantId,
+          op.newCost,
+          prevCost === undefined ? new Date(0) : effectiveFrom,
+          op.productId,
+        );
+        changedVariantIds.push(variantId);
+      }
+
+      const prevPrice = prevPrices.get(variantId);
+      const priceChanged = prevPrice === undefined || prevPrice !== op.newPrice;
+      if (priceChanged) {
+        await recordShopifyPriceChange(
+          store._id,
+          variantId,
+          op.newPrice,
+          prevPrice === undefined ? new Date(0) : effectiveFrom,
+          op.productId,
+        );
+      }
+    }
+  }
+
+  return {
+    count: ops.length,
+    hasMore: conn.pageInfo.hasNextPage,
+    nextCursor: conn.pageInfo.endCursor,
+    changedVariantIds,
+  };
+}
+
 export type OrdersPageResult = {
   imported: number;
   nextCursor: string | null;
@@ -301,6 +426,7 @@ export async function syncOrdersPage(
   domain: string,
   token: string,
   cursor: string | null,
+  pageSize = 50,
 ): Promise<OrdersPageResult> {
   const resolveCost = await loadCostResolverForStore(store._id);
   const workspace = await Workspace.findById(store.workspaceId)
@@ -314,8 +440,8 @@ export async function syncOrdersPage(
   // Desde quando importar: incremental (updated_at) ou primeira sync (created_at).
   const searchQuery = orderSyncSearchQuery(store);
 
-  const query = `query($cursor: String, $q: String) {
-    orders(first: 50, after: $cursor, query: $q, sortKey: CREATED_AT) {
+  const query = `query($cursor: String, $q: String, $first: Int!) {
+    orders(first: $first, after: $cursor, query: $q, sortKey: CREATED_AT) {
       pageInfo { hasNextPage endCursor }
       nodes {
         id
@@ -373,6 +499,7 @@ export async function syncOrdersPage(
   const data: Resp = await shopifyGraphQL<Resp>(domain, token, query, {
     cursor,
     q: searchQuery,
+    first: pageSize,
   });
   const conn = data.orders;
 

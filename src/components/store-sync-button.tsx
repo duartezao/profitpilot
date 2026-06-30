@@ -26,6 +26,14 @@ async function parseSyncResponse(
   res: Response,
 ): Promise<ChunkedSyncStatus & { error?: string }> {
   const text = await res.text();
+  if (
+    text.includes("FUNCTION_INVOCATION_TIMEOUT") ||
+    res.status === 504
+  ) {
+    throw new Error(
+      "O servidor demorou demasiado (limite Vercel). A continuar no próximo passo…",
+    );
+  }
   let data: ChunkedSyncStatus & { error?: string };
   try {
     data = JSON.parse(text) as ChunkedSyncStatus & { error?: string };
@@ -90,7 +98,17 @@ export function StoreSyncButton({
       setState(status);
 
       while (status.continue && !abortRef.current) {
-        status = await callSync("step");
+        try {
+          status = await callSync("step");
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "";
+          if (msg.includes("limite Vercel") && !abortRef.current) {
+            await new Promise((r) => setTimeout(r, 800));
+            status = await callSync("step");
+          } else {
+            throw e;
+          }
+        }
         setState(status);
       }
 
@@ -146,7 +164,17 @@ export function StoreSyncButton({
 
           let status = data;
           while (status.continue && !abortRef.current && !cancelled) {
-            status = await callSync("step");
+            try {
+              status = await callSync("step");
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : "";
+              if (msg.includes("limite Vercel") && !abortRef.current) {
+                await new Promise((r) => setTimeout(r, 800));
+                status = await callSync("step");
+              } else {
+                throw e;
+              }
+            }
             if (cancelled) return;
             setState(status);
           }

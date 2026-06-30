@@ -8,7 +8,7 @@ import {
 } from "@/lib/cogs-modes";
 import { connectToDatabase } from "@/lib/db";
 import { enhancePayoutsError } from "@/lib/shopify-scopes";
-import { syncSessionMetricsForStore } from "@/lib/session-metrics";
+import { syncSessionMetricsChunk } from "@/lib/session-metrics";
 import { Store } from "@/models/Store";
 import { applyOrderFeesFromShopify } from "@/lib/order-fees-from-shopify";
 import {
@@ -19,16 +19,20 @@ import {
   syncIncomingBalanceTransactions,
   syncOrdersPage,
   syncPayouts,
-  syncProductCosts,
+  syncProductCostsPage,
 } from "@/lib/shopify-sync";
 
 export type ChunkedSyncPhase =
   | "products"
   | "orders"
-  | "post_orders"
+  | "post_orders_backfill"
+  | "post_orders_fees"
   | "payouts"
   | "sessions"
   | "done";
+
+/** Páginas de encomendas por passo — menor para caber no timeout Vercel Hobby (~10s). */
+const CHUNKED_ORDERS_PAGE_SIZE = 20;
 
 export type ChunkedSyncStatus = {
   status: "idle" | "running" | "done" | "error";
@@ -46,7 +50,7 @@ export type ChunkedSyncStatus = {
   continue: boolean;
 };
 
-const STALE_MS = 20 * 60 * 1000;
+const STALE_MS = 3 * 60 * 1000;
 
 function orderProgress(pagesDone: number): number {
   return Math.min(82, 10 + pagesDone * 1.2);
@@ -155,6 +159,8 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
     progress: 2,
     message: "A ligar à Shopify…",
     orderCursor: null,
+    productCursor: null,
+    sessionRangeIndex: 0,
     orderPagesDone: 0,
     ordersImported: 0,
     productsImported: 0,
@@ -229,6 +235,7 @@ export async function runChunkedSyncStep(
           progress: 10,
           message: "A importar encomendas…",
           productsImported: 0,
+          productCursor: null,
           orderCursor: null,
           orderPagesDone: 0,
           ordersImported: 0,
@@ -236,11 +243,26 @@ export async function runChunkedSyncStep(
         return getChunkedSyncStatus(storeId);
       }
 
-      const { count: products } = await syncProductCosts(
+      const productCursor = store.syncState.productCursor ?? null;
+      const page = await syncProductCostsPage(
         freshStore,
         domain,
         accessToken,
+        productCursor,
       );
+      const productsImported =
+        (store.syncState.productsImported ?? 0) + page.count;
+
+      if (page.hasMore) {
+        await patchSyncState(storeId, {
+          phase: "products",
+          productCursor: page.nextCursor,
+          productsImported,
+          progress: Math.min(9, 3 + productsImported / 50),
+          message: `${productsImported} variantes importadas…`,
+        });
+        return getChunkedSyncStatus(storeId);
+      }
 
       if (assimilatesCogsOnSync(freshStore.cogsMode)) {
         await assimilatePendingCogsForStore(freshStore._id);
@@ -250,7 +272,8 @@ export async function runChunkedSyncStep(
         phase: "orders",
         progress: 10,
         message: "A importar encomendas…",
-        productsImported: products,
+        productsImported,
+        productCursor: null,
         orderCursor: null,
         orderPagesDone: 0,
         ordersImported: 0,
@@ -265,6 +288,7 @@ export async function runChunkedSyncStep(
         domain,
         accessToken,
         cursor,
+        CHUNKED_ORDERS_PAGE_SIZE,
       );
 
       const pagesDone = (store.syncState.orderPagesDone ?? 0) + 1;
@@ -284,7 +308,7 @@ export async function runChunkedSyncStep(
       }
 
       await patchSyncState(storeId, {
-        phase: "post_orders",
+        phase: "post_orders_backfill",
         orderCursor: null,
         orderPagesDone: pagesDone,
         ordersImported,
@@ -294,7 +318,7 @@ export async function runChunkedSyncStep(
       return getChunkedSyncStatus(storeId);
     }
 
-    if (phase === "post_orders") {
+    if (phase === "post_orders_backfill") {
       await backfillOrderNetRevenueForStore(freshStore._id);
       if (await ordersNeedLinePriceBackfill(freshStore._id)) {
         await backfillOrderLinePricesForStore(
@@ -307,6 +331,15 @@ export async function runChunkedSyncStep(
         await assimilatePendingCogsForStore(freshStore._id);
       }
 
+      await patchSyncState(storeId, {
+        phase: "post_orders_fees",
+        progress: 85,
+        message: "A calcular taxas…",
+      });
+      return getChunkedSyncStatus(storeId);
+    }
+
+    if (phase === "post_orders_fees") {
       const feeSince = freshStore.lastSyncAt
         ? orderSyncSince(freshStore)
         : null;
@@ -330,6 +363,7 @@ export async function runChunkedSyncStep(
         phase: "payouts",
         progress: 86,
         message: `A importar payouts…${feesMessage}`,
+        sessionRangeIndex: 0,
       });
       return getChunkedSyncStatus(storeId);
     }
@@ -376,11 +410,22 @@ export async function runChunkedSyncStep(
     }
 
     if (phase === "sessions") {
-      let sessionDays = 0;
+      const rangeIndex = store.syncState.sessionRangeIndex ?? 0;
+      let sessionDays = store.syncState.sessionDaysSynced ?? 0;
       let sessionError: string | undefined;
       try {
-        const sm = await syncSessionMetricsForStore(storeId);
-        sessionDays = sm.synced;
+        const chunk = await syncSessionMetricsChunk(storeId, rangeIndex);
+        sessionDays += chunk.synced;
+        if (!chunk.done) {
+          await patchSyncState(storeId, {
+            phase: "sessions",
+            sessionRangeIndex: chunk.nextRangeIndex,
+            sessionDaysSynced: sessionDays,
+            progress: Math.min(98, 92 + chunk.nextRangeIndex * 2),
+            message: `Sessões (${chunk.nextRangeIndex}/${chunk.totalRanges})…`,
+          });
+          return getChunkedSyncStatus(storeId);
+        }
         freshStore.lastSessionMetricsError = null;
       } catch (e) {
         sessionError =
