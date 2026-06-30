@@ -66,6 +66,7 @@ export function StoreSyncButton({
   const queryClient = useQueryClient();
   const [state, setState] = useState<ChunkedSyncStatus>(IDLE);
   const [pending, setPending] = useState(false);
+  const [incremental, setIncremental] = useState(false);
   const abortRef = useRef(false);
   const runningRef = useRef(false);
 
@@ -96,6 +97,7 @@ export function StoreSyncButton({
     try {
       let status = await callSync("start");
       setState(status);
+      setIncremental(Boolean(status.incremental));
 
       while (status.continue && !abortRef.current) {
         try {
@@ -110,6 +112,7 @@ export function StoreSyncButton({
           }
         }
         setState(status);
+        setIncremental(Boolean(status.incremental));
       }
 
       if (status.status === "done") {
@@ -158,6 +161,7 @@ export function StoreSyncButton({
         }
         if (data.status === "running" && data.continue) {
           setState(data);
+          setIncremental(Boolean(data.incremental));
           setPending(true);
           runningRef.current = true;
           abortRef.current = false;
@@ -177,12 +181,15 @@ export function StoreSyncButton({
             }
             if (cancelled) return;
             setState(status);
+            setIncremental(Boolean(status.incremental));
           }
 
           if (status.status === "done") {
             invalidateMetrics();
             onDone?.();
           }
+        } else {
+          setIncremental(Boolean(data.incremental));
         }
       } catch {
         /* ignorar — utilizador pode iniciar manualmente */
@@ -213,7 +220,11 @@ export function StoreSyncButton({
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-60"
         >
           <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-          {syncing ? "A sincronizar…" : "Sincronizar agora"}
+          {syncing
+            ? state.message || "A sincronizar…"
+            : incremental
+              ? "Atualizar dados"
+              : "Sincronizar agora"}
         </button>
         {syncing && (
           <button

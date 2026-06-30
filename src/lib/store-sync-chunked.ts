@@ -1,10 +1,11 @@
 import "server-only";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
 import { backfillOrderLinePricesForStore, ordersNeedLinePriceBackfill } from "@/lib/order-price-backfill";
-import { assimilatePendingCogsForStore, countDistinctSoldVariants } from "@/lib/cogs";
+import { assimilatePendingCogsForStore, countDistinctSoldVariants, listVariantIdsNeedingCostSync } from "@/lib/cogs";
 import {
   assimilatesCogsOnSync,
   syncsShopifyProductCosts,
+  type CogsMode,
 } from "@/lib/cogs-modes";
 import { connectToDatabase } from "@/lib/db";
 import { enhancePayoutsError } from "@/lib/shopify-scopes";
@@ -48,31 +49,32 @@ export type ChunkedSyncStatus = {
   error: string | null;
   resultSummary: string | null;
   continue: boolean;
+  /** true = só delta desde a última sync concluída */
+  incremental?: boolean;
 };
 
-const STALE_MS = 3 * 60 * 1000;
+const STALE_MS = 10 * 60 * 1000;
 
-function orderProgress(pagesDone: number): number {
-  return Math.min(82, 10 + pagesDone * 1.2);
-}
-
-function readSyncStatus(store: {
-  syncState?: {
-    status?: string;
-    phase?: string | null;
-    progress?: number;
-    message?: string;
-    ordersImported?: number;
-    orderPagesDone?: number;
-    productsImported?: number;
-    payoutsImported?: number;
-    balanceTransactionsImported?: number;
-    sessionDaysSynced?: number;
-    error?: string | null;
-    resultSummary?: string | null;
-    updatedAt?: Date | null;
-  };
-}): ChunkedSyncStatus {
+function readSyncStatus(
+  store: {
+    lastSyncAt?: Date | null;
+    syncState?: {
+      status?: string;
+      phase?: string | null;
+      progress?: number;
+      message?: string;
+      ordersImported?: number;
+      orderPagesDone?: number;
+      productsImported?: number;
+      payoutsImported?: number;
+      balanceTransactionsImported?: number;
+      sessionDaysSynced?: number;
+      error?: string | null;
+      resultSummary?: string | null;
+      updatedAt?: Date | null;
+    };
+  },
+): ChunkedSyncStatus {
   const s = store.syncState ?? { status: "idle" };
   const status = (s.status ?? "idle") as ChunkedSyncStatus["status"];
   return {
@@ -89,7 +91,57 @@ function readSyncStatus(store: {
     error: s.error ?? null,
     resultSummary: s.resultSummary ?? null,
     continue: status === "running",
+    incremental: Boolean(store.lastSyncAt),
   };
+}
+
+function canResumeInitialSync(store: {
+  lastSyncAt?: Date | null;
+  syncState?: {
+    status?: string;
+    phase?: string | null;
+    orderCursor?: string | null;
+    ordersImported?: number;
+    orderPagesDone?: number;
+    updatedAt?: Date | null;
+  };
+}): boolean {
+  if (store.lastSyncAt) return false;
+  const s = store.syncState;
+  if (!s?.phase || s.phase === "done") return false;
+  if (s.status === "running" && !isStaleRunning(store)) return false;
+  const started =
+    Boolean(s.orderCursor) ||
+    (s.ordersImported ?? 0) > 0 ||
+    (s.orderPagesDone ?? 0) > 0 ||
+    (s.phase !== "orders" && s.phase !== "done");
+  return (
+    started &&
+    (s.status === "error" || s.status === "running" || isStaleRunning(store))
+  );
+}
+
+async function touchSyncHeartbeat(storeId: string): Promise<void> {
+  await Store.updateOne(
+    { _id: storeId },
+    { $set: { "syncState.updatedAt": new Date() } },
+  );
+}
+
+function orderProgress(pagesDone: number, incremental: boolean): number {
+  if (incremental) {
+    return Math.min(70, 15 + pagesDone * 8);
+  }
+  return Math.min(82, 10 + pagesDone * 1.2);
+}
+
+async function needsSoldProductCostSync(
+  storeId: import("mongoose").Types.ObjectId,
+  cogsMode: CogsMode | null | undefined,
+): Promise<boolean> {
+  if (!syncsShopifyProductCosts(cogsMode)) return false;
+  const ids = await listVariantIdsNeedingCostSync(storeId, 1);
+  return ids.length > 0;
 }
 
 function isStaleRunning(store: {
@@ -123,7 +175,9 @@ export async function getChunkedSyncStatus(
   storeId: string,
 ): Promise<ChunkedSyncStatus> {
   await connectToDatabase();
-  const store = await Store.findById(storeId).select("syncState").lean();
+  const store = await Store.findById(storeId)
+    .select("syncState lastSyncAt")
+    .lean();
   if (!store) throw new Error("Loja não encontrada.");
   return readSyncStatus(store);
 }
@@ -141,7 +195,7 @@ export async function cancelChunkedSync(storeId: string): Promise<ChunkedSyncSta
   return getChunkedSyncStatus(storeId);
 }
 
-/** Inicia sync em passos: encomendas primeiro, depois COGS das variantes vendidas. */
+/** Inicia sync: retoma importação interrompida, atualização incremental ou importação inicial. */
 export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStatus> {
   await connectToDatabase();
   const existing = await Store.findById(storeId);
@@ -151,12 +205,24 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
     return readSyncStatus(existing);
   }
 
+  if (canResumeInitialSync(existing)) {
+    await patchSyncState(storeId, {
+      status: "running",
+      message: "A retomar importação onde parou…",
+      error: null,
+    });
+    return getChunkedSyncStatus(storeId);
+  }
+
+  const incremental = isIncrementalSync(existing);
   const startedAt = new Date();
   await patchSyncState(storeId, {
     status: "running",
     phase: "orders",
-    progress: 2,
-    message: "A ligar à Shopify…",
+    progress: incremental ? 12 : 2,
+    message: incremental
+      ? "A buscar encomendas novas ou alteradas…"
+      : "Importação inicial — encomendas…",
     orderCursor: null,
     productCursor: null,
     sessionRangeIndex: 0,
@@ -173,17 +239,6 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
 
   try {
     await prepareShopifySyncContext(storeId);
-
-    await patchSyncState(storeId, {
-      phase: "orders",
-      progress: 10,
-      message: "A importar encomendas…",
-      productsImported: 0,
-      orderCursor: null,
-      orderPagesDone: 0,
-      ordersImported: 0,
-    });
-
     return getChunkedSyncStatus(storeId);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao iniciar sync.";
@@ -210,19 +265,15 @@ export async function runChunkedSyncStep(
   if (store.syncState?.status !== "running") {
     return readSyncStatus(store);
   }
-  if (isStaleRunning(store)) {
-    await patchSyncState(storeId, {
-      status: "error",
-      error: "Sync interrompido (timeout). Clica novamente para recomeçar.",
-    });
-    return getChunkedSyncStatus(storeId);
-  }
+
+  await touchSyncHeartbeat(storeId);
 
   const phase = store.syncState.phase as ChunkedSyncPhase | null;
 
   try {
     const { store: freshStore, domain, accessToken } =
       await prepareShopifySyncContext(storeId);
+    const incremental = isIncrementalSync(freshStore);
 
     if (phase === "products") {
       if (!syncsShopifyProductCosts(freshStore.cogsMode)) {
@@ -295,30 +346,41 @@ export async function runChunkedSyncStep(
           orderCursor: page.nextCursor,
           orderPagesDone: pagesDone,
           ordersImported,
-          progress: orderProgress(pagesDone),
-          message: `${ordersImported} encomendas importadas…`,
+          progress: orderProgress(pagesDone, incremental),
+          message: incremental
+            ? `${ordersImported} encomendas atualizadas…`
+            : `${ordersImported} encomendas importadas…`,
         });
         return getChunkedSyncStatus(storeId);
       }
 
+      const wantProductCosts = await needsSoldProductCostSync(
+        freshStore._id,
+        freshStore.cogsMode as CogsMode | null | undefined,
+      );
+
       await patchSyncState(storeId, {
-        phase: syncsShopifyProductCosts(freshStore.cogsMode)
-          ? "products"
-          : "post_orders_backfill",
+        phase: wantProductCosts ? "products" : "post_orders_backfill",
         orderCursor: null,
         orderPagesDone: pagesDone,
         ordersImported,
-        progress: syncsShopifyProductCosts(freshStore.cogsMode) ? 82 : 84,
-        message: syncsShopifyProductCosts(freshStore.cogsMode)
-          ? "A importar custos de produtos vendidos…"
-          : "A finalizar encomendas…",
+        progress: wantProductCosts ? (incremental ? 72 : 82) : incremental ? 78 : 84,
+        message: wantProductCosts
+          ? incremental
+            ? "A importar custos de produtos novos…"
+            : "A importar custos de produtos vendidos…"
+          : incremental
+            ? "A finalizar atualização…"
+            : "A finalizar encomendas…",
         productsImported: 0,
       });
       return getChunkedSyncStatus(storeId);
     }
 
     if (phase === "post_orders_backfill") {
-      await backfillOrderNetRevenueForStore(freshStore._id);
+      if (!incremental) {
+        await backfillOrderNetRevenueForStore(freshStore._id);
+      }
       if (await ordersNeedLinePriceBackfill(freshStore._id)) {
         await backfillOrderLinePricesForStore(
           freshStore._id,
@@ -326,14 +388,17 @@ export async function runChunkedSyncStep(
           accessToken,
         );
       }
-      if (assimilatesCogsOnSync(freshStore.cogsMode)) {
+      if (
+        assimilatesCogsOnSync(freshStore.cogsMode) &&
+        !syncsShopifyProductCosts(freshStore.cogsMode)
+      ) {
         await assimilatePendingCogsForStore(freshStore._id);
       }
 
       await patchSyncState(storeId, {
         phase: "post_orders_fees",
-        progress: 85,
-        message: "A calcular taxas…",
+        progress: incremental ? 82 : 85,
+        message: incremental ? "A atualizar taxas…" : "A calcular taxas…",
       });
       return getChunkedSyncStatus(storeId);
     }
@@ -361,7 +426,9 @@ export async function runChunkedSyncStep(
       await patchSyncState(storeId, {
         phase: "payouts",
         progress: 86,
-        message: `A importar payouts…${feesMessage}`,
+        message: incremental
+          ? `A atualizar payouts…${feesMessage}`
+          : `A importar payouts…${feesMessage}`,
         sessionRangeIndex: 0,
       });
       return getChunkedSyncStatus(storeId);
@@ -400,8 +467,8 @@ export async function runChunkedSyncStep(
 
       await patchSyncState(storeId, {
         phase: "sessions",
-        progress: 92,
-        message: "A importar sessões…",
+        progress: incremental ? 90 : 92,
+        message: incremental ? "A atualizar sessões…" : "A importar sessões…",
         payoutsImported: payouts,
         balanceTransactionsImported: balanceTransactions,
       });
@@ -442,9 +509,13 @@ export async function runChunkedSyncStep(
         ? `sessões: erro — ${sessionError}`
         : `${sessionDays} dia${sessionDays === 1 ? "" : "s"} de sessões`;
 
-      const summary = payoutsErr
-        ? `${orders} orders · ${products} produtos · ${sessionPart} · payouts: ${payoutsErr}`
-        : `${orders} orders · ${products} produtos · ${sessionPart} · ${payouts} payouts · ${balance} pendentes`;
+      const summary = incremental
+        ? payoutsErr
+          ? `Atualizado · ${orders} encomendas · ${sessionPart} · payouts: ${payoutsErr}`
+          : `Atualizado · ${orders} encomendas${products > 0 ? ` · ${products} custos novos` : ""} · ${sessionPart}`
+        : payoutsErr
+          ? `${orders} orders · ${products} produtos · ${sessionPart} · payouts: ${payoutsErr}`
+          : `${orders} orders · ${products} produtos · ${sessionPart} · ${payouts} payouts · ${balance} pendentes`;
 
       await persistStoreSyncFields(freshStore._id, {
         lastSyncAt: new Date(),
@@ -456,10 +527,12 @@ export async function runChunkedSyncStep(
         status: "done",
         phase: "done",
         progress: 100,
-        message: "Concluído",
+        message: incremental ? "Atualização concluída" : "Concluído",
         sessionDaysSynced: sessionDays,
         resultSummary: summary,
         error: null,
+        orderCursor: null,
+        productCursor: null,
       });
 
       return getChunkedSyncStatus(storeId);
