@@ -365,6 +365,41 @@ export async function closeManualCostHistory(
   await closeOpenHistory(storeId, variantId, "manual", effectiveTo);
 }
 
+const SOLD_VARIANT_BATCH = 50;
+
+/**
+ * Variantes que aparecem em encomendas mas ainda não têm custo Shopify/manual na BD.
+ * Só estas precisam de ser importadas — o catálogo completo não entra no lucro.
+ */
+export async function listVariantIdsNeedingCostSync(
+  storeId: Types.ObjectId,
+  limit = SOLD_VARIANT_BATCH,
+): Promise<string[]> {
+  const sold = await Order.aggregate<{ _id: string }>([
+    { $match: { storeId } },
+    { $unwind: "$lineItems" },
+    {
+      $match: {
+        "lineItems.variantId": { $exists: true, $nin: ["", null] },
+      },
+    },
+    { $group: { _id: "$lineItems.variantId" } },
+  ]);
+  const variantIds = sold.map((r) => String(r._id)).filter(Boolean);
+  if (!variantIds.length) return [];
+
+  const withCost = await ProductCost.find({
+    storeId,
+    variantId: { $in: variantIds },
+    $or: [{ unitCost: { $gt: 0 } }, { manualCost: { $gt: 0 } }],
+  })
+    .select("variantId")
+    .lean();
+
+  const satisfied = new Set(withCost.map((c) => String(c.variantId)));
+  return variantIds.filter((id) => !satisfied.has(id)).slice(0, limit);
+}
+
 /** Carrega resolver para uma loja (sync de encomendas). */
 export async function loadCostResolverForStore(
   storeId: Types.ObjectId,

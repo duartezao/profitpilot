@@ -19,7 +19,7 @@ import {
   syncIncomingBalanceTransactions,
   syncOrdersPage,
   syncPayouts,
-  syncProductCostsPage,
+  syncSoldProductCostsPage,
 } from "@/lib/shopify-sync";
 
 export type ChunkedSyncPhase =
@@ -141,7 +141,7 @@ export async function cancelChunkedSync(storeId: string): Promise<ChunkedSyncSta
   return getChunkedSyncStatus(storeId);
 }
 
-/** Inicia sync em passos: produtos + estado para encomendas paginadas. */
+/** Inicia sync em passos: encomendas primeiro, depois COGS das variantes vendidas. */
 export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStatus> {
   await connectToDatabase();
   const existing = await Store.findById(storeId);
@@ -151,11 +151,10 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
     return readSyncStatus(existing);
   }
 
-  const skipProducts = !syncsShopifyProductCosts(existing.cogsMode);
   const startedAt = new Date();
   await patchSyncState(storeId, {
     status: "running",
-    phase: skipProducts ? "orders" : "products",
+    phase: "orders",
     progress: 2,
     message: "A ligar à Shopify…",
     orderCursor: null,
@@ -173,15 +172,12 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
   });
 
   try {
-    const { store } = await prepareShopifySyncContext(storeId);
-    const skipProducts = !syncsShopifyProductCosts(store.cogsMode);
+    await prepareShopifySyncContext(storeId);
 
     await patchSyncState(storeId, {
-      phase: skipProducts ? "orders" : "products",
-      progress: skipProducts ? 10 : 5,
-      message: skipProducts
-        ? "A importar encomendas…"
-        : "A importar custos de produtos…",
+      phase: "orders",
+      progress: 10,
+      message: "A importar encomendas…",
       productsImported: 0,
       orderCursor: null,
       orderPagesDone: 0,
@@ -231,24 +227,17 @@ export async function runChunkedSyncStep(
     if (phase === "products") {
       if (!syncsShopifyProductCosts(freshStore.cogsMode)) {
         await patchSyncState(storeId, {
-          phase: "orders",
-          progress: 10,
-          message: "A importar encomendas…",
-          productsImported: 0,
-          productCursor: null,
-          orderCursor: null,
-          orderPagesDone: 0,
-          ordersImported: 0,
+          phase: "post_orders_backfill",
+          progress: 84,
+          message: "A finalizar encomendas…",
         });
         return getChunkedSyncStatus(storeId);
       }
 
-      const productCursor = store.syncState.productCursor ?? null;
-      const page = await syncProductCostsPage(
+      const page = await syncSoldProductCostsPage(
         freshStore,
         domain,
         accessToken,
-        productCursor,
       );
       const productsImported =
         (store.syncState.productsImported ?? 0) + page.count;
@@ -256,27 +245,27 @@ export async function runChunkedSyncStep(
       if (page.hasMore) {
         await patchSyncState(storeId, {
           phase: "products",
-          productCursor: page.nextCursor,
           productsImported,
-          progress: Math.min(9, 3 + productsImported / 50),
-          message: `${productsImported} variantes importadas…`,
+          progress: Math.min(83, 82 + productsImported / 20),
+          message: `${productsImported} variantes vendidas com custo…`,
         });
         return getChunkedSyncStatus(storeId);
       }
 
       if (assimilatesCogsOnSync(freshStore.cogsMode)) {
-        await assimilatePendingCogsForStore(freshStore._id);
+        await assimilatePendingCogsForStore(
+          freshStore._id,
+          page.changedVariantIds.length
+            ? { variantIds: page.changedVariantIds }
+            : undefined,
+        );
       }
 
       await patchSyncState(storeId, {
-        phase: "orders",
-        progress: 10,
-        message: "A importar encomendas…",
+        phase: "post_orders_backfill",
+        progress: 84,
+        message: "A finalizar encomendas…",
         productsImported,
-        productCursor: null,
-        orderCursor: null,
-        orderPagesDone: 0,
-        ordersImported: 0,
       });
       return getChunkedSyncStatus(storeId);
     }
@@ -308,12 +297,17 @@ export async function runChunkedSyncStep(
       }
 
       await patchSyncState(storeId, {
-        phase: "post_orders_backfill",
+        phase: syncsShopifyProductCosts(freshStore.cogsMode)
+          ? "products"
+          : "post_orders_backfill",
         orderCursor: null,
         orderPagesDone: pagesDone,
         ordersImported,
-        progress: 84,
-        message: "A finalizar encomendas…",
+        progress: syncsShopifyProductCosts(freshStore.cogsMode) ? 82 : 84,
+        message: syncsShopifyProductCosts(freshStore.cogsMode)
+          ? "A importar custos de produtos vendidos…"
+          : "A finalizar encomendas…",
+        productsImported: 0,
       });
       return getChunkedSyncStatus(storeId);
     }

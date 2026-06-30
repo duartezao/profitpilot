@@ -28,8 +28,8 @@ import {
   applyLineUnitCost,
   applyLineUnitPrice,
   assimilatePendingCogsForStore,
+  listVariantIdsNeedingCostSync,
   loadCostResolverForStore,
-  mergeAssimilateResults,
   recordShopifyCostChange,
   recordShopifyPriceChange,
 } from "@/lib/cogs";
@@ -124,7 +124,7 @@ function normPayoutStatus(s?: string | null) {
   return (s ?? "").toLowerCase();
 }
 
-/** Importa/atualiza o custo por variante (COGS) de todas as variantes. */
+/** @deprecated Importa o catálogo inteiro — usar syncSoldProductCostsPage / syncAllSoldProductCosts. */
 export async function syncProductCosts(
   store: StoreDoc,
   domain: string,
@@ -377,6 +377,159 @@ export async function syncProductCostsPage(
     nextCursor: conn.pageInfo.endCursor,
     changedVariantIds,
   };
+}
+
+type ShopifyVariantCostNode = {
+  id: string;
+  title: string;
+  price: string;
+  product: { id: string; title: string } | null;
+  inventoryItem: { unitCost: { amount: string } | null } | null;
+};
+
+/** Grava custos/preços de variantes na BD e regista histórico. */
+async function upsertProductCostNodes(
+  store: StoreDoc,
+  nodes: ShopifyVariantCostNode[],
+): Promise<{ count: number; changedVariantIds: string[] }> {
+  if (!nodes.length) return { count: 0, changedVariantIds: [] };
+
+  const existing = await ProductCost.find({ storeId: store._id })
+    .select("variantId unitCost price")
+    .lean();
+  const prevCosts = new Map(
+    existing.map((c) => [String(c.variantId), num(c.unitCost)]),
+  );
+  const prevPrices = new Map(
+    existing.map((c) => [String(c.variantId), num(c.price)]),
+  );
+
+  const ops = nodes.map((v) => {
+    const newCost = num(v.inventoryItem?.unitCost?.amount);
+    const newPrice = num(v.price);
+    return {
+      updateOne: {
+        filter: { storeId: store._id, variantId: v.id },
+        update: {
+          $set: {
+            storeId: store._id,
+            variantId: v.id,
+            productId: v.product?.id,
+            title: v.product?.title
+              ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
+              : v.title,
+            price: newPrice,
+            unitCost: newCost,
+            currency: store.currency,
+          },
+        },
+        upsert: true,
+      },
+      newCost,
+      newPrice,
+      productId: v.product?.id,
+      variantId: v.id,
+    };
+  });
+
+  const changedVariantIds: string[] = [];
+  const effectiveFrom = new Date();
+  await ProductCost.bulkWrite(
+    ops.map(({ updateOne }) => ({ updateOne })),
+    { ordered: false },
+  );
+
+  for (const op of ops) {
+    const variantId = String(op.variantId);
+    const prevCost = prevCosts.get(variantId);
+    const costChanged = prevCost === undefined || prevCost !== op.newCost;
+    if (costChanged) {
+      await recordShopifyCostChange(
+        store._id,
+        variantId,
+        op.newCost,
+        prevCost === undefined ? new Date(0) : effectiveFrom,
+        op.productId,
+      );
+      changedVariantIds.push(variantId);
+    }
+
+    const prevPrice = prevPrices.get(variantId);
+    const priceChanged = prevPrice === undefined || prevPrice !== op.newPrice;
+    if (priceChanged) {
+      await recordShopifyPriceChange(
+        store._id,
+        variantId,
+        op.newPrice,
+        prevPrice === undefined ? new Date(0) : effectiveFrom,
+        op.productId,
+      );
+    }
+  }
+
+  return { count: ops.length, changedVariantIds };
+}
+
+/**
+ * Importa custos Shopify só para variantes vendidas (sem custo na BD).
+ * Um passo — para sync em chunks no Hobby.
+ */
+export async function syncSoldProductCostsPage(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+): Promise<{ count: number; hasMore: boolean; changedVariantIds: string[] }> {
+  const variantIds = await listVariantIdsNeedingCostSync(store._id);
+  if (!variantIds.length) {
+    return { count: 0, hasMore: false, changedVariantIds: [] };
+  }
+
+  const query = `query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        id
+        title
+        price
+        product { id title }
+        inventoryItem { unitCost { amount } }
+      }
+    }
+  }`;
+
+  type Resp = {
+    nodes: Array<ShopifyVariantCostNode | null>;
+  };
+
+  const data = await shopifyGraphQL<Resp>(domain, token, query, {
+    ids: variantIds,
+  });
+  const nodes = data.nodes.filter(
+    (n): n is ShopifyVariantCostNode => n != null && Boolean(n.id),
+  );
+  const { count, changedVariantIds } = await upsertProductCostNodes(
+    store,
+    nodes,
+  );
+
+  const remaining = await listVariantIdsNeedingCostSync(store._id, 1);
+  return { count, hasMore: remaining.length > 0, changedVariantIds };
+}
+
+/** Importa custos de todas as variantes vendidas em falta (cron / sync completa). */
+export async function syncAllSoldProductCosts(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+): Promise<{ count: number; changedVariantIds: string[] }> {
+  let total = 0;
+  const changedVariantIds: string[] = [];
+  for (let step = 0; step < 200; step++) {
+    const page = await syncSoldProductCostsPage(store, domain, token);
+    total += page.count;
+    changedVariantIds.push(...page.changedVariantIds);
+    if (!page.hasMore) break;
+  }
+  return { count: total, changedVariantIds };
 }
 
 export type OrdersPageResult = {
@@ -988,20 +1141,22 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   const feeSince = store.lastSyncAt ? orderSyncSince(store) : null;
 
   let products = 0;
-  if (!incremental && syncsShopifyProductCosts(store.cogsMode)) {
-    const result = await syncProductCosts(store, domain, accessToken);
-    products = result.count;
-  }
   const assimilateCogs = assimilatesCogsOnSync(store.cogsMode);
-  const assimilatedBefore =
-    !incremental && assimilateCogs
-      ? await assimilatePendingCogsForStore(store._id)
-      : { ordersUpdated: 0, linesFilled: 0 };
   const orders = await syncOrders(store, domain, accessToken);
-  const assimilatedAfter = assimilateCogs
-    ? await assimilatePendingCogsForStore(store._id)
+
+  let changedVariantIds: string[] = [];
+  if (syncsShopifyProductCosts(store.cogsMode)) {
+    const sold = await syncAllSoldProductCosts(store, domain, accessToken);
+    products = sold.count;
+    changedVariantIds = sold.changedVariantIds;
+  }
+
+  const assimilated = assimilateCogs
+    ? await assimilatePendingCogsForStore(
+        store._id,
+        changedVariantIds.length ? { variantIds: changedVariantIds } : undefined,
+      )
     : { ordersUpdated: 0, linesFilled: 0 };
-  const assimilated = mergeAssimilateResults(assimilatedBefore, assimilatedAfter);
 
   let orderFeesReal = 0;
   let orderFeesEstimated = 0;
