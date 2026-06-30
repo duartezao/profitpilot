@@ -179,7 +179,7 @@ Futuro:
 
 * **Webhooks** para eventos em tempo real (`orders/create`, `orders/updated`, `refunds/create`, `products/update`)
 * **Sincronização inicial histórica** ao adicionar uma loja — com opção de escolher o **dia de início** (importar tudo o disponível **ou** apenas a partir de uma data X, ex.: "só desde 01/01/2026")
-* **Sincronização incremental** agendada — **um único pedido Vercel Cron de 4 em 4 horas** (`/api/cron/sync`) sincroniza em lote todas as lojas ativas de todos os workspaces. **Depois da primeira sync**, cada execução só pede o **delta** à Shopify:
+* **Sincronização incremental** agendada — **um único pedido Vercel Cron diário às 01:00 UTC** (`/api/cron/sync`) sincroniza em lote todas as lojas ativas de todos os workspaces (compatível com o limite do plano Vercel Hobby). **Depois da primeira sync**, cada execução só pede o **delta** à Shopify:
   * **Encomendas**: `updated_at` desde `lastSyncAt` (−2 h de margem) — apanha vendas novas **e** refunds/alterações sem reimportar o histórico.
   * **Taxas**: balance transactions e encomendas afetadas só desde o mesmo delta (não percorre todas as orders da loja).
   * **Payouts**: 2 páginas (100 mais recentes) em vez de 6; **produtos/COGS Shopify** saltam em sync incremental (só na primeira sync ou manual completa).
@@ -632,7 +632,7 @@ Principais dificuldades: 0
 | CPC, CTR, CPM | Métricas das contas de ads ligadas |
 | Produtos/Coleções testadas, próxima coleção, best-seller, OBS, dificuldades | **Campos da nota diária** (preenchidos por ti) |
 
-> **Funil (sessões, ATC %, checkout %, CVR %):** vêm da Shopify (ShopifyQL via Admin GraphQL **2025-10+**, scope `read_reports`), **filtradas pelo país escolhido uma vez por loja** em Definições → «País das sessões» (ex. Bélgica = `BE`; vazio = mundo inteiro). Query: `FROM sessions … WHERE session_country_code = 'BE' SINCE … UNTIL … TIMESERIES day` (ordem ShopifyQL obrigatória). Os dados ficam **guardados na BD** em blobs mensais gzip (`session_metrics_months`, chave `countryKey`) — o relatório e a dashboard **só leem da BD**; dias históricos não voltam a ser pedidos à Shopify (sync automático cron 4 h preenche dias em falta). Se o sync falhou antes, dias com zeros são re-pedidos na próxima sync. REV, REFUNDS, PROFIT e ADSPEND **não** usam este filtro — vêm das orders/ad spend da loja. CPC/CTR/CPM vêm das contas de ads.
+> **Funil (sessões, ATC %, checkout %, CVR %):** vêm da Shopify (ShopifyQL via Admin GraphQL **2025-10+**, scope `read_reports`), **filtradas pelo país escolhido uma vez por loja** em Definições → «País das sessões» (ex. Bélgica = `BE`; vazio = mundo inteiro). Query: `FROM sessions … WHERE session_country_code = 'BE' SINCE … UNTIL … TIMESERIES day` (ordem ShopifyQL obrigatória). Os dados ficam **guardados na BD** em blobs mensais gzip (`session_metrics_months`, chave `countryKey`) — o relatório e a dashboard **só leem da BD**; dias históricos não voltam a ser pedidos à Shopify (sync automático diário às 01:00 UTC preenche dias em falta). Se o sync falhou antes, dias com zeros são re-pedidos na próxima sync. REV, REFUNDS, PROFIT e ADSPEND **não** usam este filtro — vêm das orders/ad spend da loja. CPC/CTR/CPM vêm das contas de ads.
 
 ## Separação por plataforma (Google vs Facebook)
 
@@ -1292,7 +1292,7 @@ Lucro após taxas =
 * `timezoneSource` (`shopify` = sincronizado automaticamente da Shopify no sync; `manual` = override do utilizador em Definições → Lojas, **não é** sobrescrito pelo sync). Volta a `shopify` escolhendo «Automático (Shopify)».
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
 * `paymentsBalance` / `paymentsBalanceUpdatedAt` (saldo Shopify Payments ainda por pagar)
-* `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — intervalo automático **global** 4 h (`GLOBAL_SYNC_INTERVAL_MINUTES`, `vercel.json` cron); `syncIntervalMinutes` legado na BD
+* `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — sincronização automática **global diária às 01:00 UTC** (`vercel.json` cron, limite Vercel Hobby); `syncIntervalMinutes` legado na BD
 * `syncState` — progresso do sync manual em passos (`status`, `phase`, `progress`, `orderCursor`, contagens, `message`)
 * `createdAt`
 * `deletedAt`
@@ -1363,7 +1363,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `blob` (gzip de tuplas `[dia, sessões, cart, checkout, concluídas]`)
 * `updatedAt`
 
-> A dashboard **nunca** pede sessões à Shopify em tempo real. Só o sync (manual ou cron 4 h) preenche dias em falta; dias históricos já guardados não são re-pedidos. COGS, orders e ad spend continuam a calcular-se em tempo real a partir da BD.
+> A dashboard **nunca** pede sessões à Shopify em tempo real. Só o sync (manual ou cron diário às 01:00 UTC) preenche dias em falta; dias históricos já guardados não são re-pedidos. COGS, orders e ad spend continuam a calcular-se em tempo real a partir da BD.
 
 ## orders
 
