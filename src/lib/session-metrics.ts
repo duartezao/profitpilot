@@ -368,6 +368,110 @@ export async function syncSessionMetricsForStore(
   return { synced, skipped: keysToSync.length - missing.length };
 }
 
+export type SessionMetricsChunkResult = {
+  synced: number;
+  done: boolean;
+  nextRangeIndex: number;
+  totalRanges: number;
+};
+
+/** Um intervalo de dias por passo (evita timeout em serverless). */
+export async function syncSessionMetricsChunk(
+  storeId: string,
+  rangeIndex: number,
+): Promise<SessionMetricsChunkResult> {
+  await connectToDatabase();
+  const store = await Store.findById(storeId);
+  if (!store || store.platform !== "shopify") {
+    return { synced: 0, done: true, nextRangeIndex: 0, totalRanges: 0 };
+  }
+
+  const countryKey = sessionCountryKey(store.analyticsSessionCountry);
+  const tz = normalizeStoreTimezone(store.ianaTimezone);
+  const range = resolveSyncRange(
+    store.importStartDate,
+    store.createdAt,
+    tz,
+  );
+  const allKeys = dayKeysBetweenInTimezone(range.from, range.to, tz);
+
+  const todayKey = dateKeyInTimezone(startOfDay(new Date()), tz);
+  const keysToSync = [...allKeys];
+  if (!keysToSync.includes(todayKey)) {
+    keysToSync.push(todayKey);
+  }
+
+  const stored = await loadMonthDays(
+    store._id,
+    countryKey,
+    [...new Set(keysToSync.map(monthKeyFromDateKey))],
+  );
+
+  const hadError = Boolean(store.lastSessionMetricsError);
+  const missing = keysToSync.filter((k) => {
+    const existing = stored.get(k);
+    if (!existing) return true;
+    if (!isHistoricalDay(k, tz)) return true;
+    if (hadError && isAllZero(existing)) return true;
+    return false;
+  });
+
+  if (!missing.length) {
+    await Store.updateOne(
+      { _id: store._id },
+      { lastSessionMetricsAt: new Date(), lastSessionMetricsError: null },
+    );
+    return { synced: 0, done: true, nextRangeIndex: 0, totalRanges: 0 };
+  }
+
+  const ranges = groupContiguousRanges(missing, tz);
+  if (rangeIndex >= ranges.length) {
+    await Store.updateOne(
+      { _id: store._id },
+      { lastSessionMetricsAt: new Date(), lastSessionMetricsError: null },
+    );
+    return {
+      synced: 0,
+      done: true,
+      nextRangeIndex: rangeIndex,
+      totalRanges: ranges.length,
+    };
+  }
+
+  const { since, until } = ranges[rangeIndex]!;
+  const rows = await fetchDailySessionMetricsFromShopify(store, since, until);
+  const byKey = new Map(rows.map((r) => [r.dateKey, r]));
+  const rangeMissing = missing.filter((k) => k >= since && k <= until);
+  const toWrite = rangeMissing.map((dateKey) => {
+    const hit = byKey.get(dateKey);
+    if (hit) return hit;
+    return {
+      dateKey,
+      sessions: 0,
+      cart: 0,
+      checkout: 0,
+      completed: 0,
+    };
+  });
+  const synced = await upsertDayRows(store._id, countryKey, toWrite);
+  const nextIndex = rangeIndex + 1;
+  const done = nextIndex >= ranges.length;
+
+  if (done) {
+    await Store.updateOne(
+      { _id: store._id },
+      { lastSessionMetricsAt: new Date(), lastSessionMetricsError: null },
+    );
+  }
+
+  return {
+    synced,
+    done,
+    nextRangeIndex: nextIndex,
+    totalRanges: ranges.length,
+  };
+}
+
 /** Agrega funil a partir da BD — sem pedidos à Shopify. */
 export async function aggregateSessionFunnelFromDb(
   storeId: Types.ObjectId,

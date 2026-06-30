@@ -31,6 +31,8 @@ const SyncStateSchema = new Schema(
     progress: { type: Number, default: 0 },
     message: { type: String, default: "" },
     orderCursor: { type: String, default: null },
+    productCursor: { type: String, default: null },
+    sessionRangeIndex: { type: Number, default: 0 },
     orderPagesDone: { type: Number, default: 0 },
     ordersImported: { type: Number, default: 0 },
     productsImported: { type: Number, default: 0 },

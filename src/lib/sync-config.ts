@@ -1,7 +1,7 @@
 /** Intervalo global de sync automático (todas as lojas / todos os workspaces). */
 export function getGlobalSyncIntervalMinutes(): number {
-  const raw = Number(process.env.GLOBAL_SYNC_INTERVAL_MINUTES ?? 240);
-  if (!Number.isFinite(raw) || raw < 60) return 240;
+  const raw = Number(process.env.GLOBAL_SYNC_INTERVAL_MINUTES ?? 1440);
+  if (!Number.isFinite(raw) || raw < 60) return 1440;
   return Math.min(raw, 24 * 60);
 }
 
