@@ -533,7 +533,12 @@ export async function syncAllSoldProductCosts(
 }
 
 export type OrdersPageResult = {
+  /** Total processadas nesta página */
   imported: number;
+  /** Novas na BD */
+  inserted: number;
+  /** Já existiam — só actualizadas */
+  updated: number;
   nextCursor: string | null;
   hasMore: boolean;
 };
@@ -562,15 +567,15 @@ export function orderSyncSince(
   );
 }
 
-/** Query Shopify: incremental por `updated_at`; primeira sync por `created_at`. */
+/** Query Shopify: incremental por `updated_at`; primeira sync por `created_at`. Exclui anuladas. */
 export function orderSyncSearchQuery(
   store: Pick<StoreDoc, "lastSyncAt" | "importStartDate">,
 ): string {
   const since = orderSyncSince(store);
-  if (store.lastSyncAt) {
-    return `updated_at:>=${since.toISOString()}`;
-  }
-  return `created_at:>=${since.toISOString()}`;
+  const base = store.lastSyncAt
+    ? `updated_at:>=${since.toISOString()}`
+    : `created_at:>=${since.toISOString()}`;
+  return `${base} -financial_status:voided`;
 }
 
 /** Uma página de encomendas (50) — taxas aplicadas depois via balance transactions. */
@@ -689,9 +694,15 @@ export async function syncOrdersPage(
     }
 
     const ops: AnyBulkWriteOperation[] = [];
+    let inserted = 0;
+    let updated = 0;
 
     for (const o of conn.nodes) {
+      const finStatus = (o.displayFinancialStatus ?? "").toLowerCase();
+      if (finStatus === "voided" || finStatus === "expired") continue;
+
       const orderDate = new Date(o.createdAt);
+      const isNew = !existingMap.has(o.id);
       const prevLine = existingMap.get(o.id);
       const lineItems = o.lineItems.nodes.map((li) => {
         const variantId = li.variant?.id ?? "";
@@ -773,16 +784,19 @@ export async function syncOrdersPage(
           upsert: true,
         },
       });
+      if (isNew) inserted += 1;
+      else updated += 1;
     }
 
-  let imported = 0;
+  const imported = inserted + updated;
   if (ops.length) {
     await Order.bulkWrite(ops as AnyBulkWriteOperation[], { ordered: false });
-    imported = ops.length;
   }
 
   return {
     imported,
+    inserted,
+    updated,
     nextCursor: conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null,
     hasMore: conn.pageInfo.hasNextPage,
   };

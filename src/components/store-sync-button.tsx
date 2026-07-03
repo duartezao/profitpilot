@@ -12,6 +12,7 @@ const IDLE: ChunkedSyncStatus = {
   progress: 0,
   message: "",
   ordersImported: 0,
+  ordersUpdated: 0,
   orderPagesDone: 0,
   productsImported: 0,
   payoutsImported: 0,
