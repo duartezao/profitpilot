@@ -35,6 +35,7 @@ const SyncStateSchema = new Schema(
     sessionRangeIndex: { type: Number, default: 0 },
     orderPagesDone: { type: Number, default: 0 },
     ordersImported: { type: Number, default: 0 },
+    ordersUpdated: { type: Number, default: 0 },
     productsImported: { type: Number, default: 0 },
     payoutsImported: { type: Number, default: 0 },
     balanceTransactionsImported: { type: Number, default: 0 },

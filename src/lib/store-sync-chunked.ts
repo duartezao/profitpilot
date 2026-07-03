@@ -41,6 +41,7 @@ export type ChunkedSyncStatus = {
   progress: number;
   message: string;
   ordersImported: number;
+  ordersUpdated: number;
   orderPagesDone: number;
   productsImported: number;
   payoutsImported: number;
@@ -64,6 +65,7 @@ function readSyncStatus(
       progress?: number;
       message?: string;
       ordersImported?: number;
+      ordersUpdated?: number;
       orderPagesDone?: number;
       productsImported?: number;
       payoutsImported?: number;
@@ -83,6 +85,7 @@ function readSyncStatus(
     progress: s.progress ?? 0,
     message: s.message ?? "",
     ordersImported: s.ordersImported ?? 0,
+    ordersUpdated: s.ordersUpdated ?? 0,
     orderPagesDone: s.orderPagesDone ?? 0,
     productsImported: s.productsImported ?? 0,
     payoutsImported: s.payoutsImported ?? 0,
@@ -126,6 +129,27 @@ async function touchSyncHeartbeat(storeId: string): Promise<void> {
     { _id: storeId },
     { $set: { "syncState.updatedAt": new Date() } },
   );
+}
+
+function formatOrderSyncLabel(
+  inserted: number,
+  updated: number,
+  incremental: boolean,
+): string {
+  if (inserted === 0 && updated === 0) {
+    return "Sem alterações nas encomendas";
+  }
+  if (incremental) {
+    if (inserted === 0) {
+      return `${updated} encomenda${updated === 1 ? "" : "s"} actualizada${updated === 1 ? "" : "s"}`;
+    }
+    if (updated === 0) {
+      return `${inserted} encomenda${inserted === 1 ? "" : "s"} nova${inserted === 1 ? "" : "s"}`;
+    }
+    return `${inserted} nova${inserted === 1 ? "" : "s"} · ${updated} actualizada${updated === 1 ? "" : "s"}`;
+  }
+  const total = inserted + updated;
+  return `${total} encomenda${total === 1 ? "" : "s"} importada${total === 1 ? "" : "s"}`;
 }
 
 function orderProgress(pagesDone: number, incremental: boolean): number {
@@ -228,6 +252,7 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
     sessionRangeIndex: 0,
     orderPagesDone: 0,
     ordersImported: 0,
+    ordersUpdated: 0,
     productsImported: 0,
     payoutsImported: 0,
     balanceTransactionsImported: 0,
@@ -338,7 +363,14 @@ export async function runChunkedSyncStep(
 
       const pagesDone = (store.syncState.orderPagesDone ?? 0) + 1;
       const ordersImported =
-        (store.syncState.ordersImported ?? 0) + page.imported;
+        (store.syncState.ordersImported ?? 0) + page.inserted;
+      const ordersUpdated =
+        (store.syncState.ordersUpdated ?? 0) + page.updated;
+      const orderLabel = formatOrderSyncLabel(
+        ordersImported,
+        ordersUpdated,
+        incremental,
+      );
 
       if (page.hasMore) {
         await patchSyncState(storeId, {
@@ -346,10 +378,9 @@ export async function runChunkedSyncStep(
           orderCursor: page.nextCursor,
           orderPagesDone: pagesDone,
           ordersImported,
+          ordersUpdated,
           progress: orderProgress(pagesDone, incremental),
-          message: incremental
-            ? `${ordersImported} encomendas atualizadas…`
-            : `${ordersImported} encomendas importadas…`,
+          message: incremental ? `${orderLabel}…` : `${orderLabel}…`,
         });
         return getChunkedSyncStatus(storeId);
       }
@@ -364,6 +395,7 @@ export async function runChunkedSyncStep(
         orderCursor: null,
         orderPagesDone: pagesDone,
         ordersImported,
+        ordersUpdated,
         progress: wantProductCosts ? (incremental ? 72 : 82) : incremental ? 78 : 84,
         message: wantProductCosts
           ? incremental
@@ -499,23 +531,34 @@ export async function runChunkedSyncStep(
         freshStore.lastSessionMetricsError = sessionError;
       }
 
-      const orders = store.syncState.ordersImported ?? 0;
-      const products = store.syncState.productsImported ?? 0;
+      const ordersInserted = store.syncState.ordersImported ?? 0;
+      const ordersUpdated = store.syncState.ordersUpdated ?? 0;
       const payouts = store.syncState.payoutsImported ?? 0;
       const balance = store.syncState.balanceTransactionsImported ?? 0;
       const payoutsErr = freshStore.payoutsError ?? undefined;
 
       const sessionPart = sessionError
         ? `sessões: erro — ${sessionError}`
-        : `${sessionDays} dia${sessionDays === 1 ? "" : "s"} de sessões`;
+        : sessionDays > 0
+          ? `${sessionDays} dia${sessionDays === 1 ? "" : "s"} de sessões`
+          : "sessões em dia";
+
+      const orderPart = formatOrderSyncLabel(
+        ordersInserted,
+        ordersUpdated,
+        incremental,
+      );
+      const products = store.syncState.productsImported ?? 0;
+      const productPart =
+        products > 0 ? ` · ${products} custo${products === 1 ? "" : "s"} novos` : "";
 
       const summary = incremental
         ? payoutsErr
-          ? `Atualizado · ${orders} encomendas · ${sessionPart} · payouts: ${payoutsErr}`
-          : `Atualizado · ${orders} encomendas${products > 0 ? ` · ${products} custos novos` : ""} · ${sessionPart}`
+          ? `Atualizado · ${orderPart}${productPart} · ${sessionPart} · payouts: ${payoutsErr}`
+          : `Atualizado · ${orderPart}${productPart} · ${sessionPart}`
         : payoutsErr
-          ? `${orders} orders · ${products} produtos · ${sessionPart} · payouts: ${payoutsErr}`
-          : `${orders} orders · ${products} produtos · ${sessionPart} · ${payouts} payouts · ${balance} pendentes`;
+          ? `${orderPart} · ${products} produtos · ${sessionPart} · payouts: ${payoutsErr}`
+          : `${orderPart} · ${products} produtos · ${sessionPart} · ${payouts} payouts · ${balance} pendentes`;
 
       await persistStoreSyncFields(freshStore._id, {
         lastSyncAt: new Date(),
