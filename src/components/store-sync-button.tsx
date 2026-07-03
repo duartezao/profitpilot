@@ -211,6 +211,32 @@ export function StoreSyncButton({
     };
   }, [storeId, callSync, invalidateMetrics, onDone]);
 
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (runningRef.current || pending) return;
+      void (async () => {
+        try {
+          const res = await fetch(`/api/stores/${storeId}/sync`, {
+            cache: "no-store",
+          });
+          const data = await parseSyncResponse(res);
+          if (data.status === "done" && data.resultSummary) {
+            setState(data);
+            setIncremental(Boolean(data.incremental));
+          } else if (data.status === "running" && data.continue) {
+            setState(data);
+            setIncremental(Boolean(data.incremental));
+          }
+        } catch {
+          /* ignorar */
+        }
+      })();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [storeId, pending]);
+
   const syncing = pending || state.status === "running";
   const progress = Math.min(100, Math.max(0, state.progress));
 

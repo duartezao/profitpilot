@@ -487,7 +487,7 @@ export async function closeManualCostHistory(
   await closeOpenHistory(storeId, variantId, "manual", effectiveTo);
 }
 
-const SOLD_VARIANT_BATCH = 50;
+export const SOLD_VARIANT_BATCH = 50;
 
 /**
  * Variantes vendidas que ainda não foram consultadas na Shopify (sem registo em ProductCost).
@@ -539,10 +539,10 @@ export async function countDistinctSoldVariants(
   return rows[0]?.total ?? 0;
 }
 
-/** Variantes vendidas para rever custo/preço no catálogo (paginação por id). */
-export async function listSoldVariantIdsForCostRefresh(
+/** Variantes vendidas (cor/tamanho) paginadas por índice — evita cursor em IDs Shopify. */
+export async function listSoldVariantIdsByOffset(
   storeId: Types.ObjectId,
-  afterVariantId: string | null,
+  skip = 0,
   limit = SOLD_VARIANT_BATCH,
 ): Promise<string[]> {
   const pipeline: PipelineStage[] = [
@@ -555,12 +555,9 @@ export async function listSoldVariantIdsForCostRefresh(
     },
     { $group: { _id: "$lineItems.variantId" } },
     { $sort: { _id: 1 } },
+    { $skip: skip },
+    { $limit: limit },
   ];
-  if (afterVariantId) {
-    pipeline.push({ $match: { _id: { $gt: afterVariantId } } });
-  }
-  pipeline.push({ $limit: limit });
-
   const rows = await Order.aggregate<{ _id: string }>(pipeline);
   return rows.map((r) => String(r._id)).filter(Boolean);
 }

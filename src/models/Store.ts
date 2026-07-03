@@ -32,6 +32,8 @@ const SyncStateSchema = new Schema(
     message: { type: String, default: "" },
     orderCursor: { type: String, default: null },
     productCursor: { type: String, default: null },
+    /** Índice na lista ordenada de variantes vendidas (sync COGS em lotes). */
+    productRefreshOffset: { type: Number, default: 0 },
     sessionRangeIndex: { type: Number, default: 0 },
     orderPagesDone: { type: Number, default: 0 },
     ordersImported: { type: Number, default: 0 },
@@ -108,6 +110,8 @@ const StoreSchema = new Schema(
     startingBalance: { type: Number, default: 0 },
     startingBalanceDate: { type: Date },
     lastSyncAt: { type: Date },
+    /** Rotação incremental: próximo lote de variantes vendidas a rever no catálogo. */
+    catalogRefreshOffset: { type: Number, default: 0 },
     // Sincronização automática.
     autoSync: { type: Boolean, default: true },
     syncIntervalMinutes: { type: Number, default: 240 },

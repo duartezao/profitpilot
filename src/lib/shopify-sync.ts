@@ -30,8 +30,10 @@ import {
   assimilatePendingCogsForStore,
   assimilatePendingPricesForStore,
   earliestShopifyEffectiveFrom,
-  listSoldVariantIdsForCostRefresh,
+  countDistinctSoldVariants,
+  listSoldVariantIdsByOffset,
   listVariantIdsNeedingCostSync,
+  SOLD_VARIANT_BATCH,
   loadCostResolverForStore,
   loadPriceResolverForStore,
   recordShopifyCostChange,
@@ -578,40 +580,67 @@ async function upsertProductCostNodes(
   };
 }
 
+export type SoldCostSyncOptions = {
+  refreshOffset?: number;
+  incremental?: boolean;
+};
+
 /**
- * Importa/atualiza custos Shopify das variantes vendidas (novas + rever catálogo).
- * Um passo — para sync em chunks no Hobby.
+ * Importa/atualiza custos Shopify das variantes vendidas (cor/tamanho).
+ * Incremental: só novas + 1 lote de revisão. Inicial: percorre todas em lotes.
  */
 export async function syncSoldProductCostsPage(
   store: StoreDoc,
   domain: string,
   token: string,
-  refreshAfterVariantId: string | null = null,
+  options: SoldCostSyncOptions = {},
 ): Promise<{
   count: number;
   hasMore: boolean;
   changedVariantIds: string[];
-  nextRefreshCursor: string | null;
+  nextRefreshOffset: number;
+  mode: "new" | "refresh" | "none";
 }> {
-  let variantIds = await listVariantIdsNeedingCostSync(store._id);
-  let nextRefreshCursor = refreshAfterVariantId;
-  let refreshMode = false;
+  const refreshOffset = options.refreshOffset ?? 0;
+  const incremental = options.incremental ?? false;
 
-  if (!variantIds.length) {
-    variantIds = await listSoldVariantIdsForCostRefresh(
-      store._id,
-      refreshAfterVariantId,
-    );
-    refreshMode = true;
+  const newIds = await listVariantIdsNeedingCostSync(store._id);
+  let variantIds: string[];
+  let mode: "new" | "refresh" = "new";
+  let nextRefreshOffset = refreshOffset;
+
+  if (newIds.length) {
+    variantIds = newIds;
+  } else if (incremental) {
+    const skip = store.catalogRefreshOffset ?? 0;
+    variantIds = await listSoldVariantIdsByOffset(store._id, skip, SOLD_VARIANT_BATCH);
+    mode = "refresh";
     if (!variantIds.length) {
       return {
         count: 0,
         hasMore: false,
         changedVariantIds: [],
-        nextRefreshCursor: null,
+        nextRefreshOffset: refreshOffset,
+        mode: "none",
       };
     }
-    nextRefreshCursor = variantIds[variantIds.length - 1] ?? null;
+  } else {
+    variantIds = await listSoldVariantIdsByOffset(
+      store._id,
+      refreshOffset,
+      SOLD_VARIANT_BATCH,
+    );
+    mode = "refresh";
+    if (!variantIds.length) {
+      return {
+        count: 0,
+        hasMore: false,
+        changedVariantIds: [],
+        nextRefreshOffset: refreshOffset,
+        mode: "none",
+      };
+    }
+    nextRefreshOffset = refreshOffset + variantIds.length;
   }
 
   const query = `query($ids: [ID!]!) {
@@ -637,23 +666,63 @@ export async function syncSoldProductCostsPage(
     nodes,
   );
 
-  let hasMore: boolean;
-  if (!refreshMode) {
+  if (mode === "new") {
     const stillNew = await listVariantIdsNeedingCostSync(store._id, 1);
-    hasMore =
-      stillNew.length > 0 ||
-      (await listSoldVariantIdsForCostRefresh(store._id, null, 1)).length > 0;
-    nextRefreshCursor = null;
-  } else {
-    const next = await listSoldVariantIdsForCostRefresh(
-      store._id,
-      nextRefreshCursor,
-      1,
-    );
-    hasMore = next.length > 0;
+    if (stillNew.length > 0) {
+      return {
+        count,
+        hasMore: true,
+        changedVariantIds,
+        nextRefreshOffset: refreshOffset,
+        mode: "new",
+      };
+    }
+    if (!incremental) {
+      const soldTotal = await countDistinctSoldVariants(store._id);
+      if (soldTotal > 0) {
+        return {
+          count,
+          hasMore: true,
+          changedVariantIds,
+          nextRefreshOffset: 0,
+          mode: "new",
+        };
+      }
+    }
+    return {
+      count,
+      hasMore: false,
+      changedVariantIds,
+      nextRefreshOffset: refreshOffset,
+      mode: "new",
+    };
   }
 
-  return { count, hasMore, changedVariantIds, nextRefreshCursor };
+  if (incremental) {
+    const total = await countDistinctSoldVariants(store._id);
+    const skip = store.catalogRefreshOffset ?? 0;
+    const nextSkip = total > 0 ? (skip + variantIds.length) % total : 0;
+    await Store.updateOne(
+      { _id: store._id },
+      { $set: { catalogRefreshOffset: nextSkip } },
+    );
+    return {
+      count,
+      hasMore: false,
+      changedVariantIds,
+      nextRefreshOffset: refreshOffset,
+      mode: "refresh",
+    };
+  }
+
+  const soldTotal = await countDistinctSoldVariants(store._id);
+  return {
+    count,
+    hasMore: nextRefreshOffset < soldTotal,
+    changedVariantIds,
+    nextRefreshOffset,
+    mode: "refresh",
+  };
 }
 
 /** Importa custos de todas as variantes vendidas em falta (cron / sync completa). */
@@ -664,18 +733,16 @@ export async function syncAllSoldProductCosts(
 ): Promise<{ count: number; changedVariantIds: string[] }> {
   let total = 0;
   const changedVariantIds: string[] = [];
-  let refreshCursor: string | null = null;
+  let refreshOffset = 0;
   for (let step = 0; step < 200; step++) {
-    const page = await syncSoldProductCostsPage(
-      store,
-      domain,
-      token,
-      refreshCursor,
-    );
+    const page = await syncSoldProductCostsPage(store, domain, token, {
+      refreshOffset,
+      incremental: false,
+    });
     total += page.count;
     changedVariantIds.push(...page.changedVariantIds);
     if (!page.hasMore) break;
-    refreshCursor = page.nextRefreshCursor;
+    refreshOffset = page.nextRefreshOffset;
   }
   return { count: total, changedVariantIds };
 }
