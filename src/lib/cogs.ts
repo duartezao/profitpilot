@@ -55,7 +55,7 @@ export type SoldVariantMissingCost = {
 };
 
 /** Variantes com vendas registadas mas sem custo nas linhas das encomendas. */
-export async function listSoldVariantsMissingCost(
+async function listSoldVariantsMissingCostFromOrders(
   storeIds: Types.ObjectId[],
 ): Promise<SoldVariantMissingCost[]> {
   if (!storeIds.length) return [];
@@ -95,14 +95,64 @@ export async function listSoldVariantsMissingCost(
   }));
 }
 
-/** Conta variantes distintas vendidas sem custo (opcionalmente só no período). */
+/** Exclui variantes com custo já conhecido no catálogo (Shopify/manual). */
+async function excludeVariantsWithCatalogCost(
+  storeIds: Types.ObjectId[],
+  rows: SoldVariantMissingCost[],
+): Promise<SoldVariantMissingCost[]> {
+  if (!rows.length) return rows;
+
+  const variantIds = [...new Set(rows.map((r) => r.variantId))];
+  const catalog = await ProductCost.find({
+    storeId: { $in: storeIds },
+    variantId: { $in: variantIds },
+  })
+    .select("storeId variantId unitCost manualCost")
+    .lean();
+
+  const resolved = new Set(
+    catalog
+      .filter(
+        (c) =>
+          num(c.unitCost) > 0 ||
+          (c.manualCost != null && num(c.manualCost) >= 0),
+      )
+      .map((c) => `${String(c.storeId)}:${String(c.variantId)}`),
+  );
+
+  return rows.filter((r) => !resolved.has(`${r.storeId}:${r.variantId}`));
+}
+
+/**
+ * Variantes vendidas sem COGS resolvível.
+ * Assimila custos do catálogo nas encomendas e só lista as que ficam sem valor.
+ */
+export async function listSoldVariantsMissingCost(
+  storeIds: Types.ObjectId[],
+  options?: { assimilateFirst?: boolean },
+): Promise<SoldVariantMissingCost[]> {
+  if (!storeIds.length) return [];
+
+  if (options?.assimilateFirst !== false) {
+    for (const storeId of storeIds) {
+      await assimilatePendingCogsForStore(storeId);
+    }
+  }
+
+  const rows = await listSoldVariantsMissingCostFromOrders(storeIds);
+  return excludeVariantsWithCatalogCost(storeIds, rows);
+}
+
+/** Conta variantes distintas vendidas sem custo resolvível (opcionalmente só no período). */
 export async function countSoldVariantsMissingCost(
   storeIds: Types.ObjectId[],
   period?: CogsPeriodSlice,
 ): Promise<number> {
   if (!storeIds.length) return 0;
 
-  const rows = await Order.aggregate<{ total: number }>([
+  const rows = await Order.aggregate<{
+    _id: { storeId: Types.ObjectId; variantId: string };
+  }>([
     { $match: orderMatchForStores(storeIds, period) },
     { $unwind: "$lineItems" },
     {
@@ -116,10 +166,18 @@ export async function countSoldVariantsMissingCost(
         _id: { storeId: "$storeId", variantId: "$lineItems.variantId" },
       },
     },
-    { $count: "total" },
   ]);
 
-  return rows[0]?.total ?? 0;
+  const candidates: SoldVariantMissingCost[] = rows.map((r) => ({
+    storeId: String(r._id.storeId),
+    variantId: String(r._id.variantId),
+    title: "",
+    unitsSold: 0,
+    orderCount: 0,
+  }));
+
+  const missing = await excludeVariantsWithCatalogCost(storeIds, candidates);
+  return missing.length;
 }
 
 /** Variantes distintas sem custo, agrupadas por dia civil (fuso da loja opcional). */

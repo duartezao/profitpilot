@@ -79,36 +79,42 @@ export function CostRow({ row }: { row: CostRowData }) {
         </span>
       </td>
       <td className="px-4 py-3">
-        <form action={doSet} className="flex flex-wrap items-center gap-2">
-          <input type="hidden" name="storeId" value={row.storeId} />
-          <input type="hidden" name="variantId" value={row.variantId} />
-          <DecimalInput
-            name="manualCost"
-            placeholder={`custo (${row.inputCurrency})`}
-            defaultValue={row.manualCost ?? ""}
-            className={inputCls}
-            data-sensitive
-          />
-          <input
-            name="effectiveFrom"
-            type="date"
-            defaultValue={dateDefault}
-            title="Deixar vazio aplica a todas as vendas em falta de custo"
-            className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
-          />
-          <span className="text-xs text-muted-foreground">desde (opcional)</span>
-          <button
-            type="submit"
-            disabled={setting}
-            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
-          >
-            {setting ? "…" : "Guardar"}
-          </button>
-          {setState.ok && <Check className="h-4 w-4 text-positive" />}
-          {setState.error && (
-            <span className="text-xs text-negative">{setState.error}</span>
-          )}
-        </form>
+        {missing ? (
+          <form action={doSet} className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="storeId" value={row.storeId} />
+            <input type="hidden" name="variantId" value={row.variantId} />
+            <DecimalInput
+              name="manualCost"
+              placeholder={`custo (${row.inputCurrency})`}
+              className={inputCls}
+              data-sensitive
+              required
+            />
+            <input
+              name="effectiveFrom"
+              type="date"
+              defaultValue={dateDefault}
+              title="Deixar vazio aplica a todas as vendas em falta de custo"
+              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent"
+            />
+            <span className="text-xs text-muted-foreground">desde (opcional)</span>
+            <button
+              type="submit"
+              disabled={setting}
+              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
+            >
+              {setting ? "…" : "Guardar"}
+            </button>
+            {setState.ok && <Check className="h-4 w-4 text-positive" />}
+            {setState.error && (
+              <span className="text-xs text-negative">{setState.error}</span>
+            )}
+          </form>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            Custo aplicado automaticamente
+          </span>
+        )}
         {isManual && (
           <form action={doClear} className="mt-1">
             <input type="hidden" name="storeId" value={row.storeId} />
