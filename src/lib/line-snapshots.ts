@@ -1,8 +1,8 @@
 export type CostResolver = (variantId: string, orderDate: Date) => number;
 
 /**
- * Custo por linha: snapshot confirmado (>0) não muda; caso contrário resolve
- * sempre pela data da venda (nova venda ou custo ainda em falta).
+ * Custo por linha: usa o custo válido na data da venda (histórico Shopify/manual).
+ * Snapshot anterior só se ainda não há custo resolvido — permite corrigir atrasos de sync.
  */
 export function applyLineUnitCost(
   variantId: string,
@@ -11,8 +11,9 @@ export function applyLineUnitCost(
   resolveCost: CostResolver,
 ): number {
   if (!variantId) return 0;
-  if (previousSnapshot > 0) return previousSnapshot;
-  return resolveCost(variantId, orderDate);
+  const resolved = resolveCost(variantId, orderDate);
+  if (resolved > 0) return resolved;
+  return previousSnapshot > 0 ? previousSnapshot : 0;
 }
 
 /**

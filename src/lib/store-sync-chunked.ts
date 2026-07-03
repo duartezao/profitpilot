@@ -1,7 +1,7 @@
 import "server-only";
 import { backfillOrderNetRevenueForStore } from "@/lib/order-backfill";
 import { backfillOrderLinePricesForStore, ordersNeedLinePriceBackfill } from "@/lib/order-price-backfill";
-import { assimilatePendingCogsForStore, countDistinctSoldVariants, listVariantIdsNeedingCostSync } from "@/lib/cogs";
+import { assimilatePendingCogsForStore, assimilatePendingPricesForStore, countDistinctSoldVariants, listSoldVariantIdsForCostRefresh, listVariantIdsNeedingCostSync } from "@/lib/cogs";
 import {
   assimilatesCogsOnSync,
   syncsShopifyProductCosts,
@@ -164,8 +164,8 @@ async function needsSoldProductCostSync(
   cogsMode: CogsMode | null | undefined,
 ): Promise<boolean> {
   if (!syncsShopifyProductCosts(cogsMode)) return false;
-  const ids = await listVariantIdsNeedingCostSync(storeId, 1);
-  return ids.length > 0;
+  if ((await listVariantIdsNeedingCostSync(storeId, 1)).length > 0) return true;
+  return (await listSoldVariantIdsForCostRefresh(storeId, null, 1)).length > 0;
 }
 
 function isStaleRunning(store: {
@@ -314,6 +314,7 @@ export async function runChunkedSyncStep(
         freshStore,
         domain,
         accessToken,
+        store.syncState.productCursor ?? null,
       );
       const productsImported =
         (store.syncState.productsImported ?? 0) + page.count;
@@ -327,6 +328,7 @@ export async function runChunkedSyncStep(
         await patchSyncState(storeId, {
           phase: "products",
           productsImported,
+          productCursor: page.nextRefreshCursor,
           progress: Math.min(83, 82 + (soldTotal > 0 ? (productsImported / soldTotal) * 8 : 2)),
           message: `${costMsg}…`,
         });
@@ -334,19 +336,16 @@ export async function runChunkedSyncStep(
       }
 
       if (assimilatesCogsOnSync(freshStore.cogsMode)) {
-        await assimilatePendingCogsForStore(
-          freshStore._id,
-          page.changedVariantIds.length
-            ? { variantIds: page.changedVariantIds }
-            : undefined,
-        );
+        await assimilatePendingCogsForStore(freshStore._id);
       }
+      await assimilatePendingPricesForStore(freshStore._id);
 
       await patchSyncState(storeId, {
         phase: "post_orders_backfill",
         progress: 84,
         message: "A finalizar encomendas…",
         productsImported,
+        productCursor: null,
       });
       return getChunkedSyncStatus(storeId);
     }
@@ -426,6 +425,7 @@ export async function runChunkedSyncStep(
       ) {
         await assimilatePendingCogsForStore(freshStore._id);
       }
+      await assimilatePendingPricesForStore(freshStore._id);
 
       await patchSyncState(storeId, {
         phase: "post_orders_fees",
@@ -531,8 +531,10 @@ export async function runChunkedSyncStep(
         freshStore.lastSessionMetricsError = sessionError;
       }
 
-      const ordersInserted = store.syncState.ordersImported ?? 0;
-      const ordersUpdated = store.syncState.ordersUpdated ?? 0;
+      const latest = await Store.findById(storeId).select("syncState").lean();
+      const syncCounts = latest?.syncState ?? store.syncState;
+      const ordersInserted = syncCounts?.ordersImported ?? 0;
+      const ordersUpdated = syncCounts?.ordersUpdated ?? 0;
       const payouts = store.syncState.payoutsImported ?? 0;
       const balance = store.syncState.balanceTransactionsImported ?? 0;
       const payoutsErr = freshStore.payoutsError ?? undefined;
@@ -573,6 +575,8 @@ export async function runChunkedSyncStep(
         message: incremental ? "Atualização concluída" : "Concluído",
         sessionDaysSynced: sessionDays,
         resultSummary: summary,
+        ordersImported: 0,
+        ordersUpdated: 0,
         error: null,
         orderCursor: null,
         productCursor: null,
