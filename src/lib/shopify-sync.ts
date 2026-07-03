@@ -28,11 +28,22 @@ import {
   applyLineUnitCost,
   applyLineUnitPrice,
   assimilatePendingCogsForStore,
+  assimilatePendingPricesForStore,
+  earliestShopifyEffectiveFrom,
+  listSoldVariantIdsForCostRefresh,
   listVariantIdsNeedingCostSync,
   loadCostResolverForStore,
+  loadPriceResolverForStore,
   recordShopifyCostChange,
   recordShopifyPriceChange,
+  resolveCatalogEffectiveFrom,
 } from "@/lib/cogs";
+import {
+  buildCatalogFallbackContext,
+  resolveVariantCatalogCost,
+  resolveVariantCatalogPrice,
+  type CatalogVariantInput,
+} from "@/lib/catalog-fallback";
 import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { syncDisputes } from "@/lib/dispute-sync";
 import { snapshotYesterdayMetrics, backfillDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
@@ -379,23 +390,69 @@ export async function syncProductCostsPage(
   };
 }
 
-type ShopifyVariantCostNode = {
-  id: string;
+type ShopifyVariantCostNode = CatalogVariantInput & {
   title: string;
-  price: string;
-  product: { id: string; title: string } | null;
-  inventoryItem: { unitCost: { amount: string } | null } | null;
+  updatedAt?: string;
+  product: {
+    id: string;
+    title: string;
+    priceRangeV2?: {
+      minVariantPrice?: { amount?: string | null } | null;
+    } | null;
+    variants?: {
+      nodes: Array<{
+        id: string;
+        price: string;
+        updatedAt?: string;
+        inventoryItem?: {
+          updatedAt?: string;
+          unitCost?: { amount?: string | null } | null;
+        } | null;
+      }>;
+    } | null;
+  } | null;
+  inventoryItem?: {
+    updatedAt?: string;
+    unitCost?: { amount?: string | null } | null;
+  } | null;
 };
+
+const SHOPIFY_VARIANT_CATALOG_FIELDS = `
+  id
+  title
+  price
+  updatedAt
+  product {
+    id
+    title
+    priceRangeV2 { minVariantPrice { amount } }
+    variants(first: 100) {
+      nodes {
+        id
+        price
+        updatedAt
+        inventoryItem { updatedAt unitCost { amount } }
+      }
+    }
+  }
+  inventoryItem { updatedAt unitCost { amount } }
+`;
 
 /** Grava custos/preços de variantes na BD e regista histórico. */
 async function upsertProductCostNodes(
   store: StoreDoc,
   nodes: ShopifyVariantCostNode[],
-): Promise<{ count: number; changedVariantIds: string[] }> {
-  if (!nodes.length) return { count: 0, changedVariantIds: [] };
+): Promise<{
+  count: number;
+  changedVariantIds: string[];
+  changedPriceVariantIds: string[];
+}> {
+  if (!nodes.length) {
+    return { count: 0, changedVariantIds: [], changedPriceVariantIds: [] };
+  }
 
   const existing = await ProductCost.find({ storeId: store._id })
-    .select("variantId unitCost price")
+    .select("variantId productId unitCost price")
     .lean();
   const prevCosts = new Map(
     existing.map((c) => [String(c.variantId), num(c.unitCost)]),
@@ -403,10 +460,24 @@ async function upsertProductCostNodes(
   const prevPrices = new Map(
     existing.map((c) => [String(c.variantId), num(c.price)]),
   );
+  const fallbackCtx = buildCatalogFallbackContext(nodes, existing);
 
   const ops = nodes.map((v) => {
-    const newCost = num(v.inventoryItem?.unitCost?.amount);
-    const newPrice = num(v.price);
+    const productId = v.product?.id ?? null;
+    const rawCost = num(v.inventoryItem?.unitCost?.amount);
+    const rawPrice = num(v.price);
+    const newCost = resolveVariantCatalogCost(
+      v.id,
+      productId,
+      rawCost,
+      fallbackCtx,
+    );
+    const newPrice = resolveVariantCatalogPrice(
+      v.id,
+      productId,
+      rawPrice,
+      fallbackCtx,
+    );
     return {
       updateOne: {
         filter: { storeId: store._id, variantId: v.id },
@@ -414,7 +485,7 @@ async function upsertProductCostNodes(
           $set: {
             storeId: store._id,
             variantId: v.id,
-            productId: v.product?.id,
+            productId: productId ?? undefined,
             title: v.product?.title
               ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
               : v.title,
@@ -427,13 +498,21 @@ async function upsertProductCostNodes(
       },
       newCost,
       newPrice,
-      productId: v.product?.id,
+      productId,
       variantId: v.id,
+      costEffectiveFrom: resolveCatalogEffectiveFrom(
+        v.inventoryItem?.updatedAt ?? v.updatedAt,
+      ),
+      priceEffectiveFrom: resolveCatalogEffectiveFrom(
+        v.updatedAt ?? v.inventoryItem?.updatedAt,
+      ),
     };
   });
 
   const changedVariantIds: string[] = [];
-  const effectiveFrom = new Date();
+  const changedPriceVariantIds: string[] = [];
+  const costEffectiveFromByVariant = new Map<string, Date>();
+  const priceEffectiveFromByVariant = new Map<string, Date>();
   await ProductCost.bulkWrite(
     ops.map(({ updateOne }) => ({ updateOne })),
     { ordered: false },
@@ -444,11 +523,14 @@ async function upsertProductCostNodes(
     const prevCost = prevCosts.get(variantId);
     const costChanged = prevCost === undefined || prevCost !== op.newCost;
     if (costChanged) {
+      const effectiveFrom =
+        prevCost === undefined ? new Date(0) : op.costEffectiveFrom;
+      costEffectiveFromByVariant.set(variantId, effectiveFrom);
       await recordShopifyCostChange(
         store._id,
         variantId,
         op.newCost,
-        prevCost === undefined ? new Date(0) : effectiveFrom,
+        effectiveFrom,
         op.productId,
       );
       changedVariantIds.push(variantId);
@@ -457,41 +539,85 @@ async function upsertProductCostNodes(
     const prevPrice = prevPrices.get(variantId);
     const priceChanged = prevPrice === undefined || prevPrice !== op.newPrice;
     if (priceChanged) {
+      const effectiveFrom =
+        prevPrice === undefined ? new Date(0) : op.priceEffectiveFrom;
+      priceEffectiveFromByVariant.set(variantId, effectiveFrom);
       await recordShopifyPriceChange(
         store._id,
         variantId,
         op.newPrice,
-        prevPrice === undefined ? new Date(0) : effectiveFrom,
+        effectiveFrom,
         op.productId,
       );
+      changedPriceVariantIds.push(variantId);
     }
   }
 
-  return { count: ops.length, changedVariantIds };
+  if (changedVariantIds.length) {
+    const fromDates = [...costEffectiveFromByVariant.values()];
+    const from =
+      fromDates.length > 0
+        ? new Date(Math.min(...fromDates.map((d) => d.getTime())))
+        : await earliestShopifyEffectiveFrom(store._id, changedVariantIds, "cost");
+    await assimilatePendingCogsForStore(store._id, {
+      variantIds: changedVariantIds,
+      from,
+      reviseHistory: true,
+    });
+  }
+  if (changedPriceVariantIds.length) {
+    await assimilatePendingPricesForStore(store._id, {
+      variantIds: changedPriceVariantIds,
+    });
+  }
+
+  return {
+    count: ops.length,
+    changedVariantIds,
+    changedPriceVariantIds,
+  };
 }
 
 /**
- * Importa custos Shopify só para variantes vendidas (sem custo na BD).
+ * Importa/atualiza custos Shopify das variantes vendidas (novas + rever catálogo).
  * Um passo — para sync em chunks no Hobby.
  */
 export async function syncSoldProductCostsPage(
   store: StoreDoc,
   domain: string,
   token: string,
-): Promise<{ count: number; hasMore: boolean; changedVariantIds: string[] }> {
-  const variantIds = await listVariantIdsNeedingCostSync(store._id);
+  refreshAfterVariantId: string | null = null,
+): Promise<{
+  count: number;
+  hasMore: boolean;
+  changedVariantIds: string[];
+  nextRefreshCursor: string | null;
+}> {
+  let variantIds = await listVariantIdsNeedingCostSync(store._id);
+  let nextRefreshCursor = refreshAfterVariantId;
+  let refreshMode = false;
+
   if (!variantIds.length) {
-    return { count: 0, hasMore: false, changedVariantIds: [] };
+    variantIds = await listSoldVariantIdsForCostRefresh(
+      store._id,
+      refreshAfterVariantId,
+    );
+    refreshMode = true;
+    if (!variantIds.length) {
+      return {
+        count: 0,
+        hasMore: false,
+        changedVariantIds: [],
+        nextRefreshCursor: null,
+      };
+    }
+    nextRefreshCursor = variantIds[variantIds.length - 1] ?? null;
   }
 
   const query = `query($ids: [ID!]!) {
     nodes(ids: $ids) {
       ... on ProductVariant {
-        id
-        title
-        price
-        product { id title }
-        inventoryItem { unitCost { amount } }
+        ${SHOPIFY_VARIANT_CATALOG_FIELDS}
       }
     }
   }`;
@@ -511,8 +637,23 @@ export async function syncSoldProductCostsPage(
     nodes,
   );
 
-  const remaining = await listVariantIdsNeedingCostSync(store._id, 1);
-  return { count, hasMore: remaining.length > 0, changedVariantIds };
+  let hasMore: boolean;
+  if (!refreshMode) {
+    const stillNew = await listVariantIdsNeedingCostSync(store._id, 1);
+    hasMore =
+      stillNew.length > 0 ||
+      (await listSoldVariantIdsForCostRefresh(store._id, null, 1)).length > 0;
+    nextRefreshCursor = null;
+  } else {
+    const next = await listSoldVariantIdsForCostRefresh(
+      store._id,
+      nextRefreshCursor,
+      1,
+    );
+    hasMore = next.length > 0;
+  }
+
+  return { count, hasMore, changedVariantIds, nextRefreshCursor };
 }
 
 /** Importa custos de todas as variantes vendidas em falta (cron / sync completa). */
@@ -523,11 +664,18 @@ export async function syncAllSoldProductCosts(
 ): Promise<{ count: number; changedVariantIds: string[] }> {
   let total = 0;
   const changedVariantIds: string[] = [];
+  let refreshCursor: string | null = null;
   for (let step = 0; step < 200; step++) {
-    const page = await syncSoldProductCostsPage(store, domain, token);
+    const page = await syncSoldProductCostsPage(
+      store,
+      domain,
+      token,
+      refreshCursor,
+    );
     total += page.count;
     changedVariantIds.push(...page.changedVariantIds);
     if (!page.hasMore) break;
+    refreshCursor = page.nextRefreshCursor;
   }
   return { count: total, changedVariantIds };
 }
@@ -578,6 +726,144 @@ export function orderSyncSearchQuery(
   return `${base} -financial_status:voided`;
 }
 
+type OrderLineSnapshot = {
+  productId?: string;
+  variantId: string;
+  title: string;
+  quantity: number;
+  unitPrice: number;
+  unitCost: number;
+};
+
+type OrderAmountsBaseSnapshot = {
+  netRevenue: number | null;
+  cogs: number | null;
+  shipping: number | null;
+  fees: number | null;
+  refunded: number | null;
+  fxRate: number | null;
+  baseCurrency: string | null;
+};
+
+type OrderSetPayload = {
+  name: string;
+  orderDate: Date;
+  currency: string;
+  financialStatus: string | null;
+  totalPrice: number;
+  subtotal: number;
+  netRevenue: number;
+  discounts: number;
+  shipping: number;
+  tax: number;
+  refunded: number;
+  cogs: number;
+  lineItems: OrderLineSnapshot[];
+  amountsBase: OrderAmountsBaseSnapshot;
+};
+
+const moneyEq = (a: number, b: number) => Math.abs(num(a) - num(b)) < 0.005;
+
+function lineItemsEqual(
+  next: OrderLineSnapshot[],
+  prev: Array<{
+    productId?: string | null;
+    variantId?: string | null;
+    title?: string | null;
+    quantity?: number;
+    unitPrice?: number;
+    unitCost?: number;
+  }>,
+): boolean {
+  if (next.length !== prev.length) return false;
+  for (let i = 0; i < next.length; i++) {
+    const a = next[i];
+    const b = prev[i];
+    if (String(a.variantId) !== String(b.variantId ?? "")) return false;
+    if (String(a.productId ?? "") !== String(b.productId ?? "")) return false;
+    if (a.title !== (b.title ?? "")) return false;
+    if (num(a.quantity) !== num(b.quantity)) return false;
+    if (!moneyEq(a.unitPrice, b.unitPrice ?? 0)) return false;
+    if (!moneyEq(a.unitCost, b.unitCost ?? 0)) return false;
+  }
+  return true;
+}
+
+function amountsBaseEqual(
+  next: OrderAmountsBaseSnapshot,
+  prev: OrderAmountsBaseSnapshot | null | undefined,
+): boolean {
+  const p = prev ?? {
+    netRevenue: null,
+    cogs: null,
+    shipping: null,
+    fees: null,
+    refunded: null,
+    fxRate: null,
+    baseCurrency: null,
+  };
+  return (
+    moneyEq(next.netRevenue ?? 0, p.netRevenue ?? 0) &&
+    moneyEq(next.cogs ?? 0, p.cogs ?? 0) &&
+    moneyEq(next.shipping ?? 0, p.shipping ?? 0) &&
+    moneyEq(next.fees ?? 0, p.fees ?? 0) &&
+    moneyEq(next.refunded ?? 0, p.refunded ?? 0) &&
+    moneyEq(next.fxRate ?? 0, p.fxRate ?? 0) &&
+    (next.baseCurrency ?? "") === (p.baseCurrency ?? "")
+  );
+}
+
+function orderSetMatchesExisting(
+  existing: {
+    name?: string | null;
+    orderDate?: Date;
+    currency?: string | null;
+    financialStatus?: string | null;
+    totalPrice?: number;
+    subtotal?: number;
+    netRevenue?: number;
+    discounts?: number;
+    shipping?: number;
+    tax?: number;
+    refunded?: number;
+    cogs?: number;
+    lineItems?: Array<{
+      productId?: string | null;
+      variantId?: string | null;
+      title?: string | null;
+      quantity?: number;
+      unitPrice?: number;
+      unitCost?: number;
+    }>;
+    amountsBase?: OrderAmountsBaseSnapshot | null;
+  },
+  payload: OrderSetPayload,
+): boolean {
+  if ((existing.name ?? "") !== payload.name) return false;
+  if (new Date(existing.orderDate!).getTime() !== payload.orderDate.getTime()) {
+    return false;
+  }
+  if ((existing.currency ?? "").toUpperCase() !== payload.currency.toUpperCase()) {
+    return false;
+  }
+  if (
+    (existing.financialStatus ?? "").toLowerCase() !==
+    (payload.financialStatus ?? "").toLowerCase()
+  ) {
+    return false;
+  }
+  if (!moneyEq(existing.totalPrice ?? 0, payload.totalPrice)) return false;
+  if (!moneyEq(existing.subtotal ?? 0, payload.subtotal)) return false;
+  if (!moneyEq(existing.netRevenue ?? 0, payload.netRevenue)) return false;
+  if (!moneyEq(existing.discounts ?? 0, payload.discounts)) return false;
+  if (!moneyEq(existing.shipping ?? 0, payload.shipping)) return false;
+  if (!moneyEq(existing.tax ?? 0, payload.tax)) return false;
+  if (!moneyEq(existing.refunded ?? 0, payload.refunded)) return false;
+  if (!moneyEq(existing.cogs ?? 0, payload.cogs)) return false;
+  if (!lineItemsEqual(payload.lineItems, existing.lineItems ?? [])) return false;
+  return amountsBaseEqual(payload.amountsBase, existing.amountsBase);
+}
+
 /** Uma página de encomendas (50) — taxas aplicadas depois via balance transactions. */
 export async function syncOrdersPage(
   store: StoreDoc,
@@ -587,6 +873,7 @@ export async function syncOrdersPage(
   pageSize = 50,
 ): Promise<OrdersPageResult> {
   const resolveCost = await loadCostResolverForStore(store._id);
+  const resolvePrice = await loadPriceResolverForStore(store._id);
   const workspace = await Workspace.findById(store.workspaceId)
     .select("baseCurrency")
     .lean();
@@ -668,16 +955,22 @@ export async function syncOrdersPage(
       shopifyId: { $in: ids },
     })
       .select(
-        "shopifyId orderDate fees lineItems.variantId lineItems.unitCost manualCogs",
+        "shopifyId name orderDate currency financialStatus totalPrice subtotal netRevenue discounts shipping tax refunded cogs fees lineItems amountsBase manualCogs",
       )
       .lean();
-    const existingMap = new Map<
+    const existingByShopifyId = new Map<
+      string,
+      (typeof existingOrders)[number]
+    >();
+    const existingLineMap = new Map<
       string,
       Map<string, { unitCost: number; unitPrice: number }>
     >();
     const existingFees = new Map<string, number>();
     const existingManualCogs = new Map<string, number | null>();
     for (const eo of existingOrders) {
+      const sid = String(eo.shopifyId);
+      existingByShopifyId.set(sid, eo);
       const m = new Map<string, { unitCost: number; unitPrice: number }>();
       for (const li of eo.lineItems ?? []) {
         m.set(String(li.variantId), {
@@ -685,10 +978,10 @@ export async function syncOrdersPage(
           unitPrice: num(li.unitPrice),
         });
       }
-      existingMap.set(String(eo.shopifyId), m);
-      if (eo.fees != null) existingFees.set(String(eo.shopifyId), num(eo.fees));
+      existingLineMap.set(sid, m);
+      if (eo.fees != null) existingFees.set(sid, num(eo.fees));
       existingManualCogs.set(
-        String(eo.shopifyId),
+        sid,
         eo.manualCogs != null ? num(eo.manualCogs) : null,
       );
     }
@@ -702,8 +995,9 @@ export async function syncOrdersPage(
       if (finStatus === "voided" || finStatus === "expired") continue;
 
       const orderDate = new Date(o.createdAt);
-      const isNew = !existingMap.has(o.id);
-      const prevLine = existingMap.get(o.id);
+      const existing = existingByShopifyId.get(o.id);
+      const isNew = !existing;
+      const prevLine = existingLineMap.get(o.id);
       const lineItems = o.lineItems.nodes.map((li) => {
         const variantId = li.variant?.id ?? "";
         const prev = prevLine?.get(variantId);
@@ -714,7 +1008,13 @@ export async function syncOrdersPage(
           resolveCost,
         );
         const apiPrice = num(li.originalUnitPriceSet?.shopMoney.amount);
-        const unitPrice = applyLineUnitPrice(prev?.unitPrice ?? 0, apiPrice);
+        const catalogPrice = variantId
+          ? resolvePrice(variantId, orderDate)
+          : 0;
+        const unitPrice = applyLineUnitPrice(
+          prev?.unitPrice ?? 0,
+          apiPrice > 0 ? apiPrice : catalogPrice,
+        );
         return {
           productId: li.product?.id,
           variantId,
@@ -755,6 +1055,36 @@ export async function syncOrdersPage(
         manualCogs,
       );
 
+      const currency =
+        o.currentTotalPriceSet?.shopMoney.currencyCode ?? store.currency;
+      const payload: OrderSetPayload = {
+        name: o.name,
+        orderDate,
+        currency,
+        financialStatus: o.displayFinancialStatus,
+        totalPrice,
+        subtotal,
+        netRevenue,
+        discounts: num(o.totalDiscountsSet?.shopMoney.amount),
+        shipping,
+        tax: num(o.totalTaxSet?.shopMoney.amount),
+        refunded,
+        cogs,
+        lineItems,
+        amountsBase,
+      };
+
+      if (
+        !isNew &&
+        existing &&
+        orderSetMatchesExisting(
+          existing as Parameters<typeof orderSetMatchesExisting>[0],
+          payload,
+        )
+      ) {
+        continue;
+      }
+
       ops.push({
         updateOne: {
           filter: { storeId: store._id, shopifyId: o.id },
@@ -763,21 +1093,20 @@ export async function syncOrdersPage(
               workspaceId: store.workspaceId,
               storeId: store._id,
               shopifyId: o.id,
-              name: o.name,
-              orderDate,
-              currency:
-                o.currentTotalPriceSet?.shopMoney.currencyCode ?? store.currency,
-              financialStatus: o.displayFinancialStatus,
-              totalPrice,
-              subtotal,
-              netRevenue,
-              discounts: num(o.totalDiscountsSet?.shopMoney.amount),
-              shipping,
-              tax: num(o.totalTaxSet?.shopMoney.amount),
-              refunded,
-              cogs,
-              lineItems,
-              amountsBase,
+              name: payload.name,
+              orderDate: payload.orderDate,
+              currency: payload.currency,
+              financialStatus: payload.financialStatus,
+              totalPrice: payload.totalPrice,
+              subtotal: payload.subtotal,
+              netRevenue: payload.netRevenue,
+              discounts: payload.discounts,
+              shipping: payload.shipping,
+              tax: payload.tax,
+              refunded: payload.refunded,
+              cogs: payload.cogs,
+              lineItems: payload.lineItems,
+              amountsBase: payload.amountsBase,
             },
             $setOnInsert: { fees: 0, feesSource: null },
           },
@@ -1171,6 +1500,7 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
         changedVariantIds.length ? { variantIds: changedVariantIds } : undefined,
       )
     : { ordersUpdated: 0, linesFilled: 0 };
+  await assimilatePendingPricesForStore(store._id);
 
   let orderFeesReal = 0;
   let orderFeesEstimated = 0;

@@ -189,6 +189,9 @@ export function StoreSyncButton({
             invalidateMetrics();
             onDone?.();
           }
+        } else if (data.status === "done" && data.resultSummary) {
+          setState(data);
+          setIncremental(Boolean(data.incremental));
         } else {
           setIncremental(Boolean(data.incremental));
         }

@@ -1,5 +1,5 @@
 import "server-only";
-import type { AnyBulkWriteOperation } from "mongoose";
+import type { AnyBulkWriteOperation, PipelineStage } from "mongoose";
 import type { Types } from "mongoose";
 import { Order } from "@/models/Order";
 import { Store } from "@/models/Store";
@@ -15,6 +15,7 @@ import {
 import {
   applyLineUnitCost,
   applyLineUnitPrice,
+  pricesNearlyEqual,
   type CostResolver,
 } from "@/lib/line-snapshots";
 import { buildOrderAmountsBase } from "@/lib/order-money";
@@ -187,6 +188,66 @@ function pickCostAtDate(entries: HistoryEntry[], orderDate: Date): number | null
 export type { CostResolver } from "@/lib/line-snapshots";
 export { applyLineUnitCost, applyLineUnitPrice } from "@/lib/line-snapshots";
 
+export type PriceResolver = (variantId: string, orderDate: Date) => number;
+
+type PriceHistoryEntry = {
+  price: number;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+};
+
+function pickPriceAtDate(
+  entries: PriceHistoryEntry[],
+  orderDate: Date,
+): number | null {
+  let best: PriceHistoryEntry | null = null;
+  for (const e of entries) {
+    if (e.effectiveFrom > orderDate) continue;
+    if (e.effectiveTo && orderDate >= e.effectiveTo) continue;
+    if (!best || e.effectiveFrom > best.effectiveFrom) best = e;
+  }
+  return best?.price ?? null;
+}
+
+function buildVariantProductIndex(
+  rows: Array<{ variantId: string; productId?: string | null }>,
+): {
+  variantToProduct: Map<string, string>;
+  variantsByProduct: Map<string, string[]>;
+} {
+  const variantToProduct = new Map<string, string>();
+  const variantsByProduct = new Map<string, string[]>();
+  for (const row of rows) {
+    const variantId = String(row.variantId);
+    const productId = row.productId ? String(row.productId) : "";
+    if (!productId) continue;
+    variantToProduct.set(variantId, productId);
+    const list = variantsByProduct.get(productId) ?? [];
+    if (!list.includes(variantId)) list.push(variantId);
+    variantsByProduct.set(productId, list);
+  }
+  return { variantToProduct, variantsByProduct };
+}
+
+function resolveWithProductSiblings(
+  variantId: string,
+  orderDate: Date,
+  variantToProduct: Map<string, string>,
+  variantsByProduct: Map<string, string[]>,
+  resolveDirect: (id: string, date: Date) => number,
+): number {
+  const direct = resolveDirect(variantId, orderDate);
+  if (direct > 0) return direct;
+  const productId = variantToProduct.get(variantId);
+  if (!productId) return 0;
+  for (const siblingId of variantsByProduct.get(productId) ?? []) {
+    if (siblingId === variantId) continue;
+    const siblingValue = resolveDirect(siblingId, orderDate);
+    if (siblingValue > 0) return siblingValue;
+  }
+  return 0;
+}
+
 type LineItemRow = {
   productId?: string | null;
   variantId?: string | null;
@@ -217,6 +278,7 @@ function sumOrderCogs(
 export function buildCostResolver(
   productCosts: Array<{
     variantId: string;
+    productId?: string | null;
     unitCost?: number | null;
     manualCost?: number | null;
     manualCostFrom?: Date | null;
@@ -257,7 +319,10 @@ export function buildCostResolver(
     map.set(h.variantId, list);
   }
 
-  return (variantId: string, orderDate: Date): number => {
+  const { variantToProduct, variantsByProduct } =
+    buildVariantProductIndex(productCosts);
+
+  const resolveDirect = (variantId: string, orderDate: Date): number => {
     const manual = pickCostAtDate(manualHist.get(variantId) ?? [], orderDate);
     if (manual != null) return manual;
 
@@ -271,6 +336,63 @@ export function buildCostResolver(
     }
     return c.shopify;
   };
+
+  return (variantId: string, orderDate: Date): number =>
+    resolveWithProductSiblings(
+      variantId,
+      orderDate,
+      variantToProduct,
+      variantsByProduct,
+      resolveDirect,
+    );
+}
+
+/** Resolve o preço de venda válido numa data (histórico Shopify + cache + variante irmã). */
+export function buildPriceResolver(
+  productCosts: Array<{
+    variantId: string;
+    productId?: string | null;
+    price?: number | null;
+  }>,
+  historyRows: Array<{
+    variantId: string;
+    price: number;
+    effectiveFrom: Date;
+    effectiveTo?: Date | null;
+  }>,
+): PriceResolver {
+  const legacy = new Map(
+    productCosts.map((c) => [String(c.variantId), num(c.price)]),
+  );
+  const shopifyHist = new Map<string, PriceHistoryEntry[]>();
+  for (const h of historyRows) {
+    const entry: PriceHistoryEntry = {
+      price: num(h.price),
+      effectiveFrom: new Date(h.effectiveFrom),
+      effectiveTo: h.effectiveTo ? new Date(h.effectiveTo) : null,
+    };
+    const list = shopifyHist.get(h.variantId) ?? [];
+    list.push(entry);
+    shopifyHist.set(h.variantId, list);
+  }
+
+  const { variantToProduct, variantsByProduct } =
+    buildVariantProductIndex(productCosts);
+
+  const resolveDirect = (variantId: string, orderDate: Date): number => {
+    const fromHist = pickPriceAtDate(shopifyHist.get(variantId) ?? [], orderDate);
+    if (fromHist != null) return fromHist;
+    return legacy.get(variantId) ?? 0;
+  };
+
+  return (variantId: string, orderDate: Date): number =>
+    resolveWithProductSiblings(
+      variantId,
+      orderDate,
+      variantToProduct,
+      variantsByProduct,
+      resolveDirect,
+    );
 }
 
 async function closeOpenHistory(
@@ -417,19 +539,60 @@ export async function countDistinctSoldVariants(
   return rows[0]?.total ?? 0;
 }
 
+/** Variantes vendidas para rever custo/preço no catálogo (paginação por id). */
+export async function listSoldVariantIdsForCostRefresh(
+  storeId: Types.ObjectId,
+  afterVariantId: string | null,
+  limit = SOLD_VARIANT_BATCH,
+): Promise<string[]> {
+  const pipeline: PipelineStage[] = [
+    { $match: { storeId } },
+    { $unwind: "$lineItems" },
+    {
+      $match: {
+        "lineItems.variantId": { $exists: true, $nin: ["", null] },
+      },
+    },
+    { $group: { _id: "$lineItems.variantId" } },
+    { $sort: { _id: 1 } },
+  ];
+  if (afterVariantId) {
+    pipeline.push({ $match: { _id: { $gt: afterVariantId } } });
+  }
+  pipeline.push({ $limit: limit });
+
+  const rows = await Order.aggregate<{ _id: string }>(pipeline);
+  return rows.map((r) => String(r._id)).filter(Boolean);
+}
+
 /** Carrega resolver para uma loja (sync de encomendas). */
 export async function loadCostResolverForStore(
   storeId: Types.ObjectId,
 ): Promise<CostResolver> {
   const [costs, history] = await Promise.all([
     ProductCost.find({ storeId })
-      .select("variantId unitCost manualCost manualCostFrom")
+      .select("variantId productId unitCost manualCost manualCostFrom")
       .lean(),
     CogsHistory.find({ storeId })
       .select("variantId source cost effectiveFrom effectiveTo")
       .lean(),
   ]);
   return buildCostResolver(costs, history);
+}
+
+/** Carrega resolver de preço de venda para encomendas sem preço na API. */
+export async function loadPriceResolverForStore(
+  storeId: Types.ObjectId,
+): Promise<PriceResolver> {
+  const [costs, history] = await Promise.all([
+    ProductCost.find({ storeId })
+      .select("variantId productId price")
+      .lean(),
+    PriceHistory.find({ storeId })
+      .select("variantId price effectiveFrom effectiveTo")
+      .lean(),
+  ]);
+  return buildPriceResolver(costs, history);
 }
 
 export type AssimilateResult = {
@@ -442,7 +605,49 @@ export type AssimilateOptions = {
   variantIds?: string[];
   /** Só encomendas a partir desta data (ex. custo manual com vigência futura). */
   from?: Date;
+  /** Rever linhas já preenchidas quando o custo histórico mudou (desconto fornecedor). */
+  reviseHistory?: boolean;
 };
+
+/** Data desde quando um custo/preço passou a valer (ex.: `inventoryItem.updatedAt` na Shopify). */
+export function resolveCatalogEffectiveFrom(
+  sourceUpdatedAt: Date | string | null | undefined,
+  fallback: Date = new Date(),
+): Date {
+  if (!sourceUpdatedAt) return fallback;
+  const d = new Date(sourceUpdatedAt);
+  if (!Number.isFinite(d.getTime())) return fallback;
+  if (d.getTime() > Date.now()) return fallback;
+  return d;
+}
+
+/** Menor `effectiveFrom` shopify das variantes alteradas — limite para rever encomendas. */
+export async function earliestShopifyEffectiveFrom(
+  storeId: Types.ObjectId,
+  variantIds: string[],
+  kind: "cost" | "price",
+): Promise<Date | undefined> {
+  if (!variantIds.length) return undefined;
+  if (kind === "cost") {
+    const row = await CogsHistory.findOne({
+      storeId,
+      variantId: { $in: variantIds },
+      source: "shopify",
+    })
+      .sort({ effectiveFrom: 1 })
+      .select("effectiveFrom")
+      .lean();
+    return row?.effectiveFrom ? new Date(row.effectiveFrom) : undefined;
+  }
+  const row = await PriceHistory.findOne({
+    storeId,
+    variantId: { $in: variantIds },
+  })
+    .sort({ effectiveFrom: 1 })
+    .select("effectiveFrom")
+    .lean();
+  return row?.effectiveFrom ? new Date(row.effectiveFrom) : undefined;
+}
 
 /** Soma resultados de várias passagens de assimilação na mesma sync. */
 export function mergeAssimilateResults(
@@ -458,8 +663,8 @@ export function mergeAssimilateResults(
 }
 
 /**
- * Percorre encomendas com linhas sem custo e preenche quando já existe COGS
- * válido na data da venda. Reavalia em cada sync — inclui vendas novas.
+ * Percorre encomendas e aplica COGS histórico na data da venda.
+ * Preenche linhas vazias; com `reviseHistory` corrige após desconto fornecedor tardio.
  */
 export async function assimilatePendingCogsForStore(
   storeId: Types.ObjectId,
@@ -483,18 +688,21 @@ export async function assimilatePendingCogsForStore(
   let lastId: Types.ObjectId | null = null;
   const batchSize = 100;
   const variantIds = options?.variantIds?.filter(Boolean);
+  const revising = Boolean(options?.reviseHistory || variantIds?.length);
 
   while (true) {
     const elemMatch: Record<string, unknown> = {
       variantId: { $exists: true, $nin: ["", null] },
-      unitCost: { $lte: 0 },
     };
     if (variantIds?.length) {
       elemMatch.variantId = { $in: variantIds };
+    } else if (!revising) {
+      elemMatch.unitCost = { $lte: 0 };
     }
 
     const filter: Record<string, unknown> = {
       storeId,
+      manualCogs: null,
       lineItems: { $elemMatch: elemMatch },
     };
     if (options?.from) {
@@ -504,7 +712,7 @@ export async function assimilatePendingCogsForStore(
 
     const orders = await Order.find(filter)
       .select(
-        "_id orderDate lineItems subtotal totalPrice refunded netRevenue shipping fees cogs currency",
+        "_id orderDate lineItems subtotal totalPrice refunded netRevenue shipping fees cogs currency manualCogs",
       )
       .sort({ _id: 1 })
       .limit(batchSize)
@@ -520,6 +728,12 @@ export async function assimilatePendingCogsForStore(
       let changed = false;
       const lineItems = (order.lineItems ?? []).map((li) => {
         const variantId = String(li.variantId ?? "");
+        if (
+          variantIds?.length &&
+          !variantIds.includes(variantId)
+        ) {
+          return normalizeLineItem(li, num(li.unitCost));
+        }
         const prev = num(li.unitCost);
         const unitCost = applyLineUnitCost(
           variantId,
@@ -527,9 +741,9 @@ export async function assimilatePendingCogsForStore(
           prev,
           resolveCost,
         );
-        if (unitCost > 0 && prev <= 0) {
+        if (unitCost > 0 && !pricesNearlyEqual(unitCost, prev)) {
           changed = true;
-          result.linesFilled++;
+          if (prev <= 0) result.linesFilled++;
         }
         return normalizeLineItem(li, unitCost);
       });
@@ -557,6 +771,120 @@ export async function assimilatePendingCogsForStore(
         updateOne: {
           filter: { _id: order._id },
           update: { $set: { lineItems, cogs: newCogs, amountsBase } },
+        },
+      });
+      result.ordersUpdated++;
+    }
+
+    if (bulkOps.length) {
+      await Order.bulkWrite(bulkOps, { ordered: false });
+    }
+
+    if (orders.length < batchSize) break;
+  }
+
+  return result;
+}
+
+/**
+ * Preenche `unitPrice` em linhas sem preço quando o catálogo (ou variante irmã)
+ * já tem valor válido na data da venda.
+ */
+export async function assimilatePendingPricesForStore(
+  storeId: Types.ObjectId,
+  options?: AssimilateOptions,
+): Promise<AssimilateResult> {
+  const resolvePrice = await loadPriceResolverForStore(storeId);
+  const result: AssimilateResult = { ordersUpdated: 0, linesFilled: 0 };
+
+  const store = await Store.findById(storeId)
+    .select("workspaceId currency ianaTimezone")
+    .lean();
+  if (!store) return result;
+
+  const workspace = await Workspace.findById(store.workspaceId)
+    .select("baseCurrency")
+    .lean();
+  const storeCurrency = (store.currency ?? "EUR").toUpperCase();
+  const baseCurrency = (workspace?.baseCurrency ?? "EUR").toUpperCase();
+  const tz = normalizeStoreTimezone(store.ianaTimezone);
+
+  let lastId: Types.ObjectId | null = null;
+  const batchSize = 100;
+  const variantIds = options?.variantIds?.filter(Boolean);
+
+  while (true) {
+    const elemMatch: Record<string, unknown> = {
+      variantId: { $exists: true, $nin: ["", null] },
+      unitPrice: { $lte: 0 },
+    };
+    if (variantIds?.length) {
+      elemMatch.variantId = { $in: variantIds };
+    }
+
+    const filter: Record<string, unknown> = {
+      storeId,
+      lineItems: { $elemMatch: elemMatch },
+    };
+    if (options?.from) {
+      filter.orderDate = { $gte: options.from };
+    }
+    if (lastId) filter._id = { $gt: lastId };
+
+    const orders = await Order.find(filter)
+      .select(
+        "_id orderDate lineItems subtotal totalPrice refunded netRevenue shipping fees cogs currency manualCogs",
+      )
+      .sort({ _id: 1 })
+      .limit(batchSize)
+      .lean();
+
+    if (!orders.length) break;
+
+    const bulkOps: AnyBulkWriteOperation[] = [];
+
+    for (const order of orders) {
+      lastId = order._id;
+      const orderDate = new Date(order.orderDate);
+      let changed = false;
+      const lineItems = (order.lineItems ?? []).map((li) => {
+        const variantId = String(li.variantId ?? "");
+        const prev = num(li.unitPrice);
+        const catalogPrice = variantId ? resolvePrice(variantId, orderDate) : 0;
+        const unitPrice = applyLineUnitPrice(prev, catalogPrice);
+        if (unitPrice > 0 && prev <= 0) {
+          changed = true;
+          result.linesFilled++;
+        }
+        return {
+          ...normalizeLineItem(li, num(li.unitCost)),
+          unitPrice,
+        };
+      });
+
+      if (!changed) continue;
+
+      const amountsBase = await buildOrderAmountsBase(
+        {
+          subtotal: order.subtotal,
+          totalPrice: order.totalPrice,
+          refunded: order.refunded,
+          netRevenue: order.netRevenue,
+          cogs: order.manualCogs != null ? num(order.manualCogs) : order.cogs,
+          shipping: order.shipping,
+          fees: order.fees,
+        },
+        storeCurrency,
+        baseCurrency,
+        orderDate,
+        tz,
+        order.manualCogs != null ? num(order.manualCogs) : null,
+      );
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: order._id },
+          update: { $set: { lineItems, amountsBase } },
         },
       });
       result.ordersUpdated++;
