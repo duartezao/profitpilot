@@ -21,6 +21,10 @@ import {
   orderDateMatchInTimezone,
 } from "@/lib/store-timezone";
 import { sumManualCogsForPeriod } from "@/lib/manual-cogs";
+import {
+  sumEuCategoryFeesForPeriod,
+  appliesEuCategoryFees,
+} from "@/lib/eu-category-fees";
 import { canAccessStore, type StoreAccess } from "@/lib/store-access";
 import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import { sumManualCashByStores } from "@/lib/cash-entries";
@@ -335,6 +339,9 @@ async function sumOrderOutflowsSince(
       { $group: { _id: null, cogs: cogsExpr } },
     ]);
     cogs = cogsRows[0]?.cogs ?? 0;
+    if (appliesEuCategoryFees(cogsMode)) {
+      cogs += await sumEuCategoryFeesForPeriod([storeId], slice, tz);
+    }
   }
 
   const shippingRows = await Order.aggregate<{ shipping: number }>([

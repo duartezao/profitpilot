@@ -24,6 +24,11 @@ import {
   formatMissingCogsWarning,
 } from "@/lib/manual-cogs";
 import {
+  sumEuCategoryFeesForPeriod,
+  sumEuCategoryFeesByDay,
+  appliesEuCategoryFees,
+} from "@/lib/eu-category-fees";
+import {
   aggregateStoreAdInsightsForPeriod,
   type StoreAdInsights,
 } from "@/lib/ad-insights";
@@ -456,6 +461,20 @@ async function aggregateStoreAggs(
       );
       result.get(String(s._id))!.cogs = cogs;
     }),
+  );
+
+  await Promise.all(
+    stores
+      .filter((s) => appliesEuCategoryFees(storeCogsMode(s)))
+      .map(async (s) => {
+        const tz = normalizeStoreTimezone(s.ianaTimezone);
+        const fees = await sumEuCategoryFeesForPeriod(
+          [s._id],
+          slice,
+          sharedTimeZone ?? tz,
+        );
+        result.get(String(s._id))!.cogs += fees;
+      }),
   );
 
   return result;
@@ -1075,6 +1094,15 @@ async function aggregateDailyOrders(
     }
   }
 
+  if (appliesEuCategoryFees(cogsMode) && storeOids.length === 1) {
+    const dayKeys = dayKeysInSlice(slice, storeTimeZone);
+    const euFees = await sumEuCategoryFeesByDay(storeOids[0], dayKeys);
+    for (const [dateKey, fee] of euFees) {
+      const data = result.get(dateKey);
+      if (data && fee > 0) data.cogs += fee;
+    }
+  }
+
   return result;
 }
 
@@ -1167,6 +1195,18 @@ async function aggregateDailyOrdersByStore(
           const key = storeDayKey(dateKey, sid);
           const row = map.get(key) ?? zeroRow();
           row.cogs = dayCogs.get(dateKey) ?? 0;
+          map.set(key, row);
+        }
+      }
+
+      if (appliesEuCategoryFees(mode)) {
+        const dayKeys = dayKeysInSlice(slice, tz);
+        const euFees = await sumEuCategoryFeesByDay(store._id, dayKeys);
+        for (const [dateKey, fee] of euFees) {
+          if (fee <= 0) continue;
+          const key = storeDayKey(dateKey, sid);
+          const row = map.get(key) ?? zeroRow();
+          row.cogs += fee;
           map.set(key, row);
         }
       }
@@ -2424,6 +2464,10 @@ export async function buildWorkspaceSummary(
 
     if (mode === "day" && storeOid) {
       agg.cogs = await sumManualCogsForPeriod([storeOid], slice, storeTz);
+    }
+
+    if (storeOid && mode && appliesEuCategoryFees(mode)) {
+      agg.cogs += await sumEuCategoryFeesForPeriod([storeOid], slice, storeTz);
     }
 
     return agg;
