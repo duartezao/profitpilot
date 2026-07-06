@@ -123,6 +123,33 @@ async function excludeVariantsWithCatalogCost(
   return rows.filter((r) => !resolved.has(`${r.storeId}:${r.variantId}`));
 }
 
+/** Título do catálogo (produto + variante cor/tamanho) quando existir. */
+async function enrichMissingCostTitles(
+  storeIds: Types.ObjectId[],
+  rows: SoldVariantMissingCost[],
+): Promise<SoldVariantMissingCost[]> {
+  if (!rows.length) return rows;
+
+  const variantIds = [...new Set(rows.map((r) => r.variantId))];
+  const catalog = await ProductCost.find({
+    storeId: { $in: storeIds },
+    variantId: { $in: variantIds },
+  })
+    .select("storeId variantId title")
+    .lean();
+
+  const titleByKey = new Map(
+    catalog
+      .filter((c) => c.title?.trim())
+      .map((c) => [`${String(c.storeId)}:${String(c.variantId)}`, c.title!.trim()]),
+  );
+
+  return rows.map((r) => ({
+    ...r,
+    title: titleByKey.get(`${r.storeId}:${r.variantId}`) ?? r.title,
+  }));
+}
+
 /**
  * Variantes vendidas sem COGS resolvível.
  * Assimila custos do catálogo nas encomendas e só lista as que ficam sem valor.
@@ -140,7 +167,8 @@ export async function listSoldVariantsMissingCost(
   }
 
   const rows = await listSoldVariantsMissingCostFromOrders(storeIds);
-  return excludeVariantsWithCatalogCost(storeIds, rows);
+  const missing = await excludeVariantsWithCatalogCost(storeIds, rows);
+  return enrichMissingCostTitles(storeIds, missing);
 }
 
 /** Conta variantes distintas vendidas sem custo resolvível (opcionalmente só no período). */

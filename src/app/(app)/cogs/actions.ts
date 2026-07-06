@@ -20,7 +20,7 @@ import {
   clearManualOrderCogs,
   isCogsInputCurrency,
 } from "@/lib/manual-cogs";
-import { saveEuCategoryFeeDay } from "@/lib/eu-category-fees";
+import { saveEuCategoryFeeDay, EU_CATEGORY_FEE_EFFECTIVE_FROM } from "@/lib/eu-category-fees";
 import { convertCogsInputToStoreCurrency } from "@/lib/order-money";
 import { formatDateInput, parseDateInput } from "@/lib/period";
 import { resolveAdSpendRange } from "@/lib/ad-spend";
@@ -371,8 +371,14 @@ export async function saveEuCategoryFeeDayAction(
   if (!store) return { error: "Loja não encontrada ou sem acesso." };
 
   const { fromKey } = resolveAdSpendRange(store.importStartDate, store.createdAt);
-  if (date < fromKey) {
-    return { error: `Só podes registar taxas a partir de ${fromKey}.` };
+  const minKey =
+    fromKey > EU_CATEGORY_FEE_EFFECTIVE_FROM
+      ? fromKey
+      : EU_CATEGORY_FEE_EFFECTIVE_FROM;
+  if (date < minKey) {
+    return {
+      error: `Só podes registar taxas a partir de ${minKey} (vigência da taxa EU: ${EU_CATEGORY_FEE_EFFECTIVE_FROM}).`,
+    };
   }
 
   try {

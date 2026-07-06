@@ -14,8 +14,37 @@ import {
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
 import type { PeriodSlice } from "@/lib/ad-spend";
-import { startOfDay, addDays, formatDateInput } from "@/lib/period";
+import { startOfDay, addDays, formatDateInput, parseDateInput } from "@/lib/period";
 import type { CogsMode } from "@/lib/cogs-modes";
+
+/** Shopify EU: 3 € por categoria por encomenda — vigência global. */
+export const EU_CATEGORY_FEE_EFFECTIVE_FROM = "2026-06-29";
+
+export function isEuCategoryFeeDay(dateKey: string): boolean {
+  return dateKey >= EU_CATEGORY_FEE_EFFECTIVE_FROM;
+}
+
+export function filterEuCategoryFeeDayKeys(dayKeys: string[]): string[] {
+  return dayKeys.filter(isEuCategoryFeeDay);
+}
+
+function resolveEuCategoryFeeRange(
+  importStartDate?: Date | null,
+  storeCreatedAt?: Date | null,
+): { from: Date; to: Date; fromKey: string; toKey: string } {
+  const range = resolveCogsRange(importStartDate, storeCreatedAt);
+  const feeStart = parseDateInput(EU_CATEGORY_FEE_EFFECTIVE_FROM);
+  if (!feeStart) return range;
+  const feeFrom = startOfDay(feeStart);
+  if (feeFrom > range.from) {
+    return {
+      ...range,
+      from: feeFrom,
+      fromKey: EU_CATEGORY_FEE_EFFECTIVE_FROM,
+    };
+  }
+  return range;
+}
 
 export type EuCategoryFeeRow = {
   dateKey: string;
@@ -90,7 +119,7 @@ export async function buildEuCategoryFeeRows(
   baseCurrency: string,
 ): Promise<EuCategoryFeeRow[]> {
   const tz = normalizeStoreTimezone(store.ianaTimezone);
-  const { from, to, toKey } = resolveCogsRange(
+  const { from, to, toKey } = resolveEuCategoryFeeRange(
     store.importStartDate,
     store.createdAt,
   );
@@ -112,6 +141,7 @@ export async function buildEuCategoryFeeRows(
           },
         },
       },
+      { $match: { _id: { $gte: EU_CATEGORY_FEE_EFFECTIVE_FROM } } },
     ]),
   ]);
 
@@ -163,8 +193,11 @@ export async function sumEuCategoryFeesForPeriod(
 
   if (!dayKeys.length) return 0;
 
+  const eligibleKeys = filterEuCategoryFeeDayKeys(dayKeys);
+  if (!eligibleKeys.length) return 0;
+
   const rows = await EuCategoryFeeDay.aggregate<{ total: number }>([
-    { $match: { storeId: { $in: storeIds }, dateKey: { $in: dayKeys } } },
+    { $match: { storeId: { $in: storeIds }, dateKey: { $in: eligibleKeys } } },
     { $group: { _id: null, total: { $sum: "$amount" } } },
   ]);
 
@@ -177,9 +210,12 @@ export async function sumEuCategoryFeesByDay(
 ): Promise<Map<string, number>> {
   if (!dayKeys.length) return new Map();
 
+  const eligibleKeys = filterEuCategoryFeeDayKeys(dayKeys);
+  if (!eligibleKeys.length) return new Map();
+
   const rows = await EuCategoryFeeDay.find({
     storeId,
-    dateKey: { $in: dayKeys },
+    dateKey: { $in: eligibleKeys },
   })
     .select("dateKey amount")
     .lean();

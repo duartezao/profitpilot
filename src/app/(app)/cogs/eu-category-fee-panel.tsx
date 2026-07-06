@@ -134,9 +134,10 @@ export function EuCategoryFeePanel({
         <h2 className="text-lg font-semibold">Taxas EU por categoria</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Total diário da taxa Shopify de 3 € por categoria por encomenda em{" "}
-          <Sensitive as="span">{storeName}</Sensitive>. Soma ao COGS do dia para
-          a margem e % de COGS ficarem correctas. Converte para {baseCurrency}{" "}
-          na dashboard.
+          <Sensitive as="span">{storeName}</Sensitive>. Só aplica desde{" "}
+          <span className="tabular-nums">29/06/2026</span> — dias anteriores não
+          aparecem. Soma ao COGS do dia para a margem e % de COGS ficarem
+          correctas. Converte para {baseCurrency} na dashboard.
         </p>
         {missingCount > 0 && (
           <p className="mt-2 text-sm text-warning">
