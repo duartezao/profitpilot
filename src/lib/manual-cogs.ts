@@ -62,7 +62,7 @@ export type OrderCogsRow = {
   missing: boolean;
 };
 
-function resolveCogsRange(
+export function resolveCogsRange(
   importStartDate?: Date | null,
   storeCreatedAt?: Date | null,
 ): { from: Date; to: Date; fromKey: string; toKey: string } {

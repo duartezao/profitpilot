@@ -4,6 +4,7 @@ import { connectToDatabase } from "@/lib/db";
 import { Order } from "@/models/Order";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { ManualCogsDay } from "@/models/ManualCogsDay";
+import { EuCategoryFeeDay } from "@/models/EuCategoryFeeDay";
 import { DailyNote } from "@/models/DailyNote";
 import { CashEntry } from "@/models/CashEntry";
 import { Expense } from "@/models/Expense";
@@ -23,6 +24,7 @@ export type StorePurgeCounts = {
   orders: number;
   manualAdSpend: number;
   manualCogsDays: number;
+  euCategoryFeeDays: number;
   dailyNotes: number;
   cashEntries: number;
   payouts: number;
@@ -50,6 +52,7 @@ export async function purgeStoreCompletely(
     orders,
     manualAdSpend,
     manualCogsDays,
+    euCategoryFeeDays,
     dailyNotes,
     cashEntries,
     payouts,
@@ -66,6 +69,7 @@ export async function purgeStoreCompletely(
     Order.deleteMany({ storeId: storeOid }),
     ManualAdSpend.deleteMany({ storeId: storeOid }),
     ManualCogsDay.deleteMany({ storeId: storeOid }),
+    EuCategoryFeeDay.deleteMany({ storeId: storeOid }),
     DailyNote.deleteMany({ storeId: storeOid }),
     CashEntry.deleteMany({ storeId: storeOid }),
     Payout.deleteMany({ storeId: storeOid }),
@@ -94,6 +98,7 @@ export async function purgeStoreCompletely(
     orders: orders.deletedCount,
     manualAdSpend: manualAdSpend.deletedCount,
     manualCogsDays: manualCogsDays.deletedCount,
+    euCategoryFeeDays: euCategoryFeeDays.deletedCount,
     dailyNotes: dailyNotes.deletedCount,
     cashEntries: cashEntries.deletedCount,
     payouts: payouts.deletedCount,

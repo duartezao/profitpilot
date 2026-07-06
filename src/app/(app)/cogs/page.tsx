@@ -12,11 +12,16 @@ import {
   getBaseCurrency,
   listOrdersForCogsPanel,
 } from "@/lib/manual-cogs";
+import {
+  buildEuCategoryFeeRows,
+  appliesEuCategoryFees,
+} from "@/lib/eu-category-fees";
 import { COGS_MODE_LABELS, type CogsMode } from "@/lib/cogs-modes";
 import { CostRow, type CostRowData } from "./cost-row";
 import { CogsCsvImport } from "./cogs-csv-import";
 import { OrderCogsPanel } from "./order-cogs-panel";
 import { DayCogsPanel } from "./day-cogs-panel";
+import { EuCategoryFeePanel } from "./eu-category-fee-panel";
 import { CollapsibleSection } from "@/components/collapsible-section";
 
 export const metadata: Metadata = { title: "Custos (COGS)" };
@@ -71,6 +76,13 @@ export default async function CogsPage({
   if (scoped && activeMode === "day") {
     dayRows = await buildCogsDayRows(scoped, baseCurrency);
   }
+
+  const showEuCategoryFees =
+    scoped && activeMode && appliesEuCategoryFees(activeMode);
+  const euFeeRows =
+    showEuCategoryFees && scoped
+      ? await buildEuCategoryFeeRows(scoped, baseCurrency)
+      : [];
 
   const showVariantTable =
     !activeMode || activeMode === "shopify" || activeMode === "variant";
@@ -172,6 +184,22 @@ export default async function CogsPage({
             baseCurrency={baseCurrency}
             inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
             rows={dayRows}
+          />
+        </CollapsibleSection>
+      )}
+
+      {showEuCategoryFees && scoped && (
+        <CollapsibleSection
+          title="Taxas EU por categoria"
+          description="Total diário da taxa Shopify (3 € por categoria por encomenda)."
+          flush
+        >
+          <EuCategoryFeePanel
+            storeId={String(scoped._id)}
+            storeName={scoped.name}
+            baseCurrency={baseCurrency}
+            inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+            rows={euFeeRows}
           />
         </CollapsibleSection>
       )}
