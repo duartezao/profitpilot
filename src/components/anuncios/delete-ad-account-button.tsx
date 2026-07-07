@@ -9,7 +9,7 @@ import {
 
 export function DeleteAdAccountButton({
   accountId,
-  label = "Desligar esta conta API?",
+  label = "Desligar esta conta API? O histórico de campanhas e gastos fica guardado na BD para finanças e relatórios.",
   onDeleted,
 }: {
   accountId: string;

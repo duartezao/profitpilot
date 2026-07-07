@@ -6,6 +6,7 @@ export const LIVE_QUERY_PREFIXES = new Set([
   "treasury",
   "metrics-treasury",
   "ad-spend-view",
+  "ad-campaigns",
   "decision-summary",
   "payouts",
   "products-ranking",

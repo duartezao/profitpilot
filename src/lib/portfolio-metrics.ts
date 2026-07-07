@@ -23,6 +23,7 @@ import {
 } from "@/lib/utils";
 import { buildStoreColorMap } from "@/lib/store-colors";
 import { Store } from "@/models/Store";
+import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
 import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 
 export type SummaryWorkspace = {
@@ -388,6 +389,22 @@ export async function buildPortfolioSummary(
       ? `Todos os workspaces (${workspaceIds.length})`
       : `${workspaceIds.length} workspaces`;
 
+  const wsOids = workspaceIds
+    .filter((id) => mongoose.isValidObjectId(id))
+    .map((id) => new mongoose.Types.ObjectId(id));
+  const portfolioStores = wsOids.length
+    ? await Store.find({
+        workspaceId: { $in: wsOids },
+        deletedAt: null,
+        ...NON_ARCHIVED_STORE_FILTER,
+      })
+        .select("_id")
+        .lean()
+    : [];
+  const lastSyncedAt = await resolveLastSyncedAtForStoreIds(
+    portfolioStores.map((s) => String(s._id)),
+  );
+
   return {
     portfolioMode: true,
     portfolioLabel: label,
@@ -420,6 +437,7 @@ export async function buildPortfolioSummary(
     profitWindowStatus: "provisional",
     profitWindowNote: "Lucro provisório — período dentro da janela de 30 dias; reembolsos ainda podem alterar o resultado.",
     generatedAt: new Date().toISOString(),
+    lastSyncedAt,
     monthlyGoals: null,
   };
 }

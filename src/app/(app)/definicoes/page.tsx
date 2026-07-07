@@ -28,8 +28,7 @@ import { FeeSchedulePanel } from "./fee-schedule-panel";
 import { OwnedWorkspacesPanel } from "./owned-workspaces-panel";
 import { StoreSettingsBlock } from "./store-settings-block";
 import { StoreDataPanel } from "./store-data-panel";
-import { SettingsCollapsibleSection } from "@/components/settings-collapsible-section";
-import { SettingsNav } from "@/components/settings-nav";
+import { DefinicoesTabs } from "@/components/settings/definicoes-tabs";
 import {
   buildFeeScheduleViews,
   ensureFeeSchedule,
@@ -193,294 +192,278 @@ export default async function DefinicoesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Definições</h1>
         <p className="text-sm text-muted-foreground">
-          Conta, workspaces e configuração das lojas — abre só o que precisares.
+          Conta, workspaces e configuração das lojas.
         </p>
       </div>
 
-      <SettingsNav
-        showInvites={TEAM_INVITES_ENABLED && pendingInvitations.length > 0}
-        showSendInvites={TEAM_INVITES_ENABLED && canInvite}
-        showMoveStores={canAssignStores}
-        showTeam={TEAM_MEMBERSHIP_ENABLED}
-      />
-
-      <SettingsCollapsibleSection id="conta" title="Conta">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="font-medium" data-sensitive>{user?.name}</p>
-            <p className="text-sm text-muted-foreground" data-sensitive>{user?.email}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {TEAM_MEMBERSHIP_ENABLED ? (
-                <>
-                  {roleLabel[user?.role ?? "viewer"]} ·{" "}
-                  <span data-sensitive>{user?.workspaceName}</span>
-                </>
-              ) : (
-                <span data-sensitive>{user?.workspaceName}</span>
-              )}
-            </p>
-          </div>
-          <form action={logoutAction}>
-            <button
-              type="submit"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted sm:w-auto"
-            >
-              <LogOut className="h-4 w-4" />
-              Terminar sessão
-            </button>
-          </form>
-        </div>
-      </SettingsCollapsibleSection>
-
-      {TEAM_INVITES_ENABLED && pendingInvitations.length > 0 && (
-        <SettingsCollapsibleSection
-          id="convites"
-          title="Convites pendentes"
-          badge={
-            <span className="rounded-md border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-              {pendingInvitations.length}
-            </span>
-          }
-        >
-          <PendingInvitations invitations={pendingInvitations} embedded />
-        </SettingsCollapsibleSection>
-      )}
-
-      <SettingsCollapsibleSection
-        id="meus-workspaces"
-        title="Os teus workspaces"
-        description="Cria, renomeia ou apaga workspaces de que és proprietário. Sem lojas apaga de imediato; com lojas é preciso confirmação dupla."
-      >
-        <OwnedWorkspacesPanel
-          workspaces={ownedWorkspaces}
-          currentWorkspaceId={user?.workspaceId ?? ""}
-        />
-      </SettingsCollapsibleSection>
-
-      <SettingsCollapsibleSection
-        id="workspace-activo"
-        title="Workspace activo"
-        description="Moeda base, metas e impostos do workspace que estás a ver agora (sessão)."
-      >
-        <WorkspaceForm
-          canEdit={canEditWorkspace}
-          values={{
-            name: workspace?.name ?? "",
-            baseCurrency: workspace?.baseCurrency ?? "EUR",
-            taxReservePercent: workspace?.taxReservePercent ?? 0,
-            netMarginMin: workspace?.targets?.netMarginMin ?? 15,
-            refundRateMax: workspace?.targets?.refundRateMax ?? 5,
-            chargebackRateMax: workspace?.targets?.chargebackRateMax ?? 1,
-            poasMin: workspace?.targets?.poasMin ?? 1,
-            monthlyRevenueGoal: workspace?.targets?.monthlyRevenueGoal ?? 0,
-            monthlyProfitGoal: workspace?.targets?.monthlyProfitGoal ?? 0,
-            refundWindowDays: workspace?.refundWindowDays ?? 30,
-          }}
-        />
-      </SettingsCollapsibleSection>
-
-      {TEAM_INVITES_ENABLED && canInvite && !TEAM_MEMBERSHIP_ENABLED && (
-        <SettingsCollapsibleSection
-          id="convidar"
-          title="Convidar membros"
-          description="Envia convites por email ou utilizador. A pessoa vê o pedido em Definições ao iniciar sessão."
-          defaultOpen
-        >
-          <InviteMemberForm stores={inviteStores} />
-          <SentInvitations invitations={sentInvitations} />
-        </SettingsCollapsibleSection>
-      )}
-
-      {TEAM_MEMBERSHIP_ENABLED && (
-        <SettingsCollapsibleSection
-          id="equipa"
-          title="Equipa"
-          description={
-            canManageTeam
-              ? "Convida membros, define papéis e que lojas podem ver."
-              : "Membros com acesso a este workspace. Só o proprietário gere permissões."
-          }
-        >
-          <TeamMembers
-            members={teamMembers}
-            actorRole={user?.role ?? "viewer"}
-            actorUserId={user?.id ?? ""}
-            canManage={canManageTeam}
-            isWorkspaceOwner={isWorkspaceOwner}
-            workspaceOwner={workspaceOwner}
-            stores={inviteStores}
-            sentInvitations={sentInvitations}
-          />
-        </SettingsCollapsibleSection>
-      )}
-
-      {canAssignStores && (
-        <SettingsCollapsibleSection
-          id="lojas-workspaces"
-          title="Mover lojas entre workspaces"
-          description="Reorganiza lojas entre workspaces que geres."
-        >
-          <StoreWorkspaceManager
-            stores={storeWorkspaceRows}
-            workspaces={workspaceOptions}
-          />
-        </SettingsCollapsibleSection>
-      )}
-
-      <SettingsCollapsibleSection
-        id="google-ads"
-        title="Google Ads"
-        description="Autoriza cada Gmail uma vez — nas lojas só escolhes Gmail + Customer ID."
-      >
-        <Suspense fallback={<div className="h-24 animate-pulse rounded-lg bg-muted" />}>
-          <GoogleWorkspaceLoginsPanel
-            logins={googleLogins}
-            canEdit={canEditAds}
-          />
-        </Suspense>
-      </SettingsCollapsibleSection>
-
-      <SettingsCollapsibleSection
-        id="lojas"
-        title={
-          <>
-            Lojas ·{" "}
-            <span data-sensitive>{workspace?.name ?? "workspace"}</span>
-          </>
+      <DefinicoesTabs
+        showEquipa={
+          TEAM_MEMBERSHIP_ENABLED ||
+          (TEAM_INVITES_ENABLED && (pendingInvitations.length > 0 || canInvite))
         }
-        description="Nome, sync, banca inicial, país das sessões, COGS e taxas — uma secção por loja."
-        badge={
-          stores.length > 0 ? (
-            <span className="rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              {stores.length} {stores.length === 1 ? "loja" : "lojas"}
-            </span>
-          ) : undefined
-        }
-      >
-        {stores.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-            Ainda não tens lojas. Adiciona uma em Lojas.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {stores.map((s) => {
-              const tz = normalizeStoreTimezone(s.ianaTimezone);
-              const floorKey =
-                importDateKey(s.importStartDate, s.createdAt, tz) ??
-                dateKeyInTimezone(new Date(s.createdAt ?? Date.now()), tz);
-              const schedule = ensureFeeSchedule(
-                s.feeSchedule as FeeScheduleEntry[] | undefined,
-                s.feeConfig,
-                floorKey,
-              );
-              const currency = s.currency ?? workspace?.baseCurrency ?? "EUR";
-              const baseCurrency = workspace?.baseCurrency ?? "EUR";
-              const conversionPercent = shopifyCurrencyConversionPercent(
-                currency,
-                baseCurrency,
-              );
-              const todayKey = dateKeyInTimezone(new Date(), tz);
-              const currentFee = resolveFeeConfigForDateKey(
-                schedule,
-                s.feeConfig,
-                todayKey,
-                floorKey,
-              );
-              const latest = schedule[schedule.length - 1]!;
-              const status = (s.status ?? "active") as
-                | "active"
-                | "paused"
-                | "archived";
-
-              const initialFeeEntry =
-                schedule.find((e) => e.effectiveFromKey === floorKey) ??
-                schedule[0]!;
-              const importStartDateStr = s.importStartDate
-                ? new Date(s.importStartDate).toISOString().slice(0, 10)
-                : floorKey;
-
-              return (
-                <StoreSettingsBlock
-                  key={String(s._id)}
-                  storeName={s.name}
-                  displayUrl={getStoreDisplayUrl(s) ?? s.shopDomain ?? ""}
-                  status={status}
+        storeCount={stores.length}
+        pendingInviteCount={pendingInvitations.length}
+        panels={{
+          conta: (
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-medium" data-sensitive>{user?.name}</p>
+                <p className="text-sm text-muted-foreground" data-sensitive>{user?.email}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {TEAM_MEMBERSHIP_ENABLED ? (
+                    <>
+                      {roleLabel[user?.role ?? "viewer"]} ·{" "}
+                      <span data-sensitive>{user?.workspaceName}</span>
+                    </>
+                  ) : (
+                    <span data-sensitive>{user?.workspaceName}</span>
+                  )}
+                </p>
+              </div>
+              <form action={logoutAction}>
+                <button
+                  type="submit"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted sm:w-auto"
                 >
-                  <StoreSettingsForm
-                    canEdit={canEditStores}
-                    globalSyncLabel={globalSyncLabel}
-                    baseCurrency={baseCurrency}
-                    store={{
-                      id: String(s._id),
-                      name: s.name,
-                      shopDomain: s.shopDomain ?? "",
-                      displayUrl: getStoreDisplayUrl(s) ?? "",
-                      currency,
-                      status,
-                      autoSync: s.autoSync ?? true,
-                      startingBalance: s.startingBalance ?? 0,
-                      startingBalanceDate: s.startingBalanceDate
-                        ? new Date(s.startingBalanceDate).toISOString().slice(0, 10)
-                        : "",
-                      analyticsSessionCountry:
-                        normalizeSessionCountry(s.analyticsSessionCountry) ?? "",
-                      cogsMode: (s.cogsMode ?? "shopify") as CogsMode,
-                      cogsInputCurrency: s.cogsInputCurrency ?? "EUR",
+                  <LogOut className="h-4 w-4" />
+                  Terminar sessão
+                </button>
+              </form>
+            </div>
+          ),
+          workspace: (
+            <>
+              <section id="meus-workspaces">
+                <h3 className="text-sm font-semibold">Os teus workspaces</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Cria, renomeia ou apaga workspaces de que és proprietário.
+                </p>
+                <div className="mt-4">
+                  <OwnedWorkspacesPanel
+                    workspaces={ownedWorkspaces}
+                    currentWorkspaceId={user?.workspaceId ?? ""}
+                  />
+                </div>
+              </section>
+              <section id="workspace-activo">
+                <h3 className="text-sm font-semibold">Workspace activo</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Moeda base, metas e impostos do workspace que estás a ver agora.
+                </p>
+                <div className="mt-4">
+                  <WorkspaceForm
+                    canEdit={canEditWorkspace}
+                    values={{
+                      name: workspace?.name ?? "",
+                      baseCurrency: workspace?.baseCurrency ?? "EUR",
+                      taxReservePercent: workspace?.taxReservePercent ?? 0,
+                      netMarginMin: workspace?.targets?.netMarginMin ?? 15,
+                      refundRateMax: workspace?.targets?.refundRateMax ?? 5,
+                      chargebackRateMax: workspace?.targets?.chargebackRateMax ?? 1,
+                      poasMin: workspace?.targets?.poasMin ?? 1,
+                      monthlyRevenueGoal: workspace?.targets?.monthlyRevenueGoal ?? 0,
+                      monthlyProfitGoal: workspace?.targets?.monthlyProfitGoal ?? 0,
+                      refundWindowDays: workspace?.refundWindowDays ?? 30,
                     }}
                   />
-                  <FeeSchedulePanel
-                    storeId={String(s._id)}
-                    canEdit={canEditStores}
-                    importStartDateKey={floorKey}
-                    entries={buildFeeScheduleViews(
-                      schedule,
-                      currency,
-                      conversionPercent,
-                    )}
-                    currentLabel={formatFeeConfigLabel(
-                      currentFee,
-                      currency,
-                      conversionPercent,
-                    )}
-                    currencyConversionPercent={conversionPercent}
-                    defaultProcessingPercent={latest.processingPercent}
-                    defaultProcessingFixed={latest.processingFixed}
-                    defaultTransactionFeePercent={latest.transactionFeePercent}
+                </div>
+              </section>
+              {canAssignStores && (
+                <section id="lojas-workspaces">
+                  <h3 className="text-sm font-semibold">Mover lojas entre workspaces</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Reorganiza lojas entre workspaces que geres.
+                  </p>
+                  <div className="mt-4">
+                    <StoreWorkspaceManager
+                      stores={storeWorkspaceRows}
+                      workspaces={workspaceOptions}
+                    />
+                  </div>
+                </section>
+              )}
+            </>
+          ),
+          equipa: (
+            <div className="space-y-6">
+              {TEAM_INVITES_ENABLED && pendingInvitations.length > 0 && (
+                <section id="convites">
+                  <h3 className="text-sm font-semibold">Convites pendentes</h3>
+                  <div className="mt-4">
+                    <PendingInvitations invitations={pendingInvitations} embedded />
+                  </div>
+                </section>
+              )}
+              {TEAM_INVITES_ENABLED && canInvite && !TEAM_MEMBERSHIP_ENABLED && (
+                <section id="convidar">
+                  <h3 className="text-sm font-semibold">Convidar membros</h3>
+                  <div className="mt-4 space-y-4">
+                    <InviteMemberForm stores={inviteStores} />
+                    <SentInvitations invitations={sentInvitations} />
+                  </div>
+                </section>
+              )}
+              {TEAM_MEMBERSHIP_ENABLED && (
+                <section id="equipa">
+                  <TeamMembers
+                    members={teamMembers}
+                    actorRole={user?.role ?? "viewer"}
+                    actorUserId={user?.id ?? ""}
+                    canManage={canManageTeam}
+                    isWorkspaceOwner={isWorkspaceOwner}
+                    workspaceOwner={workspaceOwner}
+                    stores={inviteStores}
+                    sentInvitations={sentInvitations}
                   />
-                  <StoreDataPanel
-                    storeId={String(s._id)}
-                    storeName={s.name}
-                    importStartDate={importStartDateStr}
-                    importFloorKey={floorKey}
-                    initialFees={normalizeFeeConfig(initialFeeEntry)}
-                    timezone={tz}
-                    timezoneSource={
-                      s.timezoneSource === "manual" ? "manual" : "shopify"
-                    }
-                    canEdit={canEditStores}
-                    canDelete={canEditWorkspace}
-                  />
-                </StoreSettingsBlock>
-              );
-            })}
-          </div>
-        )}
-      </SettingsCollapsibleSection>
+                </section>
+              )}
+            </div>
+          ),
+          lojas:
+            stores.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                Ainda não tens lojas. Adiciona uma em Lojas.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {stores.map((s) => {
+                  const tz = normalizeStoreTimezone(s.ianaTimezone);
+                  const floorKey =
+                    importDateKey(s.importStartDate, s.createdAt, tz) ??
+                    dateKeyInTimezone(new Date(s.createdAt ?? Date.now()), tz);
+                  const schedule = ensureFeeSchedule(
+                    s.feeSchedule as FeeScheduleEntry[] | undefined,
+                    s.feeConfig,
+                    floorKey,
+                  );
+                  const currency = s.currency ?? workspace?.baseCurrency ?? "EUR";
+                  const baseCurrency = workspace?.baseCurrency ?? "EUR";
+                  const conversionPercent = shopifyCurrencyConversionPercent(
+                    currency,
+                    baseCurrency,
+                  );
+                  const todayKey = dateKeyInTimezone(new Date(), tz);
+                  const currentFee = resolveFeeConfigForDateKey(
+                    schedule,
+                    s.feeConfig,
+                    todayKey,
+                    floorKey,
+                  );
+                  const latest = schedule[schedule.length - 1]!;
+                  const status = (s.status ?? "active") as
+                    | "active"
+                    | "paused"
+                    | "archived";
 
-      {cashStores.length > 0 && (
-        <SettingsCollapsibleSection
-          id="capital-negocio"
-          title="Capital no negócio"
-          description="Depósitos e levantamentos de caixa — separado do saldo inicial de cada loja."
-        >
-          <CashInjectionPanel
-            stores={cashStores}
-            entries={cashEntries}
-            canEdit={canEditStores}
-            embedded
-          />
-        </SettingsCollapsibleSection>
-      )}
+                  const initialFeeEntry =
+                    schedule.find((e) => e.effectiveFromKey === floorKey) ??
+                    schedule[0]!;
+                  const importStartDateStr = s.importStartDate
+                    ? new Date(s.importStartDate).toISOString().slice(0, 10)
+                    : floorKey;
+
+                  return (
+                    <StoreSettingsBlock
+                      key={String(s._id)}
+                      storeName={s.name}
+                      displayUrl={getStoreDisplayUrl(s) ?? s.shopDomain ?? ""}
+                      status={status}
+                    >
+                      <StoreSettingsForm
+                        canEdit={canEditStores}
+                        globalSyncLabel={globalSyncLabel}
+                        baseCurrency={baseCurrency}
+                        store={{
+                          id: String(s._id),
+                          name: s.name,
+                          shopDomain: s.shopDomain ?? "",
+                          displayUrl: getStoreDisplayUrl(s) ?? "",
+                          currency,
+                          status,
+                          autoSync: s.autoSync ?? true,
+                          startingBalance: s.startingBalance ?? 0,
+                          startingBalanceDate: s.startingBalanceDate
+                            ? new Date(s.startingBalanceDate).toISOString().slice(0, 10)
+                            : "",
+                          analyticsSessionCountry:
+                            normalizeSessionCountry(s.analyticsSessionCountry) ?? "",
+                          cogsMode: (s.cogsMode ?? "shopify") as CogsMode,
+                          cogsInputCurrency: s.cogsInputCurrency ?? "EUR",
+                        }}
+                      />
+                      <FeeSchedulePanel
+                        storeId={String(s._id)}
+                        canEdit={canEditStores}
+                        importStartDateKey={floorKey}
+                        entries={buildFeeScheduleViews(
+                          schedule,
+                          currency,
+                          conversionPercent,
+                        )}
+                        currentLabel={formatFeeConfigLabel(
+                          currentFee,
+                          currency,
+                          conversionPercent,
+                        )}
+                        currencyConversionPercent={conversionPercent}
+                        defaultProcessingPercent={latest.processingPercent}
+                        defaultProcessingFixed={latest.processingFixed}
+                        defaultTransactionFeePercent={latest.transactionFeePercent}
+                      />
+                      <StoreDataPanel
+                        storeId={String(s._id)}
+                        storeName={s.name}
+                        importStartDate={importStartDateStr}
+                        importFloorKey={floorKey}
+                        initialFees={normalizeFeeConfig(initialFeeEntry)}
+                        timezone={tz}
+                        timezoneSource={
+                          s.timezoneSource === "manual" ? "manual" : "shopify"
+                        }
+                        canEdit={canEditStores}
+                        canDelete={canEditWorkspace}
+                      />
+                    </StoreSettingsBlock>
+                  );
+                })}
+              </div>
+            ),
+          integracoes: (
+            <>
+              <section id="google-ads">
+                <h3 className="text-sm font-semibold">Google Ads</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Autoriza cada Gmail uma vez — nas lojas só escolhes Gmail + Customer ID.
+                </p>
+                <div className="mt-4">
+                  <Suspense fallback={<div className="h-24 animate-pulse rounded-lg bg-muted" />}>
+                    <GoogleWorkspaceLoginsPanel
+                      logins={googleLogins}
+                      canEdit={canEditAds}
+                    />
+                  </Suspense>
+                </div>
+              </section>
+              {cashStores.length > 0 && (
+                <section id="capital-negocio">
+                  <h3 className="text-sm font-semibold">Capital no negócio</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Depósitos e levantamentos de caixa — separado do saldo inicial de cada loja.
+                  </p>
+                  <div className="mt-4">
+                    <CashInjectionPanel
+                      stores={cashStores}
+                      entries={cashEntries}
+                      canEdit={canEditStores}
+                      embedded
+                    />
+                  </div>
+                </section>
+              )}
+            </>
+          ),
+        }}
+      />
     </div>
   );
 }

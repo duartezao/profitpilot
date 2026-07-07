@@ -4,6 +4,7 @@ import { Store } from "@/models/Store";
 import {
   credentialTokenForPlatform,
   decryptAdCredentials,
+  googleLoginCustomerIdFromCreds,
   loadActiveAdAccounts,
   type AdAccountCredentials,
 } from "@/lib/ad-accounts";
@@ -11,7 +12,9 @@ import type { AdPlatform } from "@/lib/ad-spend-platforms";
 import {
   loadStoreAdMetricsForDay,
   loadStoreAdMetricsFromDb,
+  type StoreAdMetricsBundle,
 } from "@/lib/ad-campaign-metrics";
+import { metricsFromCampaignTotals } from "@/lib/ad-campaign-types";
 import { fetchMetaAdInsightsForDay } from "@/lib/meta-ads";
 import { fetchGoogleAdInsightsForDay } from "@/lib/google-ads";
 import { fetchTiktokAdInsightsForDay } from "@/lib/tiktok-ads";
@@ -46,6 +49,7 @@ async function insightsForAccount(
         token,
         externalAccountId,
         dateKey,
+        googleLoginCustomerIdFromCreds(creds),
       );
       return { spend: r.spend, impressions: r.impressions, clicks: r.clicks };
     }
@@ -62,6 +66,59 @@ async function insightsForAccount(
   }
 }
 
+/**
+ * Métricas do dia com impressões garantidas para CPM/CTR.
+ * Se a BD tiver spend/cliques mas 0 impressões, complementa via API.
+ */
+export async function resolveStoreAdMetricsForDay(
+  storeId: string,
+  dateKey: string,
+  options?: { adAccountIds?: string[] },
+): Promise<StoreAdMetricsBundle | null> {
+  let metrics = await loadStoreAdMetricsForDay(storeId, dateKey, options);
+
+  const needsImpressions =
+    !metrics ||
+    (metrics.total.impressions <= 0 &&
+      (metrics.total.spend > 0 || metrics.total.clicks > 0));
+
+  if (!needsImpressions) return metrics;
+
+  const insights = await fetchStoreAdInsightsForDay(storeId, dateKey);
+  if (!insights) return metrics;
+
+  if (!metrics) {
+    return {
+      total: {
+        spend: insights.spend,
+        impressions: insights.impressions,
+        clicks: insights.clicks,
+        cpc: insights.cpc,
+        ctr: insights.ctr,
+        cpm: insights.cpm,
+      },
+      byPlatform: [],
+      campaigns: [],
+    };
+  }
+
+  const spend =
+    metrics.total.spend > 0 ? metrics.total.spend : insights.spend;
+  const clicks =
+    metrics.total.clicks > 0 ? metrics.total.clicks : insights.clicks;
+  const impressions = insights.impressions;
+
+  return {
+    ...metrics,
+    total: {
+      spend,
+      impressions,
+      clicks,
+      ...metricsFromCampaignTotals(spend, impressions, clicks),
+    },
+  };
+}
+
 /** Agrega CPC/CTR/CPM do dia a partir da BD (sync) ou das contas API. */
 export async function fetchStoreAdInsightsForDay(
   storeId: string,
@@ -70,8 +127,8 @@ export async function fetchStoreAdInsightsForDay(
   const fromDb = await loadStoreAdMetricsForDay(storeId, dateKey);
   if (
     fromDb &&
+    fromDb.total.impressions > 0 &&
     (fromDb.total.spend > 0 ||
-      fromDb.total.impressions > 0 ||
       fromDb.total.clicks > 0)
   ) {
     return {
@@ -113,7 +170,19 @@ export async function fetchStoreAdInsightsForDay(
     }
   }
 
-  if (spend <= 0 && impressions <= 0 && clicks <= 0) return null;
+  if (spend <= 0 && impressions <= 0 && clicks <= 0) {
+    if (fromDb && fromDb.total.spend > 0) {
+      return {
+        spend: fromDb.total.spend,
+        impressions: 0,
+        clicks: fromDb.total.clicks,
+        cpc: fromDb.total.cpc,
+        ctr: null,
+        cpm: null,
+      };
+    }
+    return null;
+  }
 
   return {
     spend,

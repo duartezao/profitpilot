@@ -31,14 +31,20 @@ export function AdSpendPlatformFields({
   disabled = false,
   compact = false,
   showZeroOption = false,
+  apiLinkedPlatforms = [],
+  lockedDate = false,
 }: {
   defaults?: PlatformDefaults;
   inputCurrency?: string;
   disabled?: boolean;
   compact?: boolean;
   showZeroOption?: boolean;
+  /** Plataformas com conta API — bloqueadas quando `lockedDate` (hoje). */
+  apiLinkedPlatforms?: AdPlatform[];
+  lockedDate?: boolean;
 }) {
   const fieldCls = compact ? compactInputCls : inputCls;
+  const apiSet = new Set(apiLinkedPlatforms);
 
   return (
     <div className="space-y-4">
@@ -48,7 +54,7 @@ export function AdSpendPlatformFields({
             type="checkbox"
             name="explicitZero"
             value="1"
-            disabled={disabled}
+            disabled={disabled || (lockedDate && apiLinkedPlatforms.length > 0)}
             className="mt-0.5 h-4 w-4 rounded border-border"
           />
           <span>
@@ -58,12 +64,17 @@ export function AdSpendPlatformFields({
             <span className="mt-0.5 block text-xs text-muted-foreground">
               Usa quando não correu ads em lado nenhum — o dia fica fechado a
               zero e deixa de aparecer em falta.
+              {lockedDate && apiLinkedPlatforms.length > 0
+                ? " Hoje as contas API sincronizam automaticamente — só podes marcar zero nas plataformas manuais."
+                : ""}
             </span>
           </span>
         </label>
       )}
       {AD_PLATFORMS.map((platform) => {
         const d = defaults[platform];
+        const apiLocked = lockedDate && apiSet.has(platform);
+        const platformDisabled = disabled || apiLocked;
         return (
           <fieldset
             key={platform}
@@ -72,13 +83,19 @@ export function AdSpendPlatformFields({
             <legend className="px-1 text-sm font-medium">
               {AD_PLATFORM_LABELS[platform]}
             </legend>
+            {apiLocked && (
+              <p className="mb-2 text-xs text-muted-foreground">
+                Conta API ligada — o gasto de hoje sincroniza automaticamente
+                (com fees). Preenche só plataformas sem API.
+              </p>
+            )}
             <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
                 <label className={labelCls}>Gasto em ads</label>
                 <DecimalInput
                   name={`${platform}_spend`}
                   defaultValue={d?.spend ?? ""}
-                  disabled={disabled}
+                  disabled={platformDisabled}
                   placeholder="0,00"
                   className={fieldCls}
                   data-sensitive
@@ -89,7 +106,7 @@ export function AdSpendPlatformFields({
                 <DecimalInput
                   name={`${platform}_extraFee`}
                   defaultValue={d?.extraFee ?? ""}
-                  disabled={disabled}
+                  disabled={platformDisabled}
                   placeholder="0,00"
                   className={fieldCls}
                   data-sensitive
@@ -101,7 +118,7 @@ export function AdSpendPlatformFields({
                   <DecimalInput
                     name={`${platform}_agencyPercent`}
                     defaultValue={d?.agencyPercent ?? ""}
-                    disabled={disabled}
+                    disabled={platformDisabled}
                     placeholder="0"
                     className={`${fieldCls} pr-7`}
                     data-sensitive
@@ -124,7 +141,8 @@ export function AdSpendPlatformFields({
       </div>
       <p className="text-xs text-muted-foreground">
         Preenche as plataformas que usaste ou marca «Sem gasto (0€)». Fee fixa
-        e % aplicam-se sobre o gasto em ads de cada plataforma.
+        e % aplicam-se sobre o gasto em ads de cada plataforma. Com conta API
+        ligada, o gasto de hoje actualiza sozinho na dashboard.
       </p>
     </div>
   );

@@ -3,6 +3,14 @@ import mongoose from "mongoose";
 import { AdCampaignDay } from "@/models/AdCampaignDay";
 import type { AdPlatform } from "@/lib/ad-spend-platforms";
 import { AD_PLATFORM_LABELS } from "@/lib/ad-spend-platforms";
+import {
+  metricsFromCampaignTotals,
+  roasFromCampaign,
+  shouldIncludeCampaignForDay,
+  type LiveCampaignRow,
+} from "@/lib/ad-campaign-types";
+import type { ApiAccountFees } from "@/lib/ad-api-fees";
+import { convertToBaseCurrency } from "@/lib/fx";
 
 export type PlatformAdMetrics = {
   platform: AdPlatform;
@@ -24,6 +32,9 @@ export type CampaignDayMetrics = {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions: number;
+  conversionValue: number;
+  roas: number | null;
   currency: string;
   cpc: number | null;
   ctr: number | null;
@@ -41,6 +52,14 @@ export type StoreAdMetricsBundle = {
   };
   byPlatform: PlatformAdMetrics[];
   campaigns: CampaignDayMetrics[];
+};
+
+export type LoadAdMetricsOptions = {
+  /**
+   * Filtrar por contas API (ex.: só activas para escala/decisão).
+   * Omitir = todo o histórico da loja (finanças/relatórios passados).
+   */
+  adAccountIds?: string[];
 };
 
 function metricsFromTotals(
@@ -62,6 +81,8 @@ function mapCampaignRow(r: {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions: number;
+  conversionValue: number;
   currency?: string | null;
 }): CampaignDayMetrics {
   const platform = r.platform as AdPlatform;
@@ -74,6 +95,9 @@ function mapCampaignRow(r: {
     spend: r.spend,
     impressions: r.impressions,
     clicks: r.clicks,
+    conversions: r.conversions,
+    conversionValue: r.conversionValue,
+    roas: roasFromCampaign(r.spend, r.conversionValue),
     currency: r.currency ?? "USD",
     ...m,
   };
@@ -83,15 +107,38 @@ function mapCampaignRow(r: {
 export async function loadStoreAdMetricsFromDb(
   storeId: string,
   dateKeys: string[],
+  options?: LoadAdMetricsOptions,
 ): Promise<StoreAdMetricsBundle | null> {
   if (!dateKeys.length) return null;
+  if (options?.adAccountIds && options.adAccountIds.length === 0) {
+    return {
+      total: {
+        spend: 0,
+        impressions: 0,
+        clicks: 0,
+        cpc: null,
+        ctr: null,
+        cpm: null,
+      },
+      byPlatform: [],
+      campaigns: [],
+    };
+  }
+
   const storeOid = new mongoose.Types.ObjectId(storeId);
-  const rows = await AdCampaignDay.find({
+  const query: Record<string, unknown> = {
     storeId: storeOid,
     dateKey: { $in: dateKeys },
-  })
+  };
+  if (options?.adAccountIds?.length) {
+    query.adAccountId = {
+      $in: options.adAccountIds.map((id) => new mongoose.Types.ObjectId(id)),
+    };
+  }
+
+  const rows = await AdCampaignDay.find(query)
     .select(
-      "campaignId campaignName platform spend impressions clicks currency dateKey",
+      "campaignId campaignName platform adAccountId spend impressions clicks conversions conversionValue currency dateKey",
     )
     .lean();
 
@@ -106,12 +153,15 @@ export async function loadStoreAdMetricsFromDb(
       spend: number;
       impressions: number;
       clicks: number;
+      conversions: number;
+      conversionValue: number;
       currency: string;
     }
   >();
 
   for (const r of rows) {
-    const key = `${r.platform}:${r.campaignId}`;
+    const accountPart = r.adAccountId ? String(r.adAccountId) : "legacy";
+    const key = `${r.platform}:${accountPart}:${r.campaignId}`;
     const prev = byCampaignKey.get(key);
     if (!prev) {
       byCampaignKey.set(key, {
@@ -121,18 +171,28 @@ export async function loadStoreAdMetricsFromDb(
         spend: r.spend ?? 0,
         impressions: r.impressions ?? 0,
         clicks: r.clicks ?? 0,
+        conversions: r.conversions ?? 0,
+        conversionValue: r.conversionValue ?? 0,
         currency: r.currency ?? "USD",
       });
     } else {
       prev.spend += r.spend ?? 0;
       prev.impressions += r.impressions ?? 0;
       prev.clicks += r.clicks ?? 0;
+      prev.conversions += r.conversions ?? 0;
+      prev.conversionValue += r.conversionValue ?? 0;
     }
   }
 
   const campaigns = [...byCampaignKey.values()]
     .map(mapCampaignRow)
-    .filter((c) => c.spend > 0 || c.impressions > 0 || c.clicks > 0)
+    .filter(
+      (c) =>
+        c.spend > 0 ||
+        c.impressions > 0 ||
+        c.clicks > 0 ||
+        c.conversions > 0,
+    )
     .sort((a, b) => b.spend - a.spend);
 
   const platformAgg = new Map<
@@ -187,6 +247,316 @@ export async function loadStoreAdMetricsFromDb(
 export async function loadStoreAdMetricsForDay(
   storeId: string,
   dateKey: string,
+  options?: LoadAdMetricsOptions,
 ): Promise<StoreAdMetricsBundle | null> {
-  return loadStoreAdMetricsFromDb(storeId, [dateKey]);
+  return loadStoreAdMetricsFromDb(storeId, [dateKey], options);
+}
+
+type DbCampaignRow = {
+  dateKey: string;
+  campaignId: string;
+  campaignName: string;
+  platform: AdPlatform;
+  adAccountId: string;
+  status: string;
+  statusLabel: string;
+  spendPlatform: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  conversionValue: number;
+  currency: string;
+  syncedAt: Date | null;
+};
+
+function applyFeesAndAggregateCampaignRows(
+  rows: DbCampaignRow[],
+  accountFees: Map<string, ApiAccountFees>,
+  accountNames: Map<string, string>,
+): LiveCampaignRow[] {
+  const dailyAccountSpend = new Map<string, number>();
+  for (const r of rows) {
+    const k = `${r.dateKey}:${r.adAccountId}`;
+    dailyAccountSpend.set(k, (dailyAccountSpend.get(k) ?? 0) + r.spendPlatform);
+  }
+
+  const agg = new Map<
+    string,
+    Omit<LiveCampaignRow, "spendPlatform"> & {
+      spendPlatform: number;
+      latestDateKey: string;
+    }
+  >();
+
+  for (const r of rows) {
+    const fees = accountFees.get(r.adAccountId) ?? {
+      extraFeeFixed: 0,
+      agencyFeePercent: 0,
+    };
+    const dayTotal =
+      dailyAccountSpend.get(`${r.dateKey}:${r.adAccountId}`) ?? r.spendPlatform;
+    const fixedShare =
+      dayTotal > 0 ? (fees.extraFeeFixed * r.spendPlatform) / dayTotal : 0;
+    const agencyFee =
+      fees.agencyFeePercent > 0
+        ? (r.spendPlatform * fees.agencyFeePercent) / 100
+        : 0;
+    const spendTotal = r.spendPlatform + fixedShare + agencyFee;
+
+    const key = `${r.platform}:${r.campaignId}`;
+    const prev = agg.get(key);
+    if (!prev) {
+      agg.set(key, {
+        campaignId: r.campaignId,
+        campaignName: r.campaignName,
+        platform: r.platform,
+        platformLabel: AD_PLATFORM_LABELS[r.platform] ?? r.platform,
+        adAccountId: r.adAccountId,
+        adAccountName:
+          accountNames.get(r.adAccountId)?.trim() ||
+          r.adAccountId ||
+          r.platform,
+        status: r.status || "—",
+        statusLabel: r.statusLabel || "—",
+        spendPlatform: r.spendPlatform,
+        spend: spendTotal,
+        impressions: r.impressions,
+        clicks: r.clicks,
+        conversions: r.conversions,
+        conversionValue: r.conversionValue,
+        roas: null,
+        currency: r.currency,
+        cpc: null,
+        ctr: null,
+        cpm: null,
+        latestDateKey: r.dateKey,
+      });
+      continue;
+    }
+
+    prev.spendPlatform += r.spendPlatform;
+    prev.spend += spendTotal;
+    prev.impressions += r.impressions;
+    prev.clicks += r.clicks;
+    prev.conversions += r.conversions;
+    prev.conversionValue += r.conversionValue;
+    if (r.dateKey >= prev.latestDateKey) {
+      prev.status = r.status || prev.status;
+      prev.statusLabel = r.statusLabel || prev.statusLabel;
+      prev.campaignName = r.campaignName || prev.campaignName;
+      prev.latestDateKey = r.dateKey;
+    }
+  }
+
+  return [...agg.values()]
+    .map(({ latestDateKey: _d, ...r }) => {
+      const spend = Math.round(r.spend * 100) / 100;
+      const conversionValue = Math.round(r.conversionValue * 100) / 100;
+      const conversions = Math.round(r.conversions * 100) / 100;
+      return {
+        ...r,
+        spend,
+        conversions,
+        conversionValue,
+        roas: roasFromCampaign(spend, conversionValue),
+        ...metricsFromCampaignTotals(spend, r.impressions, r.clicks),
+      };
+    })
+    .sort((a, b) => b.spend - a.spend);
+}
+
+async function convertCampaignRowsToBase(
+  rows: LiveCampaignRow[],
+  baseCurrency: string,
+  fxDateKey: string,
+): Promise<LiveCampaignRow[]> {
+  const base = baseCurrency.toUpperCase();
+  const rateByCurrency = new Map<string, number>();
+
+  async function amountInBase(
+    amount: number,
+    fromCurrency: string,
+  ): Promise<number> {
+    if (!amount) return 0;
+    const from = fromCurrency.toUpperCase();
+    if (from === base) return amount;
+    const cached = rateByCurrency.get(from);
+    if (cached != null) return Math.round(amount * cached * 100) / 100;
+    const fx = await convertToBaseCurrency(amount, from, base, fxDateKey);
+    rateByCurrency.set(from, fx.fxRate);
+    return fx.amountBase;
+  }
+
+  const out: LiveCampaignRow[] = [];
+  for (const r of rows) {
+    const inputCurrency = (r.currency || "USD").toUpperCase();
+    const spendInput = r.spend;
+    const spendPlatformInput = r.spendPlatform;
+    const conversionValueInput = r.conversionValue;
+
+    if (inputCurrency === base) {
+      out.push({
+        ...r,
+        inputCurrency,
+        spendInput,
+        spendPlatformInput,
+        currency: base,
+        roas: roasFromCampaign(spendInput, conversionValueInput),
+        ...metricsFromCampaignTotals(spendInput, r.impressions, r.clicks),
+      });
+      continue;
+    }
+
+    const spend = await amountInBase(spendInput, inputCurrency);
+    const spendPlatform =
+      spendPlatformInput != null
+        ? await amountInBase(spendPlatformInput, inputCurrency)
+        : undefined;
+    const conversionValue = await amountInBase(
+      conversionValueInput,
+      inputCurrency,
+    );
+
+    out.push({
+      ...r,
+      inputCurrency,
+      spendInput,
+      spendPlatformInput,
+      currency: base,
+      spend,
+      spendPlatform,
+      conversionValue,
+      roas: roasFromCampaign(spend, conversionValue),
+      ...metricsFromCampaignTotals(spend, r.impressions, r.clicks),
+    });
+  }
+  return out;
+}
+
+/** Campanhas a partir da BD (um ou vários dias), com fees aplicadas por dia. */
+export async function loadStoreCampaignsFromDb(
+  storeId: string,
+  dateKeys: string[],
+  accounts: Array<{
+    id: string;
+    platform: AdPlatform;
+    accountName: string;
+    externalAccountId: string;
+    apiExtraFeeFixed: number;
+    apiAgencyFeePercent: number;
+  }>,
+  options: { baseCurrency: string; fxDateKey: string },
+): Promise<{
+  campaigns: LiveCampaignRow[];
+  syncedAt: string | null;
+  daysWithData: number;
+}> {
+  if (!dateKeys.length) {
+    return { campaigns: [], syncedAt: null, daysWithData: 0 };
+  }
+
+  const storeOid = new mongoose.Types.ObjectId(storeId);
+  const activePlatforms = [...new Set(accounts.map((a) => a.platform))];
+  const activeAccountIds = new Set(accounts.map((a) => a.id));
+
+  const rawRows = await AdCampaignDay.find({
+    storeId: storeOid,
+    dateKey: { $in: dateKeys },
+    platform: { $in: activePlatforms },
+  })
+    .select(
+      "dateKey campaignId campaignName platform adAccountId spend impressions clicks conversions conversionValue currency status statusLabel syncedAt",
+    )
+    .lean();
+
+  const bestByKey = new Map<string, (typeof rawRows)[number]>();
+  for (const r of rawRows) {
+    const key = `${r.platform}:${r.dateKey}:${r.campaignId}`;
+    const accId = r.adAccountId ? String(r.adAccountId) : "";
+    const prev = bestByKey.get(key);
+    if (!prev) {
+      bestByKey.set(key, r);
+      continue;
+    }
+    const prevActive = activeAccountIds.has(
+      prev.adAccountId ? String(prev.adAccountId) : "",
+    );
+    const curActive = activeAccountIds.has(accId);
+    if (curActive && !prevActive) {
+      bestByKey.set(key, r);
+      continue;
+    }
+    if (curActive === prevActive) {
+      const prevTs = prev.syncedAt ? new Date(prev.syncedAt).getTime() : 0;
+      const curTs = r.syncedAt ? new Date(r.syncedAt).getTime() : 0;
+      if (curTs >= prevTs) bestByKey.set(key, r);
+    }
+  }
+
+  const rows = [...bestByKey.values()].filter((r) =>
+    shouldIncludeCampaignForDay(r.status ?? "", {
+      spend: r.spend ?? 0,
+      impressions: r.impressions ?? 0,
+      clicks: r.clicks ?? 0,
+      conversions: r.conversions ?? 0,
+    }),
+  );
+
+  const accountFees = new Map<string, ApiAccountFees>();
+  const accountNames = new Map<string, string>();
+  for (const acc of accounts) {
+    accountFees.set(acc.id, {
+      extraFeeFixed: acc.apiExtraFeeFixed ?? 0,
+      agencyFeePercent: acc.apiAgencyFeePercent ?? 0,
+    });
+    accountNames.set(
+      acc.id,
+      acc.accountName?.trim() || acc.externalAccountId || acc.platform,
+    );
+  }
+
+  const daysWithData = new Set(
+    rows.map((r) => r.dateKey).filter((k): k is string => Boolean(k)),
+  ).size;
+
+  const dbRows: DbCampaignRow[] = rows.map((r) => ({
+    dateKey: r.dateKey,
+    campaignId: r.campaignId,
+    campaignName: r.campaignName?.trim() || "Campanha",
+    platform: r.platform as AdPlatform,
+    adAccountId: r.adAccountId ? String(r.adAccountId) : "",
+    status: r.status ?? "",
+    statusLabel: r.statusLabel ?? "",
+    spendPlatform: r.spend ?? 0,
+    impressions: r.impressions ?? 0,
+    clicks: r.clicks ?? 0,
+    conversions: r.conversions ?? 0,
+    conversionValue: r.conversionValue ?? 0,
+    currency: r.currency ?? "USD",
+    syncedAt: r.syncedAt ?? null,
+  }));
+
+  const campaignsRaw = applyFeesAndAggregateCampaignRows(
+    dbRows,
+    accountFees,
+    accountNames,
+  );
+
+  const campaigns = await convertCampaignRowsToBase(
+    campaignsRaw,
+    options.baseCurrency,
+    options.fxDateKey,
+  );
+
+  const latestSync = rows.reduce<Date | null>((max, r) => {
+    const t = r.syncedAt;
+    if (!t) return max;
+    return !max || t > max ? t : max;
+  }, null);
+
+  return {
+    campaigns,
+    syncedAt: latestSync?.toISOString() ?? null,
+    daysWithData,
+  };
 }

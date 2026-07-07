@@ -16,6 +16,7 @@ import {
 } from "@/lib/period";
 import type { StoreAccess } from "@/lib/store-access";
 import { loadStoreAdMetricsFromDb } from "@/lib/ad-campaign-metrics";
+import { loadActiveAdAccountIdsForStore } from "@/lib/ad-accounts";
 import {
   buildCampaignDecisions,
   pickBestCampaign,
@@ -48,6 +49,8 @@ export type DecisionSummary = {
   actions: TodayAction[];
   rows: DecisionRow[];
   campaignRows: CampaignDecisionRow[];
+  /** BER da loja no período (para campanhas scale/descale). */
+  storeBerRoas: string | null;
   treasury: {
     available: string;
     incoming: string;
@@ -270,12 +273,20 @@ export async function buildDecisionSummary(
   ]);
 
   let campaignRows: CampaignDecisionRow[] = [];
+  let storeBerRoas: string | null = null;
   if (storeId) {
     const dayKeys = dayKeysFromPeriod(period);
-    const metrics = await loadStoreAdMetricsFromDb(storeId, dayKeys);
+    const activeAccountIds = await loadActiveAdAccountIdsForStore(storeId);
+    const metrics = await loadStoreAdMetricsFromDb(storeId, dayKeys, {
+      adAccountIds: activeAccountIds,
+    });
     if (metrics?.campaigns.length) {
       const storeLine = pnl.stores[0];
+      const storeBer = storeLine ? berRoas(storeLine) : berRoas(pnl.totals);
+      storeBerRoas =
+        storeBer != null ? storeBer.toFixed(2).replace(".", ",") : null;
       campaignRows = buildCampaignDecisions(metrics.campaigns, {
+        storeBer,
         storeRevenue: storeLine?.revenue ?? pnl.totals.revenue,
         totalAdSpend: storeLine?.adSpend ?? pnl.totals.adSpend,
       });
@@ -316,6 +327,7 @@ export async function buildDecisionSummary(
     actions,
     rows,
     campaignRows,
+    storeBerRoas,
     treasury: treasury ? treasuryCard(treasury, storeId) : null,
     generatedAt: new Date().toISOString(),
   };

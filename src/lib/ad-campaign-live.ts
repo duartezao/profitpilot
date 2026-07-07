@@ -2,19 +2,23 @@ import "server-only";
 import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
+import { Workspace } from "@/models/Workspace";
 import {
   credentialTokenForPlatform,
   decryptAdCredentials,
-  loadActiveAdAccounts,
+  googleLoginCustomerIdFromCreds,
+  loadSyncAdAccountsForStore,
   type AdAccountCredentials,
 } from "@/lib/ad-accounts";
 import { AD_PLATFORM_LABELS, type AdPlatform } from "@/lib/ad-spend-platforms";
 import {
+  aggregateCampaignPeriodTotals,
   metricsFromCampaignTotals,
+  roasFromCampaign,
   type LiveCampaignRow,
   type StoreCampaignsView,
 } from "@/lib/ad-campaign-types";
-import { loadStoreAdMetricsForDay } from "@/lib/ad-campaign-metrics";
+import { loadStoreCampaignsFromDb } from "@/lib/ad-campaign-metrics";
 import { fetchMetaLiveCampaigns } from "@/lib/meta-ads";
 import {
   fetchGoogleLiveCampaigns,
@@ -25,6 +29,11 @@ import {
   dateKeyInTimezone,
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
+import {
+  dateKeysFromResolvedPeriod,
+  type PeriodInput,
+} from "@/lib/period";
+import { resolvePeriodForStore } from "@/lib/ad-campaign-period";
 
 async function fetchLiveForAccount(
   platform: AdPlatform,
@@ -35,11 +44,11 @@ async function fetchLiveForAccount(
   adAccountName: string,
   allocationPct: number,
 ): Promise<LiveCampaignRow[]> {
-    if (platform === "google" && !googleAdsServerConfigStatus().apiReady) {
-      throw new Error(
-        "Google Ads API indisponível neste servidor — confirma GOOGLE_ADS_DEVELOPER_TOKEN na Vercel e faz redeploy.",
-      );
-    }
+  if (platform === "google" && !googleAdsServerConfigStatus().apiReady) {
+    throw new Error(
+      "Google Ads API indisponível — confirma GOOGLE_ADS_DEVELOPER_TOKEN.",
+    );
+  }
 
   const token = credentialTokenForPlatform(platform, creds);
   let rows: LiveCampaignRow[] = [];
@@ -53,195 +62,231 @@ async function fetchLiveForAccount(
         token,
         externalAccountId,
         dateKey,
+        googleLoginCustomerIdFromCreds(creds),
       );
       break;
     case "tiktok":
-      rows = await fetchTiktokLiveCampaigns(
-        token,
-        externalAccountId,
-        dateKey,
-      );
+      rows = await fetchTiktokLiveCampaigns(token, externalAccountId, dateKey);
       break;
     default:
       return [];
   }
 
   const alloc = allocationPct / 100;
-  return rows.map((r) => ({
-    ...r,
-    platform,
-    platformLabel: AD_PLATFORM_LABELS[platform] ?? platform,
-    adAccountId,
-    adAccountName,
-    spend: r.spend * alloc,
-    impressions: Math.round(r.impressions * alloc),
-    clicks: Math.round(r.clicks * alloc),
-    ...metricsFromCampaignTotals(
-      r.spend * alloc,
-      Math.round(r.impressions * alloc),
-      Math.round(r.clicks * alloc),
-    ),
-  }));
+  return rows.map((r) => {
+    const spend = r.spend * alloc;
+    const impressions = Math.round(r.impressions * alloc);
+    const clicks = Math.round(r.clicks * alloc);
+    const conversions = r.conversions * alloc;
+    const conversionValue = r.conversionValue * alloc;
+    return {
+      ...r,
+      platform,
+      platformLabel: AD_PLATFORM_LABELS[platform] ?? platform,
+      adAccountId,
+      adAccountName,
+      spend,
+      spendPlatform: r.spendPlatform != null ? r.spendPlatform * alloc : undefined,
+      impressions,
+      clicks,
+      conversions,
+      conversionValue,
+      roas: roasFromCampaign(spend, conversionValue),
+      ...metricsFromCampaignTotals(spend, impressions, clicks),
+    };
+  });
 }
 
-
-export async function loadStoreCampaignsLive(
-  storeId: string,
-  options?: { syncFirst?: boolean },
-): Promise<StoreCampaignsView> {
-  await connectToDatabase();
-
-  if (!mongoose.isValidObjectId(storeId)) {
-    return {
-      storeId,
-      dateKey: "",
-      dateLabel: "",
-      hasLinkedAccounts: false,
-      source: "cache",
-      syncedAt: null,
-      campaigns: [],
-      errors: ["Loja inválida."],
-    };
-  }
-
-  const store = await Store.findById(storeId)
-    .select("name ianaTimezone")
-    .lean();
-  if (!store) {
-    return {
-      storeId,
-      dateKey: "",
-      dateLabel: "",
-      hasLinkedAccounts: false,
-      source: "cache",
-      syncedAt: null,
-      campaigns: [],
-      errors: ["Loja não encontrada."],
-    };
-  }
-
-  const tz = normalizeStoreTimezone(store.ianaTimezone);
-  const dateKey = dateKeyInTimezone(new Date(), tz);
-  const dateLabel = new Date(`${dateKey}T12:00:00`).toLocaleDateString("pt-PT", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-
-  if (options?.syncFirst) {
-    const { syncAdAccountsSpendForStore } = await import("@/lib/ad-api-sync");
-    try {
-      await syncAdAccountsSpendForStore(storeId);
-    } catch {
-      /* continua com live/cache */
-    }
-  }
-
-  const accounts = await loadActiveAdAccounts(store._id);
-  if (!accounts.length) {
-    return {
-      storeId,
-      dateKey,
-      dateLabel,
-      hasLinkedAccounts: false,
-      source: "cache",
-      syncedAt: null,
-      campaigns: [],
-      errors: [],
-    };
-  }
-
+async function fetchLiveCampaignsForToday(
+  accounts: Awaited<ReturnType<typeof loadSyncAdAccountsForStore>>,
+  todayKey: string,
+): Promise<{ campaigns: LiveCampaignRow[]; errors: string[] }> {
+  const campaigns: LiveCampaignRow[] = [];
   const errors: string[] = [];
-  const liveCampaigns: LiveCampaignRow[] = [];
-  let liveCount = 0;
 
   for (const acc of accounts) {
     const platform = acc.platform as AdPlatform;
     const accountId = String(acc._id);
     const accountName =
       acc.accountName?.trim() || acc.externalAccountId || platform;
-
     try {
       const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
       const rows = await fetchLiveForAccount(
         platform,
         creds,
         acc.externalAccountId,
-        dateKey,
+        todayKey,
         accountId,
         accountName,
         acc.allocation ?? 100,
       );
-      liveCampaigns.push(...rows);
-      liveCount++;
+      campaigns.push(...rows);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Falha ao carregar campanhas.";
       errors.push(`${AD_PLATFORM_LABELS[platform] ?? platform}: ${msg}`);
     }
   }
 
-  let campaigns = liveCampaigns;
-  let source: StoreCampaignsView["source"] =
-    liveCount > 0 ? "live" : "cache";
+  campaigns.sort((a, b) => b.spend - a.spend);
+  return { campaigns, errors };
+}
 
-  if (liveCount === 0 || liveCount < accounts.length) {
-    const cached = await loadStoreAdMetricsForDay(storeId, dateKey);
-    if (cached?.campaigns.length) {
-      const accountByPlatform = new Map(
-        accounts.map((a) => [a.platform as AdPlatform, a]),
-      );
-      const cachedRows: LiveCampaignRow[] = cached.campaigns.map((c) => {
-        const acc = accountByPlatform.get(c.platform);
-        return {
-          campaignId: c.campaignId,
-          campaignName: c.campaignName,
-          platform: c.platform,
-          platformLabel: c.platformLabel,
-          adAccountId: acc ? String(acc._id) : "",
-          adAccountName:
-            acc?.accountName?.trim() || acc?.externalAccountId || c.platformLabel,
-          status: "—",
-          statusLabel: "—",
-          spend: c.spend,
-          impressions: c.impressions,
-          clicks: c.clicks,
-          currency: c.currency,
-          cpc: c.cpc,
-          ctr: c.ctr,
-          cpm: c.cpm,
-        };
+export async function loadStoreCampaignsLive(
+  storeId: string,
+  options?: { syncFirst?: boolean; periodInput?: PeriodInput },
+): Promise<StoreCampaignsView> {
+  await connectToDatabase();
+
+  const emptyBase = {
+    storeId,
+    periodKey: "",
+    dateKey: "",
+    dateFrom: "",
+    dateTo: "",
+    dateLabel: "",
+    daysInPeriod: 0,
+    daysWithData: 0,
+    displayCurrency: "EUR",
+    fxDateKey: "",
+    hasLinkedAccounts: false,
+    includesToday: false,
+    source: "cache" as const,
+    syncedAt: null,
+    campaigns: [] as StoreCampaignsView["campaigns"],
+    totals: aggregateCampaignPeriodTotals([], "EUR"),
+    errors: [] as string[],
+  };
+
+  if (!mongoose.isValidObjectId(storeId)) {
+    return { ...emptyBase, errors: ["Loja inválida."] };
+  }
+
+  const store = await Store.findById(storeId)
+    .select("name ianaTimezone workspaceId importStartDate createdAt")
+    .lean();
+  if (!store) {
+    return { ...emptyBase, errors: ["Loja não encontrada."] };
+  }
+
+  const workspace = await Workspace.findById(store.workspaceId)
+    .select("baseCurrency")
+    .lean();
+  const displayCurrency = workspace?.baseCurrency ?? "EUR";
+
+  const tz = normalizeStoreTimezone(store.ianaTimezone);
+  const todayKey = dateKeyInTimezone(new Date(), tz);
+  const resolved = resolvePeriodForStore(options?.periodInput ?? {}, tz);
+  let dateKeys = dateKeysFromResolvedPeriod(resolved);
+  dateKeys = dateKeys.filter((k) => k <= todayKey);
+
+  const importFloor = store.importStartDate
+    ? dateKeyInTimezone(new Date(store.importStartDate), tz)
+    : store.createdAt
+      ? dateKeyInTimezone(new Date(store.createdAt), tz)
+      : null;
+  if (importFloor) {
+    dateKeys = dateKeys.filter((k) => k >= importFloor);
+  }
+
+  const dateFrom = dateKeys[0] ?? todayKey;
+  const dateTo = dateKeys[dateKeys.length - 1] ?? todayKey;
+  const dateLabel = resolved.label;
+  const includesToday = dateKeys.includes(todayKey);
+
+  let accounts = await loadSyncAdAccountsForStore(store._id);
+  if (!accounts.length) {
+    return {
+      ...emptyBase,
+      periodKey: resolved.key,
+      dateKey: todayKey,
+      dateFrom,
+      dateTo,
+      dateLabel,
+      daysInPeriod: dateKeys.length,
+      displayCurrency,
+      fxDateKey: todayKey,
+      includesToday,
+    };
+  }
+
+  const errors: string[] = [];
+  let source: StoreCampaignsView["source"] = "cache";
+
+  // Só chama a API Google/Meta quando é sync manual explícito e o período inclui hoje.
+  if (options?.syncFirst && includesToday) {
+    const { syncAdAccountsSpendForStore } = await import("@/lib/ad-api-sync");
+    try {
+      await syncAdAccountsSpendForStore(storeId, {
+        campaignDateKeys: [todayKey],
       });
+      source = "live";
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Falha no sync.";
+      errors.push(msg);
+    }
 
-      if (liveCount === 0) {
-        campaigns = cachedRows;
-        source = "cache";
-      } else {
-        const liveKeys = new Set(
-          liveCampaigns.map((c) => `${c.platform}:${c.campaignId}`),
+    accounts = await loadSyncAdAccountsForStore(store._id);
+
+    for (const acc of accounts) {
+      if (acc.lastSyncError) {
+        const platform = acc.platform as AdPlatform;
+        errors.push(
+          `${AD_PLATFORM_LABELS[platform] ?? platform}: ${acc.lastSyncError}`,
         );
-        for (const row of cachedRows) {
-          const key = `${row.platform}:${row.campaignId}`;
-          if (!liveKeys.has(key)) campaigns.push(row);
-        }
-        campaigns.sort((a, b) => b.spend - a.spend);
-        source = "mixed";
       }
     }
   }
 
-  const syncedAt =
-    campaigns.length > 0
-      ? new Date().toISOString()
-      : accounts.find((a) => a.lastSyncAt)?.lastSyncAt?.toISOString() ?? null;
+  const accountRows = accounts.map((a) => ({
+    id: String(a._id),
+    platform: a.platform as AdPlatform,
+    accountName: a.accountName?.trim() || a.externalAccountId || "",
+    externalAccountId: a.externalAccountId,
+    apiExtraFeeFixed: a.apiExtraFeeFixed ?? 0,
+    apiAgencyFeePercent: a.apiAgencyFeePercent ?? 0,
+  }));
+
+  const { campaigns, syncedAt, daysWithData } = await loadStoreCampaignsFromDb(
+    storeId,
+    dateKeys,
+    accountRows,
+    { baseCurrency: displayCurrency, fxDateKey: todayKey },
+  );
+
+  let finalCampaigns = campaigns;
+  let finalSource = source;
+  const finalErrors = [...errors];
+
+  // Fallback live: BD vazia após sync (ex. primeiro sync ou API sem dados persistidos).
+  if (options?.syncFirst && includesToday && campaigns.length === 0) {
+    const live = await fetchLiveCampaignsForToday(accounts, todayKey);
+    if (live.campaigns.length) {
+      finalCampaigns = live.campaigns;
+      finalSource = "live";
+    }
+    finalErrors.push(...live.errors);
+  }
 
   return {
     storeId,
-    dateKey,
+    periodKey: resolved.key,
+    dateKey: todayKey,
+    dateFrom,
+    dateTo,
     dateLabel,
+    daysInPeriod: dateKeys.length,
+    daysWithData,
+    displayCurrency,
+    fxDateKey: todayKey,
     hasLinkedAccounts: true,
-    source,
-    syncedAt,
-    campaigns,
-    errors,
+    includesToday,
+    source: finalSource,
+    syncedAt:
+      syncedAt ??
+      accounts.find((a) => a.lastSyncAt)?.lastSyncAt?.toISOString() ??
+      null,
+    campaigns: finalCampaigns,
+    totals: aggregateCampaignPeriodTotals(finalCampaigns, displayCurrency),
+    errors: [...new Set(finalErrors)],
   };
 }

@@ -22,7 +22,11 @@ export type AdAccountRow = {
 };
 
 export type MetaCredentials = { accessToken: string };
-export type GoogleCredentials = { refreshToken: string };
+export type GoogleCredentials = {
+  refreshToken: string;
+  /** MCC / gestor — obrigatório para contas convidadas via MCC. */
+  loginCustomerId?: string;
+};
 export type TiktokCredentials = { accessToken: string };
 
 export type AdAccountCredentials =
@@ -38,6 +42,13 @@ export function credentialTokenForPlatform(
     return (creds as GoogleCredentials).refreshToken;
   }
   return (creds as MetaCredentials | TiktokCredentials).accessToken;
+}
+
+export function googleLoginCustomerIdFromCreds(
+  creds: AdAccountCredentials,
+): string | undefined {
+  const id = (creds as GoogleCredentials).loginCustomerId?.trim();
+  return id || undefined;
 }
 
 export function encryptAdCredentials(payload: Record<string, string>): string {
@@ -184,7 +195,50 @@ export async function loadActiveAdAccounts(storeId: Types.ObjectId) {
     storeId,
     deletedAt: null,
     status: "active",
-  }).lean();
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+}
+
+export type ActiveAdAccountDoc = Awaited<
+  ReturnType<typeof loadActiveAdAccounts>
+>[number];
+
+/** Uma conta por plataforma para sync — a mais recente ligada ganha. */
+export function pickSyncAdAccountPerPlatform(
+  accounts: ActiveAdAccountDoc[],
+): Map<AdPlatform, ActiveAdAccountDoc> {
+  const map = new Map<AdPlatform, ActiveAdAccountDoc>();
+  for (const acc of accounts) {
+    const platform = acc.platform as AdPlatform;
+    const prev = map.get(platform);
+    if (!prev) {
+      map.set(platform, acc);
+      continue;
+    }
+    const prevTs = prev.createdAt?.getTime() ?? 0;
+    const accTs = acc.createdAt?.getTime() ?? 0;
+    if (accTs >= prevTs) map.set(platform, acc);
+  }
+  return map;
+}
+
+export async function loadSyncAdAccountsForStore(
+  storeId: Types.ObjectId,
+): Promise<ActiveAdAccountDoc[]> {
+  const accounts = await loadActiveAdAccounts(storeId);
+  return [...pickSyncAdAccountPerPlatform(accounts).values()];
+}
+
+export async function loadActiveAdAccountIdsForStore(
+  storeId: string | Types.ObjectId,
+): Promise<string[]> {
+  const oid =
+    typeof storeId === "string"
+      ? new mongoose.Types.ObjectId(storeId)
+      : storeId;
+  const accounts = await loadSyncAdAccountsForStore(oid);
+  return accounts.map((a) => String(a._id));
 }
 
 export async function markAdAccountSync(

@@ -62,7 +62,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * Tailwind CSS
 * Shadcn/UI
 * Recharts (ou Tremor para dashboards financeiros)
-* TanStack Query (cache 60 s, `placeholderData` ao mudar período; polling ~60 s + invalidação SSE targeted)
+* TanStack Query (cache servidor 60 s; cliente lê BD a cada **30 s** com `placeholderData`; sync API ads a cada **5 min** com throttle por conta)
 * Zustand (estado global leve)
 * **PWA**: `manifest.json` + service worker (ex.: Serwist / next-pwa) para instalar no telemóvel e funcionar offline
 
@@ -391,8 +391,9 @@ Net Profit =
 * Ligar uma **Ad Account**: **Meta (Facebook/Instagram)**, **Google Ads** e **TikTok Ads**.
 * A app vai buscar automaticamente o **valor gasto (spend)** por dia, por campanha e por conta.
 * Sincronização diária automática + opção de **refresh manual** a qualquer momento.
-* **Regra de sync**: em cada sync periódico, o gasto de **hoje** é **substituído** pelo valor fresco das APIs; **ontem e dias anteriores ficam fechados** (já não é possível gastar mais nesses dias). O manual preenche dias em falta, sobretudo ontem.
-* **Ad spend manual** (`/anuncios`) — se não houver contas ligadas ou o sync falhar, preenches o gasto **por dia, loja e plataforma** (Meta, Google, TikTok) em USD, EUR ou GBP. Cada plataforma tem gasto em ads, fee fixa de agência e fee % sobre o gasto (varia por dia). Dias em falta contam **desde a `importStartDate` da loja** (escolhida no setup) até ontem. Converte automaticamente para a **moeda base** do workspace com a taxa do dia. A página **actualiza-se automaticamente** (polling ~10 s) — não é preciso refresh manual. Se **dois utilizadores guardarem o mesmo dia ao mesmo tempo**, prevalece o **primeiro** (optimistic locking com `updatedAt`); o segundo vê aviso e a lista actualiza-se.
+* **Regra de sync**: em cada sync periódico, o gasto de **hoje** é **substituído** pelo valor fresco das APIs (inclui **fees** da conta API) — **nunca somado** em cima do que já está na BD; **ontem e dias anteriores ficam fechados** quando já têm gasto + campanhas. Backfill **incremental** (`ad-metrics-cursor`): só pede à Google/Meta dias em **lacuna** ou **hoje**; dias passados completos não voltam à API (como taxas Shopify desde `lastSyncAt`). **Leitura da BD** a cada **30 s** na dashboard e em `/anuncios` (rápido, sem API externa). **Sync API** a cada **5 min** com app aberta (throttle por conta) + **cron Vercel** `/api/cron/ads-sync` a cada **15 min** mesmo com app fechada. O manual preenche dias em falta e plataformas **sem** conta API; **hoje**, plataformas com API ligada não se preenchem à mão.
+* **Ad spend manual** (`/anuncios`) — se não houver contas ligadas ou o sync falhar, preenches o gasto **por dia, loja e plataforma** (Meta, Google, TikTok) em USD, EUR ou GBP. Cada plataforma tem gasto em ads, fee fixa de agência e fee % sobre o gasto (varia por dia). Dias em falta contam **desde a `importStartDate` da loja** (escolhida no setup) até ontem. Converte automaticamente para a **moeda base** do workspace com a taxa do dia. A página **actualiza-se automaticamente** (BD 30 s + sync API 5 min + SSE) — não é preciso refresh manual. Se **dois utilizadores guardarem o mesmo dia ao mesmo tempo**, prevalece o **primeiro** (optimistic locking com `updatedAt`); o segundo vê aviso e a lista actualiza-se.
+* **UI por loja** (`/anuncios?store=…`) — 4 KPIs no topo (dias em falta, ontem, contas API, moeda) + **tabs**: **Gasto manual** (formulário do dia), **Contas API** (lista ligada + Google/Meta/TikTok), **Campanhas** (KPIs + tabela — **mesmo período do selector do topo**; dias passados só BD, API só em «Hoje»), **Histórico** (calendário diário). Sem loja seleccionada: tabela resumo «dias em falta por loja».
 
 ## Ligação Meta Ads (Facebook/Instagram)
 
@@ -401,7 +402,7 @@ Net Profit =
 1. Criar uma app no **Meta for Developers** (`developers.facebook.com`), tipo **Business**.
 2. Pedir a permissão **`ads_read`** (e `business_management` se gerires várias contas via Business Manager).
 3. Obter um **System User token** do Business Manager (recomendado para servidor) com acesso às ad accounts.
-4. Em `/anuncios`: colar o token → **Procurar contas** (`GET /me/adaccounts`) → escolher `act_<ID>` → a app valida com `GET /act_<ID>` antes de guardar (credenciais encriptadas AES-256-GCM).
+4. Em `/anuncios` → tab **Contas API**: colar o token → **Procurar contas** (`GET /me/adaccounts`) → escolher `act_<ID>` → a app valida com `GET /act_<ID>` antes de guardar (credenciais encriptadas AES-256-GCM).
 5. O spend vem de **`GET /act_<AD_ACCOUNT_ID>/insights`** com `fields=spend,account_currency`, `level=account`, `time_range` do dia (fuso da loja). API Graph **v25.0** por defeito.
 
 > **OAuth completo** («Ligar Meta» com redirect) — fase seguinte; o fluxo actual segue a documentação oficial para tokens de servidor (System User).
@@ -414,7 +415,7 @@ Net Profit =
 2. Obter um **developer token** no **Centro da API** de qualquer conta Google Ads a que tenhas acesso — **não é obrigatório MCC**; uma conta de ads normal chega (modo teste para começar). URL: `ads.google.com/aw/apicenter`.
 3. Redirect URI: `GOOGLE_ADS_OAUTH_REDIRECT_URI` → `/api/oauth/google/callback`.
 4. **Definições → Google Ads** — OAuth **uma vez por Gmail** (workspace).
-5. Em cada loja (`/anuncios`) — escolher Gmail + **Customer ID** para sync opcional. **Gasto manual** funciona sempre sem API.
+5. Em cada loja (`/anuncios` → tab **Contas API**) — escolher Gmail + **Customer ID** para sync opcional. **Gasto manual** (tab homónima) funciona sempre sem API.
 6. O gasto vem em **USD** (moeda da conta) e converte para a moeda base do workspace. Query **GAQL** ao `GoogleAdsService.search` (`metrics.cost_micros` ÷ 1.000.000).
 7. **Fees na conta API** — fee fixa extra + % agência; aplicam-se em cada sync automático.
 8. **Trocar conta** — ao ligar outra conta Google na mesma loja, a anterior é desligada; o **histórico de gasto** (`manualAdSpend`) mantém-se.
@@ -586,7 +587,7 @@ Cada loja deve ter:
 
 > Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
 
-**Estado (implementado):** painel «Resumo» em `/notas`, `/metricas` (loja seleccionada) e na **Dashboard consolidada** (todas as lojas). Ontem por defeito, `?date=YYYY-MM-DD` opcional, com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** (total + bloco por plataforma Meta/Google/TikTok quando há mais de uma) e **lista das campanhas** (top por spend) quando a loja tem contas API ligadas — dados vindos da coleção `ad_campaign_days` (sync no mesmo ciclo do ad spend). Campos **MELHOR CAMPANHA** e **SUGESTÃO ADS** vêm do snapshot API na nota diária (`apiSnapshot`, preenchido automaticamente no sync). Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
+**Estado (implementado):** painel «Resumo» em `/notas`, `/metricas` (loja seleccionada) e na **Dashboard consolidada** (todas as lojas). Ontem por defeito, `?date=YYYY-MM-DD` opcional, com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** (totais ads do dia, BD ou `apiSnapshot`). Do lado dos ads no resumo copiado: **MELHOR CAMPANHA** (`apiSnapshot.bestCampaign`) — sem lista de campanhas nem bloco OBS da API. **PRODUTO BEST-SELLER** vem do top produto do dia (unidades/lucro conforme `cogsMode`); se não houver vendas, usa o campo manual da nota. Campos manuais (produtos/coleções testadas, OBS escrita à mão, dificuldades, scale) vêm da **nota diária** (`reportFields`). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
 
 **Diário ou semanal (toggle):** o painel «Resumo» tem dois modos. O **diário** gera para o dia escolhido (com campos manuais da nota). O **semanal** (`?period=week`) agrega os **7 dias até à data** escolhida (REV, refunds, ad spend, despesas, profit somados; funil e CPC/CTR/CPM recalculados sobre os totais da semana) — cabeçalho `SEMANA: dd/mm – dd/mm`. Em ambos, na vista consolidada/todas as lojas gera **um bloco por loja** (vista de texto por defeito) e por loja mostra também o cartão visual.
 
@@ -1288,7 +1289,7 @@ Lucro após taxas =
 * `startingBalance` (saldo inicial de caixa **desta loja**, na moeda base do workspace — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
 * `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
-* `ianaTimezone` (fuso IANA da loja, ex. `Europe/Lisbon` — define o dia civil de revenue/orders; default `Europe/Brussels`)
+* `ianaTimezone` (fuso IANA da loja, ex. `Europe/Lisbon` — define o dia civil de revenue/orders e **ads**; default `Europe/Lisbon`)
 * `timezoneSource` (`shopify` = sincronizado automaticamente da Shopify no sync; `manual` = override do utilizador em Definições → Lojas, **não é** sobrescrito pelo sync). Volta a `shopify` escolhendo «Automático (Shopify)».
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
 * `paymentsBalance` / `paymentsBalanceUpdatedAt` (saldo Shopify Payments ainda por pagar)
@@ -1454,15 +1455,18 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `dateKey` (YYYY-MM-DD)
 * `campaignId`
 * `campaignName`
-* `spend`
+* `spend` (gasto plataforma, sem fees — fees aplicadas na leitura)
 * `impressions`
 * `clicks`
+* `conversions`
+* `conversionValue` (receita atribuída na moeda da conta)
+* `status` / `statusLabel`
 * `currency`
 * `syncedAt`
 
-> Guardado ao nível de **campanha + dia** (sync automático quando a conta API sincroniza o spend de hoje). CPC/CTR/CPM são calculados na leitura (`spend/cliques`, etc.). Os totais por plataforma e por loja agregam a partir daqui. Em `/anuncios` → secção **Campanhas**: lista campanhas activas/pausadas da conta ligada com métricas de hoje (`GET /api/anuncios/campaigns?store=`).
+> **Visibilidade por dia:** campanhas **activas** aparecem sempre (mesmo sem gasto nesse dia). Campanhas **pausadas** só entram no dia se tiverem actividade (spend, impressões, cliques ou conversões) — pausada no dia 7 sem gasto não aparece no 7, mas mantém-se nos dias anteriores com dados. Regra aplicada no sync API e na leitura da BD.
 
-**Pendente (roadmap):** `conversions`, `spendBaseCurrency`, toggle média vs total no UI do relatório.
+> Guardado ao nível de **campanha + conta API + dia** (`storeId+adAccountId+platform+dateKey+campaignId`). Ao trocar de conta API, o histórico da conta antiga **permanece** na BD (soft delete da conta não apaga `ad_campaign_days`). O sync só remove campanhas órfãs da **conta que está a sincronizar**, não das outras. Finanças/relatórios passados leem todo o histórico; **Decisão**, **notas** e tab **Campanhas** usam só a conta API activa mais recente por plataforma para scale/descale.
 
 ## manualAdSpend
 
@@ -1550,9 +1554,10 @@ Pipeline operacional de dropshipping.
 
 > A app actualiza-se sem F5 nem reentrar no browser quando mudam dados do workspace.
 
-* **SSE** `GET /api/live/stream` — stream autenticado; poll interno ~4 s a `getWorkspaceRevision(workspaceId)` (`src/lib/workspace-revision.ts`: `updatedAt` de stores, tarefas, coleções + assinatura de `operationStatus`/`operationKilledAt`).
+* **SSE** `GET /api/live/stream` — stream autenticado; poll interno ~10 s a `getWorkspaceRevision(workspaceId)` (`updatedAt` de stores, tarefas, coleções, `ManualAdSpend`, `AdCampaignDay` + assinatura de `operationStatus`/`operationKilledAt`).
 * **Cliente** `WorkspaceLiveSync` no layout `(app)` — `EventSource`; quando a revisão muda → `queryClient.invalidateQueries()` + `router.refresh()`.
-* Complementa o polling leve do dashboard (~60 s) e o registo do service worker (PWA). O SSE invalida só queries de métricas/tesouraria/anúncios (não invalida tudo). `placeholderData` mantém dados anteriores visíveis enquanto refresca.
+* Complementa o polling da BD (~30 s) e o registo do service worker (PWA). O SSE invalida queries de métricas/tesouraria/anúncios/campanhas (não invalida tudo). `placeholderData` mantém dados anteriores visíveis enquanto refresca.
+* **Cache campanhas** (`unstable_cache` 45 s em `/api/anuncios/campaigns`) — leitura BD rápida; invalida após sync API.
 
 ### Modo empresarial P&L (`/financas?mode=business`)
 
@@ -1619,7 +1624,7 @@ Pipeline operacional de dropshipping.
 * `mood` (good / bad / neutral, opcional)
 * `attachments` (array de URLs)
 * `reportFields` (campos manuais do relatório diário: `productsTested`, `collectionsTested`, `collectionsTestedList`, `nextCollection`, `bestSellerCollection`, `dayNumber`, `difficulties`, `obs`)
-* `apiSnapshot` (preenchido no sync de ads API: `cpc`, `ctr`, `cpm`, `currency`, `bestCampaign`, `campaignSuggestion`, `syncedAt`)
+* `apiSnapshot` (preenchido no sync de ads API: `spend`, `clicks`, `impressions`, `conversions`, `conversionValue`, `roas`, `cpc`, `ctr`, `cpm`, `currency`, `bestCampaign`, `campaignSuggestion`, `syncedAt`; não preenche `reportFields.obs` — o resumo diário usa só `bestCampaign`)
 * `createdAt`
 
 ## dailyMetrics
@@ -1895,7 +1900,7 @@ Pipeline operacional de dropshipping.
 
 ![Decisão](assets/mockup-decisao.png)
 
-* **"O que fazer hoje"**: 3 ações prioritárias com semáforo (verde/amarelo/vermelho), incluindo sugestões **scale/descale por campanha** quando há dados API sincronizados.
+* **"O que fazer hoje"**: 3 ações prioritárias com semáforo (verde/amarelo/vermelho), incluindo sugestões **scale/descale por campanha** (ROAS da campanha vs BER da loja; CTR/CPC não bastam para scale) quando há dados API sincronizados.
 * **Tabela Kill / Scale / Manter**: por produto (loja seleccionada) ou por loja (consolidado).
 * **Tabela Campanhas — Scale / Descale** (loja seleccionada, com `ad_campaign_days`): campanha, plataforma, CPC, CTR, CPM, gasto e motivo heurístico.
 * **Card Tesouraria**: Disponível, A caminho, A pagar, Saldo projetado.

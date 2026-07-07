@@ -8,7 +8,11 @@
 
 import {
   formatCampaignStatusLabel,
+  isActiveCampaignStatus,
+  isPausedCampaignStatus,
   metricsFromCampaignTotals,
+  roasFromCampaign,
+  shouldIncludeCampaignForDay,
   type LiveCampaignRow,
 } from "@/lib/ad-campaign-types";
 
@@ -186,58 +190,54 @@ export type CampaignInsightsRow = {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions: number;
+  conversionValue: number;
+  currency: string;
+  status?: string;
+  statusLabel?: string;
+};
+
+function tiktokConversionsFromMetrics(
+  metrics?: {
+    conversion?: string;
+    complete_payment?: string;
+    total_purchase_value?: string;
+    value_per_total_conversion?: string;
+  },
+  spend = 0,
+): { conversions: number; conversionValue: number } {
+  const conversions =
+    Number(metrics?.conversion ?? 0) ||
+    Number(metrics?.complete_payment ?? 0) ||
+    0;
+  let conversionValue = Number(metrics?.total_purchase_value ?? 0) || 0;
+  if (conversionValue <= 0 && conversions > 0) {
+    const perConv = Number(metrics?.value_per_total_conversion ?? 0) || 0;
+    if (perConv > 0) conversionValue = conversions * perConv;
+  }
+  return { conversions, conversionValue };
+}
+
+function isTiktokCatalogCampaignStatus(status: string): boolean {
+  return isActiveCampaignStatus(status) || isPausedCampaignStatus(status);
+}
+
+type TiktokCampaignCatalogEntry = { name: string; status: string };
+
+type TiktokCampaignDayMetrics = {
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  conversionValue: number;
   currency: string;
 };
 
-/** Insights por campanha num dia. */
-export async function fetchTiktokCampaignInsightsForDay(
+async function loadTiktokCampaignCatalog(
   accessToken: string,
   advertiserId: string,
-  dateKey: string,
-): Promise<CampaignInsightsRow[]> {
+): Promise<Map<string, TiktokCampaignCatalogEntry>> {
   const id = normalizeAdvertiserId(advertiserId);
-  const data = await tiktokGet<{
-    list?: Array<{
-      metrics?: { spend?: string; impressions?: string; clicks?: string };
-      dimensions?: { campaign_id?: string; currency?: string };
-    }>;
-  }>("/report/integrated/get/", accessToken, {
-    advertiser_id: id,
-    report_type: "BASIC",
-    data_level: "AUCTION_CAMPAIGN",
-    dimensions: JSON.stringify(["campaign_id", "stat_time_day"]),
-    metrics: JSON.stringify(["spend", "impressions", "clicks"]),
-    start_date: dateKey,
-    end_date: dateKey,
-    page_size: "100",
-  });
-
-  const out: CampaignInsightsRow[] = [];
-  for (const row of data.list ?? []) {
-    const spend = Number(row?.metrics?.spend ?? 0) || 0;
-    const impressions = Number(row?.metrics?.impressions ?? 0) || 0;
-    const clicks = Number(row?.metrics?.clicks ?? 0) || 0;
-    if (spend <= 0 && impressions <= 0 && clicks <= 0) continue;
-    out.push({
-      campaignId: String(row?.dimensions?.campaign_id ?? "").trim() || "unknown",
-      campaignName: `Campanha ${row?.dimensions?.campaign_id ?? ""}`.trim(),
-      spend,
-      impressions,
-      clicks,
-      currency: row?.dimensions?.currency ?? "USD",
-    });
-  }
-  return out;
-}
-
-/** Campanhas activas com métricas de hoje. */
-export async function fetchTiktokLiveCampaigns(
-  accessToken: string,
-  advertiserId: string,
-  dateKey: string,
-): Promise<LiveCampaignRow[]> {
-  const id = normalizeAdvertiserId(advertiserId);
-
   const campaignData = await tiktokGet<{
     list?: Array<{
       campaign_id?: string;
@@ -251,9 +251,37 @@ export async function fetchTiktokLiveCampaigns(
     page_size: "100",
   });
 
-  const metricsData = await tiktokGet<{
+  const campaignsById = new Map<string, TiktokCampaignCatalogEntry>();
+  for (const c of campaignData.list ?? []) {
+    const cid = String(c.campaign_id ?? "").trim();
+    if (!cid) continue;
+    const status =
+      c.operation_status?.trim() || c.secondary_status?.trim() || "UNKNOWN";
+    campaignsById.set(cid, {
+      name: c.campaign_name?.trim() || `Campanha ${cid}`,
+      status,
+    });
+  }
+  return campaignsById;
+}
+
+async function loadTiktokCampaignDayMetrics(
+  accessToken: string,
+  advertiserId: string,
+  dateKey: string,
+): Promise<Map<string, TiktokCampaignDayMetrics>> {
+  const id = normalizeAdvertiserId(advertiserId);
+  const data = await tiktokGet<{
     list?: Array<{
-      metrics?: { spend?: string; impressions?: string; clicks?: string };
+      metrics?: {
+        spend?: string;
+        impressions?: string;
+        clicks?: string;
+        conversion?: string;
+        complete_payment?: string;
+        total_purchase_value?: string;
+        value_per_total_conversion?: string;
+      };
       dimensions?: { campaign_id?: string; currency?: string };
     }>;
   }>("/report/integrated/get/", accessToken, {
@@ -261,56 +289,67 @@ export async function fetchTiktokLiveCampaigns(
     report_type: "BASIC",
     data_level: "AUCTION_CAMPAIGN",
     dimensions: JSON.stringify(["campaign_id", "stat_time_day"]),
-    metrics: JSON.stringify(["spend", "impressions", "clicks"]),
+    metrics: JSON.stringify([
+      "spend",
+      "impressions",
+      "clicks",
+      "conversion",
+      "complete_payment",
+      "total_purchase_value",
+      "value_per_total_conversion",
+    ]),
     start_date: dateKey,
     end_date: dateKey,
     page_size: "100",
   });
 
-  const metricsById = new Map<
-    string,
-    { spend: number; impressions: number; clicks: number; currency: string }
-  >();
-  for (const row of metricsData.list ?? []) {
+  const metricsById = new Map<string, TiktokCampaignDayMetrics>();
+  for (const row of data.list ?? []) {
     const cid = String(row?.dimensions?.campaign_id ?? "").trim();
     if (!cid) continue;
+    const spend = Number(row?.metrics?.spend ?? 0) || 0;
     metricsById.set(cid, {
-      spend: Number(row?.metrics?.spend ?? 0) || 0,
+      spend,
       impressions: Number(row?.metrics?.impressions ?? 0) || 0,
       clicks: Number(row?.metrics?.clicks ?? 0) || 0,
+      ...tiktokConversionsFromMetrics(row?.metrics, spend),
       currency: row?.dimensions?.currency ?? "USD",
     });
   }
+  return metricsById;
+}
 
-  const out: LiveCampaignRow[] = [];
+function buildTiktokCampaignInsightRows(
+  campaignsById: Map<string, TiktokCampaignCatalogEntry>,
+  metricsById: Map<string, TiktokCampaignDayMetrics>,
+): CampaignInsightsRow[] {
+  const out: CampaignInsightsRow[] = [];
   const seen = new Set<string>();
 
-  for (const c of campaignData.list ?? []) {
-    const cid = String(c.campaign_id ?? "").trim();
-    if (!cid) continue;
-    const status = c.operation_status?.trim() || c.secondary_status?.trim() || "UNKNOWN";
+  for (const [cid, c] of campaignsById) {
+    if (!isTiktokCatalogCampaignStatus(c.status)) continue;
     const m = metricsById.get(cid);
-    const isRunning =
-      status === "ENABLE" || status === "STATUS_ENABLE" || status === "CAMPAIGN_STATUS_ENABLE";
-    if (!isRunning && !m) continue;
-
-    const spend = m?.spend ?? 0;
-    const impressions = m?.impressions ?? 0;
-    const clicks = m?.clicks ?? 0;
+    if (
+      !shouldIncludeCampaignForDay(c.status, {
+        spend: m?.spend,
+        impressions: m?.impressions,
+        clicks: m?.clicks,
+        conversions: m?.conversions,
+      })
+    ) {
+      continue;
+    }
     out.push({
       campaignId: cid,
-      campaignName: c.campaign_name?.trim() || `Campanha ${cid}`,
-      platform: "tiktok",
-      platformLabel: "TikTok",
-      adAccountId: id,
-      adAccountName: id,
-      status,
-      statusLabel: formatCampaignStatusLabel(status),
-      spend,
-      impressions,
-      clicks,
+      campaignName: c.name,
+      spend: m?.spend ?? 0,
+      impressions: m?.impressions ?? 0,
+      clicks: m?.clicks ?? 0,
+      conversions: m?.conversions ?? 0,
+      conversionValue: m?.conversionValue ?? 0,
       currency: m?.currency ?? "USD",
-      ...metricsFromCampaignTotals(spend, impressions, clicks),
+      status: c.status,
+      statusLabel: formatCampaignStatusLabel(c.status),
     });
     seen.add(cid);
   }
@@ -320,19 +359,64 @@ export async function fetchTiktokLiveCampaigns(
     out.push({
       campaignId: cid,
       campaignName: `Campanha ${cid}`,
-      platform: "tiktok",
-      platformLabel: "TikTok",
-      adAccountId: id,
-      adAccountName: id,
-      status: "ENABLE",
-      statusLabel: "Activa",
       spend: m.spend,
       impressions: m.impressions,
       clicks: m.clicks,
+      conversions: m.conversions,
+      conversionValue: m.conversionValue,
       currency: m.currency,
-      ...metricsFromCampaignTotals(m.spend, m.impressions, m.clicks),
+      status: "ENABLE",
+      statusLabel: "Activa",
     });
   }
 
-  return out.sort((a, b) => b.spend - a.spend);
+  return out;
+}
+
+/** Insights por campanha num dia (activas sempre; pausadas só com actividade no dia). */
+export async function fetchTiktokCampaignInsightsForDay(
+  accessToken: string,
+  advertiserId: string,
+  dateKey: string,
+): Promise<CampaignInsightsRow[]> {
+  const [campaignsById, metricsById] = await Promise.all([
+    loadTiktokCampaignCatalog(accessToken, advertiserId),
+    loadTiktokCampaignDayMetrics(accessToken, advertiserId, dateKey),
+  ]);
+  return buildTiktokCampaignInsightRows(campaignsById, metricsById);
+}
+
+/** Campanhas activas com métricas de hoje. */
+export async function fetchTiktokLiveCampaigns(
+  accessToken: string,
+  advertiserId: string,
+  dateKey: string,
+): Promise<LiveCampaignRow[]> {
+  const id = normalizeAdvertiserId(advertiserId);
+  const [campaignsById, metricsById] = await Promise.all([
+    loadTiktokCampaignCatalog(accessToken, advertiserId),
+    loadTiktokCampaignDayMetrics(accessToken, advertiserId, dateKey),
+  ]);
+  const insightRows = buildTiktokCampaignInsightRows(campaignsById, metricsById);
+
+  return insightRows
+    .map((row) => ({
+      campaignId: row.campaignId,
+      campaignName: row.campaignName,
+      platform: "tiktok" as const,
+      platformLabel: "TikTok",
+      adAccountId: id,
+      adAccountName: id,
+      status: row.status ?? "ENABLE",
+      statusLabel: row.statusLabel ?? "Activa",
+      spend: row.spend,
+      impressions: row.impressions,
+      clicks: row.clicks,
+      conversions: row.conversions,
+      conversionValue: row.conversionValue,
+      currency: row.currency,
+      roas: roasFromCampaign(row.spend, row.conversionValue),
+      ...metricsFromCampaignTotals(row.spend, row.impressions, row.clicks),
+    }))
+    .sort((a, b) => b.spend - a.spend);
 }

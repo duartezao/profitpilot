@@ -8,6 +8,7 @@ import { ScopeLink } from "@/components/scope-link";
 import type { IncomingDayLine, WorkspaceTreasury } from "@/lib/treasury";
 import { useWorkspace } from "@/components/workspace-context";
 import { KpiCard } from "@/components/ui/kpi-card";
+import { LastSyncBadge } from "@/components/last-sync-badge";
 
 async function fetchTreasury(storeId: string | null): Promise<WorkspaceTreasury> {
   const url = storeId
@@ -56,7 +57,7 @@ function IncomingTimeline({
 export function TreasuryClient() {
   const { workspaceId } = useWorkspace();
   const storeId = useSearchParams().get("store");
-  const { data, isError, isFetching, dataUpdatedAt } = useQuery({
+  const { data, isError, isFetching } = useQuery({
     queryKey: ["treasury", workspaceId, storeId],
     queryFn: () => fetchTreasury(storeId),
     placeholderData: (prev) => prev,
@@ -67,9 +68,7 @@ export function TreasuryClient() {
     ? data?.stores.find((s) => s.storeId === storeId)
     : null;
 
-  const updatedAt = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString("pt-PT")
-    : null;
+  const lastSyncedAt = data?.lastSyncedAt ?? null;
 
   const payoutErrors = data?.stores.filter((s) => s.payoutsError) ?? [];
 
@@ -157,19 +156,7 @@ export function TreasuryClient() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span
-                className={
-                  isFetching
-                    ? "absolute inline-flex h-full w-full animate-ping rounded-full bg-positive opacity-75"
-                    : "hidden"
-                }
-              />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-positive" />
-            </span>
-            {updatedAt ? `Ao vivo · ${updatedAt}` : "A ligar…"}
-          </span>
+          <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
           <ScopeLink
             href="/definicoes#capital-negocio"
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"

@@ -12,11 +12,11 @@ import { scopeQueryFromInput } from "@/lib/scope-query";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import { formatProfitBreakdown } from "@/lib/profit";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
+import { FinancasView } from "@/components/financas/financas-view";
 import { StoreCashFlowSection } from "@/components/financas/store-cash-flow";
 import { ExpensesPanel } from "@/components/financas/expenses-panel";
 import { BusinessPnlPanel } from "@/components/financas/business-pnl-panel";
 import { FinancasModeToggle } from "@/components/financas/financas-mode-toggle";
-import { CollapsibleSection } from "@/components/collapsible-section";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { listWorkspaceExpenses, sumWorkspaceMonthlyFixedBase } from "@/lib/expenses";
@@ -125,6 +125,155 @@ export default async function FinancasPage({
     ? await sumWorkspaceMonthlyFixedBase(user.workspaceId)
     : 0;
 
+  const resumoPanel = (
+    <>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg border border-border bg-background p-4">
+          <p className="text-xs font-medium text-muted-foreground">Receita</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums" data-sensitive>
+            {money(totals.revenue)}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-background p-4">
+          <p className="text-xs font-medium text-muted-foreground">Custos totais</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums" data-sensitive>
+            {money(
+              totals.cogs +
+                totals.shipping +
+                totals.fees +
+                totals.adSpend +
+                totals.operatingExpenses,
+            )}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-background p-4">
+          <p className="text-xs font-medium text-muted-foreground">Lucro líquido</p>
+          <p
+            className={`mt-1 text-xl font-semibold tabular-nums ${totals.netProfit >= 0 ? "text-positive" : "text-negative"}`}
+            title={profitTitle}
+            data-sensitive
+          >
+            {profitDisplay}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-background p-4">
+          <p className="text-xs font-medium text-muted-foreground">Margem</p>
+          <p
+            className={`mt-1 text-xl font-semibold tabular-nums ${totals.margin >= 0 ? "" : "text-negative"}`}
+            data-sensitive
+          >
+            {formatPercent(totals.margin)}
+          </p>
+        </div>
+      </div>
+      <div className="mt-5">
+        <h2 className="text-lg font-semibold">Demonstração de resultados</h2>
+        <p className="text-sm text-muted-foreground">
+          Onde está a ir o dinheiro no período seleccionado.
+        </p>
+        <div className="mt-3 divide-y divide-border rounded-lg border border-border">
+          {lines.map((l) => (
+            <div key={l.label} className="flex items-center justify-between px-4 py-3">
+              <span className="text-sm">{l.label}</span>
+              <div className="flex items-center gap-4">
+                {"share" in l && l.share !== undefined && (
+                  <span
+                    className="w-12 text-right text-xs text-muted-foreground tabular-nums"
+                    data-sensitive
+                  >
+                    {pct(l.share)}
+                  </span>
+                )}
+                <span
+                  className={`w-32 text-right text-sm tabular-nums ${l.tone}`}
+                  data-sensitive
+                >
+                  {money(l.value)}
+                </span>
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center justify-between bg-muted px-4 py-3">
+            <span className="text-sm font-semibold">Lucro líquido</span>
+            <span
+              className={`w-32 text-right text-sm font-semibold tabular-nums ${totals.netProfit >= 0 ? "text-positive" : "text-negative"}`}
+              title={profitTitle}
+              data-sensitive
+            >
+              {profitDisplay}
+            </span>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const storeTablePanel =
+    !scopeName && stores.length > 0 ? (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[800px] text-sm">
+          <thead>
+            <tr className="text-left text-xs font-medium text-muted-foreground">
+              <th className="px-5 py-3">Loja</th>
+              <th className="px-5 py-3 text-right">Receita</th>
+              <th className="px-5 py-3 text-right">COGS</th>
+              <th className="px-5 py-3 text-right">Ad Spend</th>
+              <th className="px-5 py-3 text-right">Taxas</th>
+              <th className="px-5 py-3 text-right">Reembolsos</th>
+              <th className="px-5 py-3 text-right">Lucro</th>
+              <th className="px-5 py-3 text-right">Margem</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stores.map((s) => (
+              <tr key={s.name} className="border-t border-border hover:bg-muted">
+                <td className="px-5 py-3 font-medium" data-sensitive>
+                  {s.name}
+                </td>
+                <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                  {money(s.revenue)}
+                </td>
+                <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                  {money(s.cogs)}
+                </td>
+                <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                  {money(s.adSpend)}
+                </td>
+                <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                  {money(s.fees)}
+                </td>
+                <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
+                  {money(s.refunds)}
+                </td>
+                <td
+                  className={`px-5 py-3 text-right tabular-nums ${s.netProfit >= 0 ? "text-positive" : "text-negative"}`}
+                  data-sensitive
+                >
+                  {money(s.netProfit)}
+                </td>
+                <td
+                  className={`px-5 py-3 text-right tabular-nums ${s.margin >= 0 ? "" : "text-negative"}`}
+                  data-sensitive
+                >
+                  {formatPercent(s.margin)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : undefined;
+
+  const expensesPanel = (
+    <ExpensesPanel
+      expenses={expenses}
+      stores={storeOptions}
+      canEdit={canEditExpenses}
+      baseCurrency={currency}
+      embedded
+    />
+  );
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -186,162 +335,19 @@ export default async function FinancasPage({
         />
       )}
 
-      {storeCash && (
-        <CollapsibleSection
-          id="caixa-loja"
-          title="Caixa da loja"
-          description={`Desde ${storeCash.sinceLabel} — saldo acumulado independente do período.`}
-        >
-          <StoreCashFlowSection cash={storeCash} embedded />
-        </CollapsibleSection>
-      )}
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="rounded-lg border border-border bg-surface p-5">
-          <p className="text-[13px] font-medium text-muted-foreground">Receita</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums" data-sensitive>
-            {money(totals.revenue)}
-          </p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-5">
-          <p className="text-[13px] font-medium text-muted-foreground">Custos totais</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums" data-sensitive>
-            {money(
-              totals.cogs +
-                totals.shipping +
-                totals.fees +
-                totals.adSpend +
-                totals.operatingExpenses,
-            )}
-          </p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-5">
-          <p className="text-[13px] font-medium text-muted-foreground">Lucro líquido</p>
-          <p
-            className={`mt-1 text-2xl font-semibold tabular-nums ${totals.netProfit >= 0 ? "text-positive" : "text-negative"}`}
-            title={profitTitle}
-            data-sensitive
-          >
-            {profitDisplay}
-          </p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-5">
-          <p className="text-[13px] font-medium text-muted-foreground">Margem</p>
-          <p
-            className={`mt-1 text-2xl font-semibold tabular-nums ${totals.margin >= 0 ? "" : "text-negative"}`}
-            data-sensitive
-          >
-            {formatPercent(totals.margin)}
-          </p>
-        </div>
-      </div>
-
-      <CollapsibleSection
-        title="Demonstração de resultados"
-        description="Onde está a ir o dinheiro no período seleccionado."
-        flush
-      >
-        <div className="divide-y divide-border">
-          {lines.map((l) => (
-            <div key={l.label} className="flex items-center justify-between px-5 py-3">
-              <span className="text-sm">{l.label}</span>
-              <div className="flex items-center gap-4">
-                {"share" in l && l.share !== undefined && (
-                  <span
-                    className="w-12 text-right text-xs text-muted-foreground tabular-nums"
-                    data-sensitive
-                  >
-                    {pct(l.share)}
-                  </span>
-                )}
-                <span
-                  className={`w-32 text-right text-sm tabular-nums ${l.tone}`}
-                  data-sensitive
-                >
-                  {money(l.value)}
-                </span>
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center justify-between bg-muted px-5 py-3">
-            <span className="text-sm font-semibold">Lucro líquido</span>
-            <span
-              className={`w-32 text-right text-sm font-semibold tabular-nums ${totals.netProfit >= 0 ? "text-positive" : "text-negative"}`}
-              title={profitTitle}
-              data-sensitive
-            >
-              {profitDisplay}
-            </span>
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {!scopeName && stores.length > 0 && (
-      <CollapsibleSection
-        title="Por loja"
-        description={`${stores.length} loja${stores.length === 1 ? "" : "s"} no período.`}
-        flush
-      >
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[800px] text-sm">
-            <thead>
-              <tr className="text-left text-xs font-medium text-muted-foreground">
-                <th className="px-5 py-3">Loja</th>
-                <th className="px-5 py-3 text-right">Receita</th>
-                <th className="px-5 py-3 text-right">COGS</th>
-                <th className="px-5 py-3 text-right">Ad Spend</th>
-                <th className="px-5 py-3 text-right">Taxas</th>
-                <th className="px-5 py-3 text-right">Reembolsos</th>
-                <th className="px-5 py-3 text-right">Lucro</th>
-                <th className="px-5 py-3 text-right">Margem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stores.map((s) => (
-                <tr key={s.name} className="border-t border-border hover:bg-muted">
-                  <td className="px-5 py-3 font-medium" data-sensitive>
-                    {s.name}
-                  </td>
-                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                    {money(s.revenue)}
-                  </td>
-                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                    {money(s.cogs)}
-                  </td>
-                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                    {money(s.adSpend)}
-                  </td>
-                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                    {money(s.fees)}
-                  </td>
-                  <td className="px-5 py-3 text-right tabular-nums" data-sensitive>
-                    {money(s.refunds)}
-                  </td>
-                  <td
-                    className={`px-5 py-3 text-right tabular-nums ${s.netProfit >= 0 ? "text-positive" : "text-negative"}`}
-                    data-sensitive
-                  >
-                    {money(s.netProfit)}
-                  </td>
-                  <td
-                    className={`px-5 py-3 text-right tabular-nums ${s.margin >= 0 ? "" : "text-negative"}`}
-                    data-sensitive
-                  >
-                    {formatPercent(s.margin)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </CollapsibleSection>
-      )}
-
-      <ExpensesPanel
-        expenses={expenses}
-        stores={storeOptions}
-        canEdit={canEditExpenses}
-        baseCurrency={currency}
+      <FinancasView
+        scopeName={scopeName}
+        hasStoreCash={Boolean(storeCash)}
+        hasStoreTable={!scopeName && stores.length > 0}
+        expenseCount={expenses.length}
+        resumo={resumoPanel}
+        storeCash={
+          storeCash ? (
+            <StoreCashFlowSection cash={storeCash} embedded />
+          ) : undefined
+        }
+        storeTable={storeTablePanel}
+        expenses={expensesPanel}
       />
     </div>
   );

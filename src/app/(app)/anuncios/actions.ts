@@ -13,8 +13,10 @@ import { parseDateInput } from "@/lib/period";
 import { resolveAdSpendRange } from "@/lib/ad-spend";
 import { AD_INPUT_CURRENCIES, isAdInputCurrency } from "@/lib/ad-currencies";
 import { findStoreForUser } from "@/lib/store-scope";
-import { parsePlatformInputs } from "@/lib/ad-spend-platforms";
-import { buildAdSpendDayFromLines, buildZeroAdSpendDay } from "@/lib/ad-spend-save";
+import { parsePlatformInputs, type AdPlatform } from "@/lib/ad-spend-platforms";
+import { buildAdSpendDayFromLines, buildZeroAdSpendDay, summarizeAdSpendLines } from "@/lib/ad-spend-save";
+import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
+import { dateKeyInTimezone, normalizeStoreTimezone } from "@/lib/store-timezone";
 
 export type AdSpendState = {
   ok?: boolean;
@@ -95,9 +97,23 @@ export async function saveManualAdSpendAction(
   const store = await findStoreForUser(
     user,
     storeId,
-    "importStartDate createdAt",
+    "importStartDate createdAt ianaTimezone",
   );
   if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
+  const tz = normalizeStoreTimezone(store.ianaTimezone);
+  const todayKey = dateKeyInTimezone(new Date(), tz);
+  const apiAccounts = await loadSyncAdAccountsForStore(store._id);
+  const apiPlatforms = new Set(
+    apiAccounts.map((a) => a.platform as AdPlatform),
+  );
+
+  if (explicitZero && date === todayKey && apiPlatforms.size > 0) {
+    return {
+      error:
+        "Hoje o gasto das contas API sincroniza automaticamente. Só podes marcar zero em dias anteriores ou editar plataformas manuais.",
+    };
+  }
 
   const { fromKey } = resolveAdSpendRange(
     store.importStartDate,
@@ -111,16 +127,56 @@ export async function saveManualAdSpendAction(
 
   const baseCurrency = await getBaseCurrency(user.workspaceId);
 
+  const manualPlatformLines =
+    date === todayKey && apiPlatforms.size > 0
+      ? platformLines.filter((l) => !apiPlatforms.has(l.platform))
+      : platformLines;
+
   let built;
   try {
-    built = explicitZero
-      ? buildZeroAdSpendDay(parsed.data.inputCurrency, baseCurrency)
-      : await buildAdSpendDayFromLines(
-          platformLines,
-          parsed.data.inputCurrency,
-          baseCurrency,
-          date,
+    if (explicitZero) {
+      built = buildZeroAdSpendDay(parsed.data.inputCurrency, baseCurrency);
+    } else {
+      const manualBuilt = await buildAdSpendDayFromLines(
+        manualPlatformLines,
+        parsed.data.inputCurrency,
+        baseCurrency,
+        date,
+      );
+
+      if (date === todayKey && apiPlatforms.size > 0) {
+        const existingDoc = await ManualAdSpend.findOne({
+          storeId: store._id,
+          dateKey: date,
+        })
+          .select("lines")
+          .lean();
+        const apiLines = (existingDoc?.lines ?? []).filter((l) =>
+          apiPlatforms.has(l.platform as AdPlatform),
         );
+        if (apiLines.length > 0) {
+          built = summarizeAdSpendLines([
+            ...manualBuilt.lines,
+            ...apiLines.map((l) => ({
+              platform: l.platform as AdPlatform,
+              inputAmount: Number(l.inputAmount ?? 0),
+              inputCurrency: l.inputCurrency ?? "USD",
+              amount: Number(l.amount ?? 0),
+              fxRate: l.fxRate ?? null,
+              extraFee: Number(l.extraFee ?? 0),
+              inputExtraFee: l.inputExtraFee ?? null,
+              agencyFeePercent: Number(l.agencyFeePercent ?? 0),
+              agencyFeeAmount: Number(l.agencyFeeAmount ?? 0),
+              inputAgencyFeeAmount: l.inputAgencyFeeAmount ?? null,
+            })),
+          ]);
+        } else {
+          built = manualBuilt;
+        }
+      } else {
+        built = manualBuilt;
+      }
+    }
   } catch (e) {
     return {
       error:

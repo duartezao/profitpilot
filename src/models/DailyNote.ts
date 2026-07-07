@@ -13,6 +13,12 @@ export type DailyNoteReportFields = {
 };
 
 export type DailyNoteApiSnapshot = {
+  spend?: number | null;
+  clicks?: number | null;
+  impressions?: number | null;
+  conversions?: number | null;
+  conversionValue?: number | null;
+  roas?: number | null;
   cpc?: number | null;
   ctr?: number | null;
   cpm?: number | null;
@@ -38,10 +44,16 @@ const ReportFieldsSchema = new Schema(
 
 const ApiSnapshotSchema = new Schema(
   {
+    spend: { type: Number, default: null },
+    clicks: { type: Number, default: null },
+    impressions: { type: Number, default: null },
+    conversions: { type: Number, default: null },
+    conversionValue: { type: Number, default: null },
+    roas: { type: Number, default: null },
     cpc: { type: Number, default: null },
     ctr: { type: Number, default: null },
     cpm: { type: Number, default: null },
-    currency: { type: String, trim: true, default: "USD" },
+    currency: { type: String, trim: true, default: "EUR" },
     bestCampaign: { type: String, trim: true, default: "" },
     campaignSuggestion: { type: String, trim: true, default: "" },
     syncedAt: { type: Date },

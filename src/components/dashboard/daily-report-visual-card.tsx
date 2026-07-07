@@ -22,7 +22,7 @@ const KPI_ORDER = [
   "DESPESAS",
   "PROFIT",
   "CPC",
-  "CTR %",
+  "CTR",
   "CPM",
   "ATC %",
   "REACHED CHECKOUT %",

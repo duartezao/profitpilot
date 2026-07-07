@@ -291,6 +291,45 @@ export function periodIsSingleDay(period: ResolvedPeriod): boolean {
   return period.start.toDateString() === period.end.toDateString();
 }
 
+/** Máximo de dias agregados em campanhas (evita queries enormes). */
+export const MAX_CAMPAIGN_PERIOD_DAYS = 31;
+
+/** Lista de dateKeys (YYYY-MM-DD) para um período resolvido. */
+export function dateKeysFromResolvedPeriod(
+  period: ResolvedPeriod,
+  maxDays = MAX_CAMPAIGN_PERIOD_DAYS,
+): string[] {
+  let keys: string[];
+  if (period.specificDates?.length) {
+    keys = [...period.specificDates].sort();
+  } else {
+    keys = [];
+    let cur = startOfDay(period.start);
+    const end = startOfDay(period.end);
+    while (cur <= end) {
+      keys.push(formatDateInput(cur));
+      cur = addDays(cur, 1);
+    }
+  }
+  if (keys.length > maxDays) {
+    return keys.slice(-maxDays);
+  }
+  return keys;
+}
+
+/** O período inclui o dia de hoje (servidor local)? */
+export function periodIncludesToday(
+  period: ResolvedPeriod,
+  todayKey = formatDateInput(new Date()),
+): boolean {
+  if (period.specificDates?.length) {
+    return period.specificDates.includes(todayKey);
+  }
+  const startKey = formatDateInput(period.start);
+  const endKey = formatDateInput(period.end);
+  return todayKey >= startKey && todayKey <= endKey;
+}
+
 function customRange(from: string, to: string): ResolvedPeriod | null {
   const fromDate = parseDateInput(from);
   const toDate = parseDateInput(to);

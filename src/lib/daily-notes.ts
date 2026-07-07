@@ -92,10 +92,16 @@ export async function fetchStoreDailyNoteForDay(
   const snap = match.apiSnapshot;
   const apiSnapshot: DailyNoteApiSnapshot | null = snap
     ? {
+        spend: snap.spend ?? null,
+        clicks: snap.clicks ?? null,
+        impressions: snap.impressions ?? null,
+        conversions: snap.conversions ?? null,
+        conversionValue: snap.conversionValue ?? null,
+        roas: snap.roas ?? null,
         cpc: snap.cpc ?? null,
         ctr: snap.ctr ?? null,
         cpm: snap.cpm ?? null,
-        currency: snap.currency ?? "USD",
+        currency: snap.currency ?? "EUR",
         bestCampaign: snap.bestCampaign ?? "",
         campaignSuggestion: snap.campaignSuggestion ?? "",
         syncedAt: snap.syncedAt ?? undefined,

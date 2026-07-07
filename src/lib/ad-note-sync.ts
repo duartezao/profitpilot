@@ -2,22 +2,33 @@ import "server-only";
 import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { DailyNote } from "@/models/DailyNote";
-import { loadStoreAdMetricsForDay } from "@/lib/ad-campaign-metrics";
+import { resolveStoreAdMetricsForDay } from "@/lib/ad-insights";
+import { loadActiveAdAccountIdsForStore } from "@/lib/ad-accounts";
+import { buildWorkspacePnl } from "@/lib/metrics";
+import { berRoas } from "@/lib/profit";
 import {
   buildCampaignDecisions,
-  buildCampaignSuggestionText,
   pickBestCampaign,
 } from "@/lib/campaign-decision";
+import { roasFromCampaign } from "@/lib/ad-campaign-types";
 import { startOfDay, endOfDay, parseDateInput } from "@/lib/period";
 
-/** Preenche snapshot API na nota diária (CPC/CTR/CPM + sugestão de campanhas). */
+function isApiAutoObs(obs: string | undefined | null): boolean {
+  const t = (obs ?? "").trim();
+  return t.startsWith("[Ads API");
+}
+
+/** Preenche snapshot API na nota diária (métricas + melhor campanha). */
 export async function syncApiMetricsToDailyNote(
   workspaceId: string,
   storeId: string,
   dateKey: string,
 ): Promise<void> {
   await connectToDatabase();
-  const metrics = await loadStoreAdMetricsForDay(storeId, dateKey);
+  const activeAccountIds = await loadActiveAdAccountIdsForStore(storeId);
+  const metrics = await resolveStoreAdMetricsForDay(storeId, dateKey, {
+    adAccountIds: activeAccountIds,
+  });
   if (!metrics) return;
 
   const day = parseDateInput(dateKey);
@@ -25,20 +36,50 @@ export async function syncApiMetricsToDailyNote(
   const noteDate = startOfDay(day);
   const dayEnd = endOfDay(noteDate);
 
-  const campaignRows = buildCampaignDecisions(metrics.campaigns);
+  let storeBer: number | null = null;
+  let storeRevenue: number | undefined;
+  let storeAdSpend: number | undefined;
+  try {
+    const pnl = await buildWorkspacePnl(workspaceId, { dates: dateKey }, storeId);
+    const storeLine = pnl.stores[0];
+    storeBer = storeLine ? berRoas(storeLine) : berRoas(pnl.totals);
+    storeRevenue = storeLine?.revenue;
+    storeAdSpend = storeLine?.adSpend ?? metrics.total.spend;
+  } catch {
+    /* BER opcional — não bloqueia nota */
+  }
+
+  const campaignRows = buildCampaignDecisions(metrics.campaigns, {
+    storeBer,
+    storeRevenue,
+    totalAdSpend: storeAdSpend ?? metrics.total.spend,
+  });
   const best = pickBestCampaign(campaignRows);
-  const suggestion = buildCampaignSuggestionText(campaignRows);
+
+  const conversionValue = metrics.campaigns.reduce(
+    (s, c) => s + c.conversionValue,
+    0,
+  );
+  const conversions = metrics.campaigns.reduce((s, c) => s + c.conversions, 0);
+  const roas = roasFromCampaign(metrics.total.spend, conversionValue);
+  const currency = metrics.byPlatform[0]?.currency ?? "EUR";
 
   const wsOid = new mongoose.Types.ObjectId(workspaceId);
   const storeOid = new mongoose.Types.ObjectId(storeId);
 
   const apiSnapshot = {
+    spend: metrics.total.spend,
+    clicks: metrics.total.clicks,
+    impressions: metrics.total.impressions,
+    conversions,
+    conversionValue,
+    roas,
     cpc: metrics.total.cpc,
     ctr: metrics.total.ctr,
     cpm: metrics.total.cpm,
-    currency: metrics.byPlatform[0]?.currency ?? "USD",
+    currency,
     bestCampaign: best?.name ?? "",
-    campaignSuggestion: suggestion ?? "",
+    campaignSuggestion: "",
     syncedAt: new Date(),
   };
 
@@ -49,10 +90,11 @@ export async function syncApiMetricsToDailyNote(
   });
 
   if (existing) {
-    await DailyNote.updateOne(
-      { _id: existing._id },
-      { $set: { apiSnapshot } },
-    );
+    const update: Record<string, unknown> = { apiSnapshot };
+    if (isApiAutoObs(existing.reportFields?.obs)) {
+      update["reportFields.obs"] = "";
+    }
+    await DailyNote.updateOne({ _id: existing._id }, { $set: update });
   } else {
     await DailyNote.create({
       workspaceId: wsOid,

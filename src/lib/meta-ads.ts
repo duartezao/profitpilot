@@ -8,7 +8,11 @@
 
 import {
   formatCampaignStatusLabel,
+  isActiveCampaignStatus,
+  isPausedCampaignStatus,
   metricsFromCampaignTotals,
+  roasFromCampaign,
+  shouldIncludeCampaignForDay,
   type LiveCampaignRow,
 } from "@/lib/ad-campaign-types";
 
@@ -95,45 +99,133 @@ async function metaGraphGet<T>(
   return json;
 }
 
-/** Lista ad accounts acessíveis com o token (me/adaccounts). */
+/** Lista ad accounts acessíveis com o token (diretas + Business Manager). */
 export async function listMetaAdAccounts(
   accessToken: string,
 ): Promise<MetaAdAccountOption[]> {
+  type AdAccountRow = {
+    id: string;
+    account_id: string;
+    name?: string;
+    account_status?: number;
+    currency?: string;
+  };
   type AdAccountPage = {
+    data?: AdAccountRow[];
+    paging?: { next?: string };
+  };
+
+  const byId = new Map<string, MetaAdAccountOption>();
+
+  const addRow = (row: AdAccountRow) => {
+    const id = row.id.startsWith("act_") ? row.id : `act_${row.account_id}`;
+    if (byId.has(id)) return;
+    byId.set(id, {
+      id,
+      accountId: row.account_id,
+      name: row.name?.trim() || `Conta ${row.account_id}`,
+      currency: row.currency ?? "USD",
+      accountStatus: row.account_status ?? 0,
+    });
+  };
+
+  const fetchAdAccountEdge = async (pathOrUrl: string, params?: Record<string, string>) => {
+    let nextUrl: string | null = null;
+    let first = true;
+    while (first || nextUrl) {
+      first = false;
+      try {
+        const json: AdAccountPage = nextUrl
+          ? await metaGraphGet<AdAccountPage>(nextUrl, accessToken)
+          : await metaGraphGet<AdAccountPage>(pathOrUrl, accessToken, {
+              fields: "account_id,name,account_status,currency,id",
+              limit: "100",
+              ...params,
+            });
+        for (const row of json.data ?? []) addRow(row);
+        nextUrl = json.paging?.next ?? null;
+      } catch {
+        nextUrl = null;
+      }
+    }
+  };
+
+  await fetchAdAccountEdge("me/adaccounts");
+
+  try {
+    const me = await metaGraphGet<{ id?: string }>("me", accessToken, {
+      fields: "id",
+    });
+    if (me.id) {
+      await fetchAdAccountEdge(`${me.id}/adaccounts`);
+    }
+  } catch {
+    /* fallback */
+  }
+
+  type BusinessPage = {
     data?: Array<{
       id: string;
-      account_id: string;
-      name?: string;
-      account_status?: number;
-      currency?: string;
+      owned_ad_accounts?: { data?: AdAccountRow[] };
+      client_ad_accounts?: { data?: AdAccountRow[] };
     }>;
     paging?: { next?: string };
   };
 
-  const accounts: MetaAdAccountOption[] = [];
-  let nextUrl: string | null = null;
-  let first = true;
-
-  while (first || nextUrl) {
-    first = false;
-    const json: AdAccountPage = nextUrl
-      ? await metaGraphGet<AdAccountPage>(nextUrl, accessToken)
-      : await metaGraphGet<AdAccountPage>("me/adaccounts", accessToken, {
-          fields: "account_id,name,account_status,currency,id",
-          limit: "100",
-        });
-
-    for (const row of json.data ?? []) {
-      accounts.push({
-        id: row.id.startsWith("act_") ? row.id : `act_${row.account_id}`,
-        accountId: row.account_id,
-        name: row.name?.trim() || `Conta ${row.account_id}`,
-        currency: row.currency ?? "USD",
-        accountStatus: row.account_status ?? 0,
-      });
+  let bizUrl: string | null = null;
+  let bizFirst = true;
+  while (bizFirst || bizUrl) {
+    bizFirst = false;
+    try {
+      const bizJson: BusinessPage = bizUrl
+        ? await metaGraphGet<BusinessPage>(bizUrl, accessToken)
+        : await metaGraphGet<BusinessPage>("me/businesses", accessToken, {
+            fields:
+              "id,owned_ad_accounts{account_id,name,account_status,currency,id},client_ad_accounts{account_id,name,account_status,currency,id}",
+            limit: "50",
+          });
+      for (const biz of bizJson.data ?? []) {
+        for (const row of biz.owned_ad_accounts?.data ?? []) addRow(row);
+        for (const row of biz.client_ad_accounts?.data ?? []) addRow(row);
+        try {
+          await fetchAdAccountEdge(`${biz.id}/owned_ad_accounts`);
+        } catch {
+          /* sem acesso */
+        }
+        try {
+          await fetchAdAccountEdge(`${biz.id}/client_ad_accounts`);
+        } catch {
+          /* sem acesso */
+        }
+        try {
+          await fetchAdAccountEdge(`${biz.id}/ad_accounts`);
+        } catch {
+          /* edge alternativo */
+        }
+        try {
+          await fetchAdAccountEdge(`${biz.id}/shared_ad_accounts`);
+        } catch {
+          /* partilhadas */
+        }
+        try {
+          await fetchAdAccountEdge(`${biz.id}/assigned_ad_accounts`);
+        } catch {
+          /* atribuídas */
+        }
+      }
+      bizUrl = bizJson.paging?.next ?? null;
+    } catch {
+      bizUrl = null;
     }
+  }
 
-    nextUrl = json.paging?.next ?? null;
+  const accounts = [...byId.values()];
+  if (!accounts.length) {
+    throw new MetaApiError({
+      message:
+        "Nenhuma ad account encontrada. Confirma ads_read, que o convite foi aceite no Business Manager, e que o login Meta é o mesmo que recebeu o acesso.",
+      code: 200,
+    });
   }
 
   return accounts.sort((a, b) => a.name.localeCompare(b.name, "pt"));
@@ -228,93 +320,133 @@ export type CampaignInsightsRow = {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions: number;
+  conversionValue: number;
   currency: string;
+  status?: string;
+  statusLabel?: string;
 };
 
-/** Insights por campanha num dia. */
-export async function fetchMetaCampaignInsightsForDay(
-  accessToken: string,
-  adAccountId: string,
-  dateKey: string,
-): Promise<CampaignInsightsRow[]> {
-  const actId = normalizeActId(adAccountId);
-  type InsightsPage = {
-    data?: Array<{
-      campaign_id?: string;
-      campaign_name?: string;
-      spend?: string;
-      impressions?: string;
-      clicks?: string;
-      account_currency?: string;
-    }>;
-    paging?: { next?: string };
-  };
+const META_PURCHASE_ACTIONS = new Set([
+  "purchase",
+  "omni_purchase",
+  "offsite_conversion.fb_pixel_purchase",
+  "web_in_store_purchase",
+  "onsite_conversion.purchase",
+  "web_app_in_store_purchase",
+]);
 
-  const rows: CampaignInsightsRow[] = [];
-  let nextUrl: string | null = null;
-  let first = true;
-
-  while (first || nextUrl) {
-    first = false;
-    const json: InsightsPage = nextUrl
-      ? await metaGraphGet<InsightsPage>(nextUrl, accessToken)
-      : await metaGraphGet<InsightsPage>(`${actId}/insights`, accessToken, {
-          fields:
-            "campaign_id,campaign_name,spend,impressions,clicks,account_currency",
-          time_range: JSON.stringify({ since: dateKey, until: dateKey }),
-          level: "campaign",
-          limit: "100",
-        });
-
-    for (const row of json.data ?? []) {
-      const spend = Number(row.spend ?? 0) || 0;
-      const impressions = Number(row.impressions ?? 0) || 0;
-      const clicks = Number(row.clicks ?? 0) || 0;
-      if (spend <= 0 && impressions <= 0 && clicks <= 0) continue;
-      rows.push({
-        campaignId: String(row.campaign_id ?? "").trim() || "unknown",
-        campaignName: row.campaign_name?.trim() || "Campanha",
-        spend,
-        impressions,
-        clicks,
-        currency: row.account_currency ?? "USD",
-      });
-    }
-    nextUrl = json.paging?.next ?? null;
-  }
-
-  return rows;
+function isMetaPurchaseAction(actionType: string): boolean {
+  const t = actionType.trim().toLowerCase();
+  if (!t) return false;
+  if (META_PURCHASE_ACTIONS.has(actionType)) return true;
+  if (t.endsWith(".purchase") || t.includes("purchase")) return true;
+  if (t.includes("fb_pixel_purchase")) return true;
+  return false;
 }
 
-/** Campanhas activas/pausadas com métricas de hoje. */
-export async function fetchMetaLiveCampaigns(
-  accessToken: string,
-  adAccountId: string,
-  dateKey: string,
-): Promise<LiveCampaignRow[]> {
-  const actId = normalizeActId(adAccountId);
-  type CampaignPage = {
-    data?: Array<{
-      id?: string;
-      name?: string;
-      status?: string;
-      effective_status?: string;
-    }>;
-    paging?: { next?: string };
-  };
+type MetaInsightsConversions = {
+  actions?: Array<{ action_type?: string; value?: string }>;
+  action_values?: Array<{ action_type?: string; value?: string }>;
+  purchase_roas?: Array<{ action_type?: string; value?: string }>;
+};
 
-  const campaignsById = new Map<
-    string,
-    { name: string; status: string }
-  >();
+function metaPurchaseFromInsights(
+  row: MetaInsightsConversions,
+  spend = 0,
+): { conversions: number; conversionValue: number } {
+  let conversions = 0;
+  let conversionValue = 0;
+  for (const a of row.actions ?? []) {
+    const t = a.action_type ?? "";
+    if (isMetaPurchaseAction(t)) {
+      conversions += Number(a.value ?? 0) || 0;
+    }
+  }
+  for (const a of row.action_values ?? []) {
+    const t = a.action_type ?? "";
+    if (isMetaPurchaseAction(t)) {
+      conversionValue += Number(a.value ?? 0) || 0;
+    }
+  }
+
+  if (conversionValue <= 0 && spend > 0) {
+    for (const pr of row.purchase_roas ?? []) {
+      const t = pr.action_type ?? "";
+      if (!isMetaPurchaseAction(t)) continue;
+      const roas = Number(pr.value ?? 0) || 0;
+      if (roas > 0) {
+        conversionValue = spend * roas;
+        break;
+      }
+    }
+  }
+
+  if (conversionValue <= 0 && conversions <= 0 && spend > 0) {
+    for (const a of row.actions ?? []) {
+      const t = (a.action_type ?? "").toLowerCase();
+      if (t.includes("purchase") || t.includes("checkout")) {
+        conversions += Number(a.value ?? 0) || 0;
+      }
+    }
+  }
+
+  return { conversions, conversionValue };
+}
+
+const META_CAMPAIGN_INSIGHT_FIELDS =
+  "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,purchase_roas,account_currency";
+
+type MetaCampaignCatalogEntry = { name: string; status: string };
+
+type MetaCampaignDayMetrics = {
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  conversionValue: number;
+  currency: string;
+  name: string;
+};
+
+type MetaCampaignPage = {
+  data?: Array<{
+    id?: string;
+    name?: string;
+    status?: string;
+    effective_status?: string;
+  }>;
+  paging?: { next?: string };
+};
+
+type MetaInsightsPage = {
+  data?: Array<{
+    campaign_id?: string;
+    campaign_name?: string;
+    spend?: string;
+    impressions?: string;
+    clicks?: string;
+    account_currency?: string;
+    actions?: Array<{ action_type?: string; value?: string }>;
+    action_values?: Array<{ action_type?: string; value?: string }>;
+    purchase_roas?: Array<{ action_type?: string; value?: string }>;
+  }>;
+  paging?: { next?: string };
+};
+
+async function loadMetaCampaignCatalog(
+  accessToken: string,
+  actId: string,
+): Promise<Map<string, MetaCampaignCatalogEntry>> {
+  const campaignsById = new Map<string, MetaCampaignCatalogEntry>();
   let nextUrl: string | null = null;
   let first = true;
 
   while (first || nextUrl) {
     first = false;
-    const json: CampaignPage = nextUrl
-      ? await metaGraphGet<CampaignPage>(nextUrl, accessToken)
-      : await metaGraphGet<CampaignPage>(`${actId}/campaigns`, accessToken, {
+    const json: MetaCampaignPage = nextUrl
+      ? await metaGraphGet<MetaCampaignPage>(nextUrl, accessToken)
+      : await metaGraphGet<MetaCampaignPage>(`${actId}/campaigns`, accessToken, {
           fields: "id,name,status,effective_status",
           limit: "100",
         });
@@ -330,32 +462,24 @@ export async function fetchMetaLiveCampaigns(
     nextUrl = json.paging?.next ?? null;
   }
 
-  const metricsById = new Map<
-    string,
-    { spend: number; impressions: number; clicks: number; currency: string; name: string }
-  >();
+  return campaignsById;
+}
 
-  type InsightsPage = {
-    data?: Array<{
-      campaign_id?: string;
-      campaign_name?: string;
-      spend?: string;
-      impressions?: string;
-      clicks?: string;
-      account_currency?: string;
-    }>;
-    paging?: { next?: string };
-  };
+async function loadMetaCampaignDayMetrics(
+  accessToken: string,
+  actId: string,
+  dateKey: string,
+): Promise<Map<string, MetaCampaignDayMetrics>> {
+  const metricsById = new Map<string, MetaCampaignDayMetrics>();
+  let nextUrl: string | null = null;
+  let first = true;
 
-  nextUrl = null;
-  first = true;
   while (first || nextUrl) {
     first = false;
-    const json: InsightsPage = nextUrl
-      ? await metaGraphGet<InsightsPage>(nextUrl, accessToken)
-      : await metaGraphGet<InsightsPage>(`${actId}/insights`, accessToken, {
-          fields:
-            "campaign_id,campaign_name,spend,impressions,clicks,account_currency",
+    const json: MetaInsightsPage = nextUrl
+      ? await metaGraphGet<MetaInsightsPage>(nextUrl, accessToken)
+      : await metaGraphGet<MetaInsightsPage>(`${actId}/insights`, accessToken, {
+          fields: META_CAMPAIGN_INSIGHT_FIELDS,
           time_range: JSON.stringify({ since: dateKey, until: dateKey }),
           level: "campaign",
           limit: "100",
@@ -364,10 +488,14 @@ export async function fetchMetaLiveCampaigns(
     for (const row of json.data ?? []) {
       const id = String(row.campaign_id ?? "").trim();
       if (!id) continue;
+      const spend = Number(row.spend ?? 0) || 0;
+      const { conversions, conversionValue } = metaPurchaseFromInsights(row, spend);
       metricsById.set(id, {
-        spend: Number(row.spend ?? 0) || 0,
+        spend,
         impressions: Number(row.impressions ?? 0) || 0,
         clicks: Number(row.clicks ?? 0) || 0,
+        conversions,
+        conversionValue,
         currency: row.account_currency ?? "USD",
         name: row.campaign_name?.trim() || "Campanha",
       });
@@ -375,32 +503,42 @@ export async function fetchMetaLiveCampaigns(
     nextUrl = json.paging?.next ?? null;
   }
 
-  const out: LiveCampaignRow[] = [];
+  return metricsById;
+}
+
+function buildMetaCampaignInsightRows(
+  campaignsById: Map<string, MetaCampaignCatalogEntry>,
+  metricsById: Map<string, MetaCampaignDayMetrics>,
+): CampaignInsightsRow[] {
+  const out: CampaignInsightsRow[] = [];
   const seen = new Set<string>();
 
   for (const [id, c] of campaignsById) {
-    const isRunning = c.status === "ACTIVE";
+    if (!isActiveCampaignStatus(c.status) && !isPausedCampaignStatus(c.status)) {
+      continue;
+    }
     const m = metricsById.get(id);
-    if (!isRunning && !m) continue;
-    if (c.status !== "ACTIVE" && c.status !== "PAUSED" && !m) continue;
-
-    const spend = m?.spend ?? 0;
-    const impressions = m?.impressions ?? 0;
-    const clicks = m?.clicks ?? 0;
+    if (
+      !shouldIncludeCampaignForDay(c.status, {
+        spend: m?.spend,
+        impressions: m?.impressions,
+        clicks: m?.clicks,
+        conversions: m?.conversions,
+      })
+    ) {
+      continue;
+    }
     out.push({
       campaignId: id,
       campaignName: c.name || m?.name || "Campanha",
-      platform: "meta",
-      platformLabel: "Meta",
-      adAccountId: actId,
-      adAccountName: actId,
+      spend: m?.spend ?? 0,
+      impressions: m?.impressions ?? 0,
+      clicks: m?.clicks ?? 0,
+      conversions: m?.conversions ?? 0,
+      conversionValue: m?.conversionValue ?? 0,
+      currency: m?.currency ?? "USD",
       status: c.status,
       statusLabel: formatCampaignStatusLabel(c.status),
-      spend,
-      impressions,
-      clicks,
-      currency: m?.currency ?? "USD",
-      ...metricsFromCampaignTotals(spend, impressions, clicks),
     });
     seen.add(id);
   }
@@ -410,19 +548,66 @@ export async function fetchMetaLiveCampaigns(
     out.push({
       campaignId: id,
       campaignName: m.name,
-      platform: "meta",
-      platformLabel: "Meta",
-      adAccountId: actId,
-      adAccountName: actId,
-      status: "ACTIVE",
-      statusLabel: "Activa",
       spend: m.spend,
       impressions: m.impressions,
       clicks: m.clicks,
+      conversions: m.conversions,
+      conversionValue: m.conversionValue,
       currency: m.currency,
-      ...metricsFromCampaignTotals(m.spend, m.impressions, m.clicks),
+      status: "ACTIVE",
+      statusLabel: "Activa",
     });
   }
 
-  return out.sort((a, b) => b.spend - a.spend);
+  return out;
+}
+
+/** Insights por campanha num dia (activas sempre; pausadas só com actividade no dia). */
+export async function fetchMetaCampaignInsightsForDay(
+  accessToken: string,
+  adAccountId: string,
+  dateKey: string,
+): Promise<CampaignInsightsRow[]> {
+  const actId = normalizeActId(adAccountId);
+  const [campaignsById, metricsById] = await Promise.all([
+    loadMetaCampaignCatalog(accessToken, actId),
+    loadMetaCampaignDayMetrics(accessToken, actId, dateKey),
+  ]);
+  return buildMetaCampaignInsightRows(campaignsById, metricsById);
+}
+
+/** Campanhas activas/pausadas com métricas de hoje. */
+export async function fetchMetaLiveCampaigns(
+  accessToken: string,
+  adAccountId: string,
+  dateKey: string,
+): Promise<LiveCampaignRow[]> {
+  const actId = normalizeActId(adAccountId);
+  const [campaignsById, metricsById] = await Promise.all([
+    loadMetaCampaignCatalog(accessToken, actId),
+    loadMetaCampaignDayMetrics(accessToken, actId, dateKey),
+  ]);
+
+  const insightRows = buildMetaCampaignInsightRows(campaignsById, metricsById);
+
+  return insightRows
+    .map((row) => ({
+      campaignId: row.campaignId,
+      campaignName: row.campaignName,
+      platform: "meta" as const,
+      platformLabel: "Meta",
+      adAccountId: actId,
+      adAccountName: actId,
+      status: row.status ?? "ACTIVE",
+      statusLabel: row.statusLabel ?? "Activa",
+      spend: row.spend,
+      impressions: row.impressions,
+      clicks: row.clicks,
+      conversions: row.conversions,
+      conversionValue: row.conversionValue,
+      currency: row.currency,
+      roas: roasFromCampaign(row.spend, row.conversionValue),
+      ...metricsFromCampaignTotals(row.spend, row.impressions, row.clicks),
+    }))
+    .sort((a, b) => b.spend - a.spend);
 }

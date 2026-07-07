@@ -4,13 +4,11 @@ import { Store } from "@/models/Store";
 import {
   fetchStoreDayFinancials,
   fetchStoreRangeFinancials,
+  buildStoreProductRanking,
 } from "@/lib/metrics";
 import { fetchStoreDailyNoteForDay } from "@/lib/daily-notes";
-import {
-  fetchStoreAdInsightsForDay,
-  aggregateStoreAdInsightsForPeriod,
-} from "@/lib/ad-insights";
-import { loadStoreAdMetricsForDay, loadStoreAdMetricsFromDb } from "@/lib/ad-campaign-metrics";
+import { aggregateStoreAdInsightsForPeriod } from "@/lib/ad-insights";
+import { loadStoreAdMetricsFromDb, loadStoreAdMetricsForDay } from "@/lib/ad-campaign-metrics";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { parseDateInput, formatDateInput, addDays, startOfDay } from "@/lib/period";
 import { buildCollectionReportBlock } from "@/lib/collection-operations";
@@ -80,6 +78,52 @@ function pushManualField(
   if (t) lines.push(`${label}: ${t}`);
 }
 
+type ReportAdKpis = {
+  cpc: number | null;
+  ctr: number | null;
+  cpm: number | null;
+  currency: string;
+};
+
+async function resolveReportAdKpis(
+  storeId: string,
+  dateKey: string,
+  apiSnap: { cpc?: number | null; ctr?: number | null; cpm?: number | null; currency?: string } | null | undefined,
+): Promise<ReportAdKpis | null> {
+  if (
+    apiSnap &&
+    (apiSnap.cpc != null || apiSnap.ctr != null || apiSnap.cpm != null)
+  ) {
+    return {
+      cpc: apiSnap.cpc ?? null,
+      ctr: apiSnap.ctr ?? null,
+      cpm: apiSnap.cpm ?? null,
+      currency: apiSnap.currency ?? "USD",
+    };
+  }
+
+  const metrics = await loadStoreAdMetricsForDay(storeId, dateKey);
+  if (!metrics || metrics.total.spend <= 0) return null;
+
+  const currency =
+    metrics.byPlatform[0]?.currency ??
+    metrics.campaigns[0]?.currency ??
+    "USD";
+
+  return {
+    cpc: metrics.total.cpc,
+    ctr: metrics.total.ctr,
+    cpm: metrics.total.cpm,
+    currency,
+  };
+}
+
+function pushReportAdKpis(lines: string[], kpis: ReportAdKpis): void {
+  pushIf(lines, kpis.cpc != null, `CPC: ${fmtAdMoney(kpis.cpc!, kpis.currency)}`);
+  pushIf(lines, kpis.ctr != null, `CTR: ${fmtReportPct(kpis.ctr)}`);
+  pushIf(lines, kpis.cpm != null, `CPM: ${fmtAdMoney(kpis.cpm!, kpis.currency)}`);
+}
+
 export type DailyReportResult = {
   text: string;
   dateKey: string;
@@ -136,9 +180,10 @@ export async function buildDailyReportText(opts: {
   ): string | null {
     if (!note) return null;
     const rfObs = note.reportFields.obs?.trim();
-    if (rfObs) return rfObs;
+    if (rfObs && !rfObs.startsWith("[Ads API")) return rfObs;
     const legacy = note.text?.trim();
-    return legacy || null;
+    if (legacy && !legacy.startsWith("[Ads API")) return legacy;
+    return null;
   }
 
   const rf = storeNote?.reportFields;
@@ -191,73 +236,33 @@ export async function buildDailyReportText(opts: {
     `CVR %: ${fmtReportPct(financials.cvrPct)}`,
   );
 
-  const adMetrics = await loadStoreAdMetricsForDay(opts.storeId, opts.dateKey);
-  const adInsights =
-    adMetrics != null
-      ? {
-          spend: adMetrics.total.spend,
-          impressions: adMetrics.total.impressions,
-          clicks: adMetrics.total.clicks,
-          cpc: adMetrics.total.cpc,
-          ctr: adMetrics.total.ctr,
-          cpm: adMetrics.total.cpm,
-        }
-      : await fetchStoreAdInsightsForDay(opts.storeId, opts.dateKey);
-
-  if (adInsights) {
-    const adCurrency =
-      adMetrics?.byPlatform[0]?.currency ??
-      adMetrics?.campaigns[0]?.currency ??
-      "USD";
-    pushAdMetricsBlock(
-      lines,
-      "ADS (total)",
-      adInsights.cpc,
-      adInsights.ctr,
-      adInsights.cpm,
-      adCurrency,
-      adInsights.spend,
-    );
-    if (adMetrics && adMetrics.byPlatform.length > 1) {
-      for (const p of adMetrics.byPlatform) {
-        pushAdMetricsBlock(
-          lines,
-          p.platformLabel.toUpperCase(),
-          p.cpc,
-          p.ctr,
-          p.cpm,
-          p.currency,
-          p.spend,
-        );
-      }
-    }
-    const topCampaigns = (adMetrics?.campaigns ?? []).slice(0, 8);
-    if (topCampaigns.length) {
-      pushLine(lines, "");
-      pushLine(lines, "— Campanhas —");
-      for (const c of topCampaigns) {
-        const parts = [`${c.campaignName} (${c.platformLabel})`];
-        if (c.spend > 0) parts.push(fmtAdMoney(c.spend, c.currency));
-        if (c.cpc != null) parts.push(`CPC ${fmtAdMoney(c.cpc, c.currency)}`);
-        if (c.ctr != null) parts.push(`CTR ${fmtReportPct(c.ctr)}`);
-        pushLine(lines, parts.join(" · "));
-      }
-    }
+  const apiSnap = storeNote?.apiSnapshot;
+  const adKpis = await resolveReportAdKpis(opts.storeId, opts.dateKey, apiSnap);
+  if (adKpis) {
+    pushReportAdKpis(lines, adKpis);
   }
 
-  const apiSnap = storeNote?.apiSnapshot;
   if (apiSnap?.bestCampaign?.trim()) {
     pushLine(lines, `MELHOR CAMPANHA: ${apiSnap.bestCampaign.trim()}`);
   }
-  if (apiSnap?.campaignSuggestion?.trim()) {
-    pushLine(lines, `SUGESTÃO ADS: ${apiSnap.campaignSuggestion.trim()}`);
+
+  const productRanking = await buildStoreProductRanking(
+    opts.workspaceId,
+    opts.storeId,
+    { dates: opts.dateKey },
+    1,
+  );
+  const autoBestSeller = productRanking.products[0]?.title?.trim();
+  if (autoBestSeller) {
+    pushLine(lines, `PRODUTO BEST-SELLER: ${autoBestSeller}`);
+  } else {
+    pushManualField(lines, "PRODUTO BEST-SELLER", rf?.bestSellerCollection);
   }
 
   pushManualField(lines, "Produtos testados", rf?.productsTested);
   pushManualField(lines, "Coleções testadas", rf?.collectionsTested);
   pushManualField(lines, "Quais coleções já testadas", rf?.collectionsTestedList);
   pushManualField(lines, "Qual a próxima coleção a testar", rf?.nextCollection);
-  pushManualField(lines, "Coleção best-seller", rf?.bestSellerCollection);
 
   const collectionBlock = await buildCollectionReportBlock(
     opts.workspaceId,

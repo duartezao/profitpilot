@@ -18,7 +18,8 @@ import { CostRow, type CostRowData } from "./cost-row";
 import { CogsCsvImport } from "./cogs-csv-import";
 import { OrderCogsPanel } from "./order-cogs-panel";
 import { DayCogsPanel } from "./day-cogs-panel";
-import { CollapsibleSection } from "@/components/collapsible-section";
+import { CogsView } from "@/components/cogs/cogs-view";
+import { PageTabCard } from "@/components/page-tabs";
 
 export const metadata: Metadata = { title: "Custos (COGS)" };
 
@@ -160,95 +161,90 @@ export default async function CogsPage({
         )}
       </div>
 
-      {scoped && activeMode === "order" && (
-        <CollapsibleSection
-          title="COGS por encomenda"
-          description={`${orderRows.length} encomendas no painel.`}
-          flush
-        >
-          <OrderCogsPanel
-            storeId={String(scoped._id)}
-            storeName={scoped.name}
-            baseCurrency={baseCurrency}
-            inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
-            rows={orderRows}
-          />
-        </CollapsibleSection>
-      )}
-
-      {scoped && activeMode === "day" && (
-        <CollapsibleSection
-          title="COGS por dia"
-          description={`${dayRows.length} dias no calendário.`}
-          flush
-        >
-          <DayCogsPanel
-            storeId={String(scoped._id)}
-            storeName={scoped.name}
-            baseCurrency={baseCurrency}
-            inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
-            rows={dayRows}
-          />
-        </CollapsibleSection>
-      )}
-
-      {showVariantTable && (
-        <>
-          <CollapsibleSection
-            title="Importar CSV"
-            description="Actualiza custos em massa por variante."
-          >
-            <CogsCsvImport
-              stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
-              defaultStoreId={scoped ? String(scoped._id) : undefined}
-            />
-          </CollapsibleSection>
-
-          <CollapsibleSection
-            title="Produtos sem custo"
-            description={
-              rows.length > 0
-                ? `${rows.length} variantes vendidas sem COGS completo.`
-                : "Nenhuma venda em falta."
-            }
-            badge={
-              rows.length > 0 ? (
-                <span className="rounded-md border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
-                  {rows.length}
-                </span>
-              ) : undefined
-            }
-            flush
-          >
-            {rows.length === 0 ? (
-              <div className="p-12 text-center text-sm text-muted-foreground">
-                {storeIds.length === 0
-                  ? "Liga uma loja e sincroniza para ver produtos vendidos."
-                  : "Não há vendas sem custo. O lucro usa o COGS registado."}
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-sm">
-                  <thead>
-                    <tr className="text-left text-xs font-medium text-muted-foreground">
-                      <th className="px-4 py-3">Produto</th>
-                      <th className="px-4 py-3 text-right">Vendidos</th>
-                      <th className="px-4 py-3 text-right">Custo</th>
-                      <th className="px-4 py-3">Origem</th>
-                      <th className="px-4 py-3">Definir custo manual</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r) => (
-                      <CostRow key={`${r.storeId}:${r.variantId}`} row={r} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+      <CogsView
+        mode={
+          activeMode === "order"
+            ? "order"
+            : activeMode === "day"
+              ? "day"
+              : showVariantTable
+                ? "variant"
+                : null
+        }
+        missingCount={rows.length}
+        main={
+          <>
+            {scoped && activeMode === "order" && (
+              <PageTabCard>
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold">COGS por encomenda</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {orderRows.length} encomendas no painel.
+                  </p>
+                </div>
+                <OrderCogsPanel
+                  storeId={String(scoped._id)}
+                  storeName={scoped.name}
+                  baseCurrency={baseCurrency}
+                  inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+                  rows={orderRows}
+                />
+              </PageTabCard>
             )}
-          </CollapsibleSection>
-        </>
-      )}
+            {scoped && activeMode === "day" && (
+              <PageTabCard>
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold">COGS por dia</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {dayRows.length} dias no calendário.
+                  </p>
+                </div>
+                <DayCogsPanel
+                  storeId={String(scoped._id)}
+                  storeName={scoped.name}
+                  baseCurrency={baseCurrency}
+                  inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+                  rows={dayRows}
+                />
+              </PageTabCard>
+            )}
+          </>
+        }
+        csvImport={
+          <CogsCsvImport
+            stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
+            defaultStoreId={scoped ? String(scoped._id) : undefined}
+          />
+        }
+        variantTable={
+          rows.length === 0 ? (
+            <div className="p-12 text-center text-sm text-muted-foreground">
+              {storeIds.length === 0
+                ? "Liga uma loja e sincroniza para ver produtos vendidos."
+                : "Não há vendas sem custo. O lucro usa o COGS registado."}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-medium text-muted-foreground">
+                    <th className="px-4 py-3">Produto</th>
+                    <th className="px-4 py-3 text-right">Vendidos</th>
+                    <th className="px-4 py-3 text-right">Custo</th>
+                    <th className="px-4 py-3">Origem</th>
+                    <th className="px-4 py-3">Definir custo manual</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <CostRow key={`${r.storeId}:${r.variantId}`} row={r} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      />
     </div>
   );
 }

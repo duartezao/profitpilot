@@ -14,7 +14,7 @@ import {
   type ResolvedPeriod,
 } from "@/lib/period";
 
-export const DEFAULT_STORE_TIMEZONE = "Europe/Brussels";
+export const DEFAULT_STORE_TIMEZONE = "Europe/Lisbon";
 
 const MAX_CUSTOM_DAYS = 366;
 const MAX_SPECIFIC_DATES = 31;
