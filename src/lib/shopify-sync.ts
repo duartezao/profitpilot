@@ -1545,7 +1545,7 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
 /** Sincroniza uma loja: custos de produtos + orders. */
 export async function syncStore(storeId: string): Promise<SyncResult> {
   const { store, domain, accessToken } = await prepareShopifySyncContext(storeId);
-  const incremental = isIncrementalSync(store);
+  const incremental = isIncrementalOrderSync(store);
   const feeSince = store.lastSyncAt ? orderSyncSince(store) : null;
 
   let products = 0;
