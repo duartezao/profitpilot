@@ -115,7 +115,7 @@ export function AdAccountsPanel({
       ) {
         setOauthMsg(
           err === "google_config_redirect"
-            ? "OAuth Google: define NEXT_PUBLIC_APP_URL no servidor (ex. https://profitpilot-kappa.vercel.app) ou GOOGLE_ADS_OAUTH_REDIRECT_URI."
+            ? "OAuth Google: redirect URI em falta. Abre /api/oauth/google/config (com sessão) para ver o URI exacto a colar no Google Cloud."
             : "OAuth Google não configurado no servidor. Adiciona GOOGLE_ADS_CLIENT_ID e GOOGLE_ADS_CLIENT_SECRET ao .env / Vercel.",
         );
       } else {
