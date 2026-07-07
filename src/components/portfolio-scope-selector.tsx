@@ -56,7 +56,7 @@ export function PortfolioScopeSelector({
   }, [portfolioParsed, workspaces]);
 
   const label = !isPortfolio
-    ? "Workspace actual"
+    ? "Só este workspace"
     : isAll
       ? "Todos os workspaces"
       : `${picked.size} workspaces`;
@@ -150,14 +150,14 @@ export function PortfolioScopeSelector({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <p className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
-              Vista de métricas
+              Comparar workspaces
             </p>
             <button
               type="button"
               className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted"
               onClick={selectActiveOnly}
             >
-              Workspace actual
+              Só este workspace
               {!isPortfolio && <Check className="h-4 w-4 shrink-0 text-accent" />}
             </button>
             <button

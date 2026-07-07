@@ -6,6 +6,7 @@ import { ProfitChart } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
 import { CostBreakdownPanel } from "@/components/dashboard/cost-breakdown-panel";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
+import { ShopifyExtraFeesLoader } from "@/components/dashboard/shopify-extra-fees-loader";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
 import { OperationsAlertsBanner } from "@/components/operations/operations-alerts-banner";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
@@ -227,6 +228,7 @@ export function DashboardClient() {
             </>
           )}
           <StoreDashboardView data={workspaceData} />
+          {storeId && <ShopifyExtraFeesLoader storeId={storeId} />}
         </>
       ) : (
         <>

@@ -193,6 +193,7 @@ export function AdAccountsPanel({
       id="contas-ads"
       title="Contas de ads (API)"
       description="Meta, Google e TikTok — cada loja com o seu login OAuth e sync automático."
+      defaultOpen={accounts.length === 0 || errorCount > 0}
       badge={
         accounts.length > 0 ? (
           <span
@@ -209,10 +210,13 @@ export function AdAccountsPanel({
       }
     >
       {canEdit && (
-        <CollapsibleSection
-          title="Ligar conta"
-          description="OAuth por loja — podes usar emails diferentes em cada loja."
-        >
+        <div className="space-y-4 border-b border-border pb-4">
+          <div>
+            <h3 className="text-sm font-semibold">Ligar conta</h3>
+            <p className="text-xs text-muted-foreground">
+              OAuth por loja — podes usar emails diferentes em cada loja.
+            </p>
+          </div>
           <div className="flex flex-wrap gap-2">
             {AD_PLATFORMS.map((p) => (
               <button
@@ -466,7 +470,7 @@ export function AdAccountsPanel({
               </button>
             </form>
           )}
-        </CollapsibleSection>
+        </div>
       )}
 
       {accounts.length === 0 ? (
