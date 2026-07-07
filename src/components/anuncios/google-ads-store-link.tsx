@@ -15,7 +15,12 @@ const inputCls =
 
 type WorkspaceGoogleLogin = { id: string; loginEmail: string };
 
-type DiscoveredAccount = { id: string; name: string; currency: string };
+type DiscoveredAccount = {
+  id: string;
+  name: string;
+  currency: string;
+  loginCustomerId?: string;
+};
 
 export function GoogleAdsStoreLink({
   storeId,
@@ -24,6 +29,7 @@ export function GoogleAdsStoreLink({
   googleAdsApiReady,
   googleAccount,
   onChanged,
+  embedded = false,
 }: {
   storeId: string;
   canEdit: boolean;
@@ -31,6 +37,7 @@ export function GoogleAdsStoreLink({
   googleAdsApiReady: boolean;
   googleAccount?: AdAccountRow;
   onChanged?: () => void;
+  embedded?: boolean;
 }) {
   const [credentialId, setCredentialId] = useState(
     workspaceGoogleLogins[0]?.id ?? "",
@@ -62,6 +69,19 @@ export function GoogleAdsStoreLink({
   if (!canEdit) return null;
 
   if (googleAccount) {
+    if (embedded) {
+      return (
+        <p className="text-sm text-muted-foreground">
+          Google já ligado — vê na lista acima.
+          {!googleAdsApiReady && (
+            <span className="text-warning">
+              {" "}
+              Sync automático pendente (developer token).
+            </span>
+          )}
+        </p>
+      );
+    }
     return (
       <div className="rounded-lg border border-border bg-surface p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -108,19 +128,32 @@ export function GoogleAdsStoreLink({
         return;
       }
       const accounts = res.google ?? [];
-      setDiscovered(accounts);
+      setDiscovered(
+        accounts.map((a) => ({
+          id: a.id,
+          name: a.name,
+          currency: a.currency,
+          loginCustomerId: a.loginCustomerId,
+        })),
+      );
       setSelectedId(accounts[0]?.id ?? "");
     });
   };
 
+  const shellCls = embedded
+    ? "space-y-3"
+    : "rounded-lg border border-border bg-surface p-4";
+
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
-      <h3 className="text-sm font-semibold">Google Ads — esta loja</h3>
+    <div className={shellCls}>
+      {!embedded && (
+        <h3 className="text-sm font-semibold">Google Ads — esta loja</h3>
+      )}
+      {!embedded && (
       <p className="mt-1 text-xs text-muted-foreground">
-        O gasto diário podes sempre preencher <strong>manualmente</strong> na
-        tabela abaixo. Sync automático é opcional: escolhe o Gmail e a conta
-        Google Ads (Customer ID).
+        Escolhe o Gmail que aceitou o convite e o Customer ID (ou procura contas).
       </p>
+      )}
 
       {workspaceGoogleLogins.length === 0 ? (
         <p className="mt-3 text-sm">
@@ -188,6 +221,21 @@ export function GoogleAdsStoreLink({
           )}
 
           {discovered.length > 0 && !manualMode && (
+            <p className="text-xs text-muted-foreground">
+              Não vês a conta partilhada? Usa{" "}
+              <button
+                type="button"
+                onClick={() => setManualMode(true)}
+                className="text-accent underline-offset-2 hover:underline"
+              >
+                Customer ID manual
+              </button>{" "}
+              — o número no canto superior direito do Google Ads (ex: 962-828-5107).
+              Confirma que o Gmail seleccionado é o que aceitou o convite.
+            </p>
+          )}
+
+          {discovered.length > 0 && !manualMode && (
             <form action={action} className="space-y-3">
               <input type="hidden" name="storeId" value={storeId} />
               <input type="hidden" name="platform" value="google" />
@@ -213,7 +261,16 @@ export function GoogleAdsStoreLink({
                 </select>
               </div>
               {selected && (
-                <input type="hidden" name="accountName" value={selected.name} />
+                <>
+                  <input type="hidden" name="accountName" value={selected.name} />
+                  {selected.loginCustomerId && (
+                    <input
+                      type="hidden"
+                      name="googleLoginCustomerId"
+                      value={selected.loginCustomerId}
+                    />
+                  )}
+                </>
               )}
               {state.error && (
                 <p className="text-sm text-negative">{state.error}</p>
@@ -261,6 +318,21 @@ export function GoogleAdsStoreLink({
                   <p className="mt-1 text-xs text-muted-foreground">
                     Número no canto superior direito do Google Ads (ex:{" "}
                     962-828-5107).
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    MCC / gestor (opcional)
+                  </label>
+                  <input
+                    name="googleLoginCustomerId"
+                    inputMode="numeric"
+                    placeholder="ID da conta gestora"
+                    className={inputCls}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Só se a conta foi partilhada via MCC — o Customer ID da conta
+                    gestora (não o da loja). Pede ao dono da conta se não souberes.
                   </p>
                 </div>
                 {state.error && (

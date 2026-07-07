@@ -300,7 +300,11 @@ export function DecisaoClient() {
               <div className="border-b border-border p-5">
                 <h2 className="text-lg font-semibold">Campanhas — Scale / Descale</h2>
                 <p className="text-sm text-muted-foreground">
-                  Baseado em CPC, CTR e peso no spend (dados sincronizados das contas API).
+                  ROAS de cada campanha vs BER da loja
+                  {data.storeBerRoas ? ` (${data.storeBerRoas}x)` : ""}
+                  {data.storeBerRoas
+                    ? " — scale só acima do break-even; CTR/CPC não bastam."
+                    : " — BER indisponível (COGS incompleto); sem sugestão de scale."}
                 </p>
               </div>
               <div className="hidden overflow-x-auto lg:block">
@@ -313,6 +317,7 @@ export function DecisaoClient() {
                       <th className="px-5 py-3 text-right">Gasto</th>
                       <th className="px-5 py-3 text-right">CPC</th>
                       <th className="px-5 py-3 text-right">CTR</th>
+                      <th className="px-5 py-3 text-right">ROAS</th>
                       <th className="px-5 py-3 text-right">CPM</th>
                       <th className="px-5 py-3">Motivo</th>
                     </tr>
@@ -340,6 +345,9 @@ export function DecisaoClient() {
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
                           <Sensitive>{fmtCampaignMetric(row.ctr, "%")}</Sensitive>
+                        </td>
+                        <td className="px-5 py-3 text-right tabular-nums">
+                          <Sensitive>{row.roas}</Sensitive>
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
                           <Sensitive>{fmtCampaignMetric(row.cpm)}</Sensitive>
@@ -382,6 +390,12 @@ export function DecisaoClient() {
                         <dt className="text-muted-foreground">CTR</dt>
                         <dd className="mt-0.5 font-semibold tabular-nums">
                           <Sensitive>{fmtCampaignMetric(row.ctr, "%")}</Sensitive>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">ROAS</dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          <Sensitive>{row.roas}</Sensitive>
                         </dd>
                       </div>
                       <div>

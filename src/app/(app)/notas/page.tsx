@@ -10,7 +10,7 @@ import { formatDateInput } from "@/lib/period";
 import { DailyNoteForm } from "./daily-note-form";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
 import { ShopifyExtraFeesSection } from "@/components/dashboard/shopify-extra-fees-section";
-import { CollapsibleSection } from "@/components/collapsible-section";
+import { NotasView } from "@/components/notas/notas-view";
 
 export const metadata: Metadata = { title: "Notas & Relatórios" };
 export const dynamic = "force-dynamic";
@@ -89,99 +89,86 @@ export default async function NotasPage({
         </p>
       </div>
 
-      {!scoped && stores.length > 0 && (
-        <Suspense fallback={<div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />}>
-          <DailyReportPanel />
-        </Suspense>
-      )}
-
-      {scoped && (
-        <div className="space-y-4">
-          <Suspense
-            fallback={
-              <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
-            }
-          >
-            <ShopifyExtraFeesSection storeId={String(scoped._id)} />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
-            }
-          >
-            <DailyReportPanel storeId={String(scoped._id)} />
-          </Suspense>
-        </div>
-      )}
-
-      <CollapsibleSection
-        title="Nova nota"
-        description="Regista scale, humor ou observações do dia."
-      >
-        <DailyNoteForm
-          canEdit={canEdit}
-          defaultDate={today}
-          defaultStoreId={scoped ? String(scoped._id) : null}
-          stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
-          embedded
-        />
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        title="Histórico"
-        description={
-          scopeName
-            ? `Últimas notas de ${scopeName}.`
-            : "Últimas notas deste workspace."
+      <NotasView
+        scopeName={scopeName}
+        noteCount={filteredNotes.length}
+        relatorio={
+          <>
+            {!scoped && stores.length > 0 && (
+              <Suspense fallback={<div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />}>
+                <DailyReportPanel />
+              </Suspense>
+            )}
+            {scoped && (
+              <>
+                <Suspense
+                  fallback={
+                    <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
+                  }
+                >
+                  <ShopifyExtraFeesSection storeId={String(scoped._id)} />
+                </Suspense>
+                <Suspense
+                  fallback={
+                    <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
+                  }
+                >
+                  <DailyReportPanel storeId={String(scoped._id)} />
+                </Suspense>
+              </>
+            )}
+          </>
         }
-        badge={
-          filteredNotes.length > 0 ? (
-            <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              {filteredNotes.length}
-            </span>
-          ) : undefined
+        novaNota={
+          <DailyNoteForm
+            canEdit={canEdit}
+            defaultDate={today}
+            defaultStoreId={scoped ? String(scoped._id) : null}
+            stores={stores.map((s) => ({ id: String(s._id), name: s.name }))}
+            embedded
+          />
         }
-        flush
-      >
-        {filteredNotes.length === 0 ? (
-          <p className="p-8 text-center text-sm text-muted-foreground">
-            Ainda não há notas. Regista o primeiro dia acima.
-          </p>
-        ) : (
-          <ul className="divide-y divide-border">
-            {filteredNotes.map((n) => (
-              <li key={String(n._id)} className="p-5">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="font-medium tabular-nums">
-                    {new Date(n.date).toLocaleDateString("pt-PT")}
-                  </span>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="text-muted-foreground" data-sensitive>
-                    {n.storeId
-                      ? storeMap.get(String(n.storeId)) ?? "Loja"
-                      : "Workspace"}
-                  </span>
-                  {n.didScale && (
-                    <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-accent">
-                      Scale
+        historico={
+          filteredNotes.length === 0 ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">
+              Ainda não há notas. Regista o primeiro dia em Nova nota.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {filteredNotes.map((n) => (
+                <li key={String(n._id)} className="p-5">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-medium tabular-nums">
+                      {new Date(n.date).toLocaleDateString("pt-PT")}
                     </span>
-                  )}
-                  {n.mood && (
-                    <span className="text-xs text-muted-foreground">
-                      {moodLabel[n.mood] ?? n.mood}
+                    <span className="text-muted-foreground">·</span>
+                    <span className="text-muted-foreground" data-sensitive>
+                      {n.storeId
+                        ? storeMap.get(String(n.storeId)) ?? "Loja"
+                        : "Workspace"}
                     </span>
+                    {n.didScale && (
+                      <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-accent">
+                        Scale
+                      </span>
+                    )}
+                    {n.mood && (
+                      <span className="text-xs text-muted-foreground">
+                        {moodLabel[n.mood] ?? n.mood}
+                      </span>
+                    )}
+                  </div>
+                  {n.text && (
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-foreground" data-sensitive>
+                      {n.text}
+                    </p>
                   )}
-                </div>
-                {n.text && (
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-foreground" data-sensitive>
-                    {n.text}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </CollapsibleSection>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      />
     </div>
   );
 }

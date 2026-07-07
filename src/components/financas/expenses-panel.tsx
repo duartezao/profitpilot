@@ -29,11 +29,13 @@ export function ExpensesPanel({
   stores,
   canEdit,
   baseCurrency,
+  embedded = false,
 }: {
   expenses: ExpenseRow[];
   stores: StoreOption[];
   canEdit: boolean;
   baseCurrency: string;
+  embedded?: boolean;
 }) {
   const [addState, addAction, adding] = useActionState<
     ExpenseActionState,
@@ -42,19 +44,8 @@ export function ExpensesPanel({
 
   const today = new Date().toISOString().slice(0, 10);
 
-  return (
-    <CollapsibleSection
-      id="despesas-fixos"
-      title="Apps, subscrições e fixos"
-      description="Custos fora de COGS e ads — pontual só no dia; mensal/anual na data de cobrança."
-      badge={
-        expenses.length > 0 ? (
-          <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {expenses.length}
-          </span>
-        ) : undefined
-      }
-    >
+  const body = (
+    <>
         {canEdit && (
           <form action={addAction} className="space-y-4 rounded-lg border border-border bg-background p-4">
             <p className="text-sm font-medium">Nova despesa</p>
@@ -277,6 +268,38 @@ export function ExpensesPanel({
             </div>
           </>
         )}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Apps, subscrições e fixos</h2>
+          <p className="text-sm text-muted-foreground">
+            Custos fora de COGS e ads — pontual só no dia; mensal/anual na data
+            de cobrança.
+          </p>
+        </div>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <CollapsibleSection
+      id="despesas-fixos"
+      title="Apps, subscrições e fixos"
+      description="Custos fora de COGS e ads — pontual só no dia; mensal/anual na data de cobrança."
+      badge={
+        expenses.length > 0 ? (
+          <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {expenses.length}
+          </span>
+        ) : undefined
+      }
+    >
+      {body}
     </CollapsibleSection>
   );
 }

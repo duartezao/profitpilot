@@ -9,6 +9,8 @@
 import {
   formatCampaignStatusLabel,
   metricsFromCampaignTotals,
+  roasFromCampaign,
+  shouldIncludeCampaignForDay,
   type LiveCampaignRow,
 } from "@/lib/ad-campaign-types";
 
@@ -20,6 +22,8 @@ export type GoogleAdAccountOption = {
   id: string;
   name: string;
   currency: string;
+  /** MCC a usar na API — preenchido quando a conta vem de um gestor. */
+  loginCustomerId?: string;
 };
 
 export class GoogleAdsApiError extends Error {
@@ -27,6 +31,120 @@ export class GoogleAdsApiError extends Error {
     super(message);
     this.name = "GoogleAdsApiError";
   }
+}
+
+function numFromGoogleMetrics(
+  metrics: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number {
+  if (!metrics) return 0;
+  for (const key of keys) {
+    const raw = metrics[key];
+    if (raw === undefined || raw === null) continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+/** Lê valor de conversão para ROAS — só metrics.conversions_value (compras), não all_conversions. */
+function googleConversionsFromMetrics(
+  metrics: Record<string, unknown> | undefined,
+): { conversions: number; conversionValue: number } {
+  if (!metrics) return { conversions: 0, conversionValue: 0 };
+
+  const conversions = numFromGoogleMetrics(metrics, "conversions");
+  const conversionValue = numFromGoogleMetrics(
+    metrics,
+    "conversionsValue",
+    "conversions_value",
+  );
+
+  return { conversions, conversionValue };
+}
+
+type GoogleCampaignDayRow = {
+  campaign?: { id?: string; name?: string; status?: string };
+  metrics?: Record<string, unknown>;
+  customer?: { currencyCode?: string };
+};
+
+function mergeGoogleCampaignDayRows(
+  trafficRows: GoogleCampaignDayRow[],
+  convRows: GoogleCampaignDayRow[],
+): GoogleCampaignDayRow[] {
+  const convById = new Map<string, Record<string, unknown>>();
+  for (const row of convRows) {
+    const id = String(row.campaign?.id ?? "").trim();
+    if (!id || !row.metrics) continue;
+    convById.set(id, row.metrics);
+  }
+
+  const merged: GoogleCampaignDayRow[] = [];
+  const seen = new Set<string>();
+
+  for (const row of trafficRows) {
+    const id = String(row.campaign?.id ?? "").trim();
+    if (!id) continue;
+    seen.add(id);
+    const convMetrics = convById.get(id);
+    merged.push({
+      ...row,
+      metrics: convMetrics ? { ...row.metrics, ...convMetrics } : row.metrics,
+    });
+  }
+
+  for (const row of convRows) {
+    const id = String(row.campaign?.id ?? "").trim();
+    if (!id || seen.has(id)) continue;
+    const { conversions, conversionValue } = googleConversionsFromMetrics(row.metrics);
+    if (conversions <= 0 && conversionValue <= 0) continue;
+    merged.push(row);
+  }
+
+  return merged;
+}
+
+/**
+ * Campanhas por dia — dois pedidos GAQL (documentação Google).
+ * Tráfego e conversões separados para evitar INVALID_ARGUMENT ao misturar métricas.
+ * @see https://developers.google.com/google-ads/api/docs/conversions/reporting
+ */
+async function fetchGoogleCampaignDayRows(
+  accessToken: string,
+  customerId: string,
+  dateKey: string,
+  loginCustomerId: string | undefined,
+  includeStatus: boolean,
+): Promise<GoogleCampaignDayRow[]> {
+  const idFields = includeStatus
+    ? "campaign.id, campaign.name, campaign.status, "
+    : "campaign.id, ";
+
+  const trafficQuery =
+    `SELECT ${idFields}metrics.cost_micros, metrics.impressions, metrics.clicks, ` +
+    `customer.currency_code FROM campaign WHERE segments.date = '${dateKey}'`;
+
+  const trafficRows = await googleAdsSearch<GoogleCampaignDayRow>(
+    accessToken,
+    customerId,
+    trafficQuery,
+    loginCustomerId,
+  );
+
+  let convRows: GoogleCampaignDayRow[] = [];
+  try {
+    convRows = await googleAdsSearch<GoogleCampaignDayRow>(
+      accessToken,
+      customerId,
+      `SELECT campaign.id, metrics.conversions, metrics.conversions_value FROM campaign WHERE segments.date = '${dateKey}'`,
+      loginCustomerId,
+    );
+  } catch {
+    /* sem conversões — mantém tráfego */
+  }
+
+  return mergeGoogleCampaignDayRows(trafficRows, convRows);
 }
 
 function requireGoogleOAuthEnv() {
@@ -89,27 +207,8 @@ export async function probeGoogleAdsApiAccess(
     await listGoogleAdAccounts(refreshToken);
     return { ok: true };
   } catch (e) {
-    const msg = e instanceof GoogleAdsApiError ? e.message : "Erro desconhecido.";
-    if (msg.toLowerCase().includes("test account")) {
-      return {
-        ok: false,
-        error:
-          "Developer token em modo Test — só funciona com contas de teste. Pede acesso Basic/Standard no Google Ads API Center.",
-      };
-    }
-    if (msg.includes("UNAUTHENTICATED") || msg.includes("developer-token")) {
-      return {
-        ok: false,
-        error: `Developer token rejeitado pela Google: ${msg}`,
-      };
-    }
-    if (msg.includes("PERMISSION_DENIED")) {
-      return {
-        ok: false,
-        error: `Sem permissão na conta Google Ads — confirma que o Gmail OAuth tem acesso ao Customer ID: ${msg}`,
-      };
-    }
-    return { ok: false, error: msg };
+    const raw = e instanceof GoogleAdsApiError ? e.message : "Erro desconhecido.";
+    return { ok: false, error: humanizeGoogleAdsError(raw) };
   }
 }
 
@@ -167,20 +266,76 @@ export async function refreshGoogleAccessToken(
   return json.access_token;
 }
 
-async function googleAdsSearch<T>(
+export function isGooglePermissionError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("permission") ||
+    m.includes("caller does not have") ||
+    m.includes("user_permission_denied")
+  );
+}
+
+/** Manager account ID opcional (contas via MCC). */
+function envLoginCustomerId(): string | null {
+  const raw = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID?.trim();
+  if (!raw) return null;
+  try {
+    return normalizeCustomerId(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function humanizeGoogleAdsError(
+  raw: string,
+  customerId?: string,
+): string {
+  const m = raw.toLowerCase();
+  const idHint = customerId ? ` (${customerId})` : "";
+
+  if (
+    m.includes("caller does not have permission") ||
+    m.includes("permission_denied") ||
+    m.includes("user_permission_denied")
+  ) {
+    return (
+      `Sem permissão na conta Google Ads${idHint}. Confirma: (1) o Gmail em Definições é o que aceitou o convite; ` +
+      `(2) o developer token tem acesso Basic/Standard no API Center (modo Test só acede a contas de teste); ` +
+      `(3) se a conta foi partilhada via MCC, indica o Customer ID do gestor (MCC) ao ligar a conta; ` +
+      `(4) o Customer ID da conta está correcto. O gasto manual continua a funcionar.`
+    );
+  }
+  if (m.includes("test account")) {
+    return (
+      "Developer token em modo Test — só acede a contas de teste. Pede acesso Basic/Standard no Google Ads API Center."
+    );
+  }
+  if (m.includes("unauthenticated") || m.includes("developer-token")) {
+    return `Developer token ou OAuth rejeitado pela Google: ${raw}`;
+  }
+  return raw;
+}
+
+async function googleAdsSearchOnce<T>(
   accessToken: string,
   customerId: string,
   query: string,
+  loginCustomerId?: string,
 ): Promise<T[]> {
   const { developerToken } = requireGoogleApiEnv();
   const cid = normalizeCustomerId(customerId);
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "developer-token": developerToken,
+    "Content-Type": "application/json",
+  };
+  if (loginCustomerId) {
+    headers["login-customer-id"] = loginCustomerId;
+  }
+
   const res = await fetch(`${GOOGLE_ADS_BASE}/customers/${cid}/googleAds:search`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "developer-token": developerToken,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({ query }),
     cache: "no-store",
   });
@@ -189,18 +344,149 @@ async function googleAdsSearch<T>(
     error?: { message?: string; status?: string };
   };
   if (!res.ok) {
-    throw new GoogleAdsApiError(
-      json.error?.message ?? `Google Ads API HTTP ${res.status}`,
-    );
+    const raw = json.error?.message ?? `Google Ads API HTTP ${res.status}`;
+    throw new GoogleAdsApiError(humanizeGoogleAdsError(raw, cid));
   }
   return json.results ?? [];
 }
 
-/** Lista customers acessíveis com o refresh token. */
-export async function listGoogleAdAccounts(
+async function googleAdsSearch<T>(
+  accessToken: string,
+  customerId: string,
+  query: string,
+  preferredLoginCustomerId?: string,
+): Promise<T[]> {
+  const cid = normalizeCustomerId(customerId);
+  const envLogin = envLoginCustomerId();
+
+  if (preferredLoginCustomerId) {
+    try {
+      return await googleAdsSearchOnce(
+        accessToken,
+        cid,
+        query,
+        normalizeCustomerId(preferredLoginCustomerId),
+      );
+    } catch (e) {
+      const msg = e instanceof GoogleAdsApiError ? e.message : String(e);
+      if (!isGooglePermissionError(msg)) throw e;
+    }
+  }
+
+  if (preferredLoginCustomerId === undefined && envLogin) {
+    try {
+      return await googleAdsSearchOnce(accessToken, cid, query, envLogin);
+    } catch (e) {
+      const msg = e instanceof GoogleAdsApiError ? e.message : String(e);
+      if (!isGooglePermissionError(msg)) throw e;
+    }
+  }
+
+  try {
+    return await googleAdsSearchOnce(accessToken, cid, query);
+  } catch (e) {
+    const msg = e instanceof GoogleAdsApiError ? e.message : String(e);
+    if (!isGooglePermissionError(msg)) throw e;
+
+    let hints: string[] = [];
+    try {
+      hints = await fetchAccessibleCustomerIds(accessToken);
+    } catch {
+      /* ignora */
+    }
+
+    const attempts = [
+      envLogin,
+      preferredLoginCustomerId
+        ? normalizeCustomerId(preferredLoginCustomerId)
+        : undefined,
+      cid,
+      ...hints.filter((id) => id !== cid),
+    ].filter((id): id is string => Boolean(id));
+    const seen = new Set<string>();
+
+    for (const loginId of attempts) {
+      if (seen.has(loginId)) continue;
+      seen.add(loginId);
+      try {
+        return await googleAdsSearchOnce(accessToken, cid, query, loginId);
+      } catch {
+        /* próximo login-customer-id */
+      }
+    }
+    throw e;
+  }
+}
+
+const GOOGLE_PROBE_QUERY = "SELECT customer.id FROM customer LIMIT 1";
+
+/** Descobre qual login-customer-id (MCC) permite aceder à conta cliente. */
+export async function resolveGoogleLoginCustomerId(
   refreshToken: string,
-): Promise<GoogleAdAccountOption[]> {
+  customerId: string,
+  manualLoginCustomerId?: string,
+): Promise<string | undefined> {
   const accessToken = await refreshGoogleAccessToken(refreshToken);
+  const cid = normalizeCustomerId(customerId);
+  let accessible: string[] = [];
+  try {
+    accessible = await fetchAccessibleCustomerIds(accessToken);
+  } catch {
+    /* ignora */
+  }
+
+  const order: (string | undefined)[] = [
+    manualLoginCustomerId?.trim()
+      ? normalizeCustomerId(manualLoginCustomerId)
+      : undefined,
+    envLoginCustomerId() ?? undefined,
+    undefined,
+    ...accessible.filter((id) => id !== cid),
+    cid,
+  ];
+  const seen = new Set<string>();
+
+  for (const loginId of order) {
+    const key = loginId ?? "__direct__";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      await googleAdsSearchOnce(accessToken, cid, GOOGLE_PROBE_QUERY, loginId);
+      return loginId;
+    } catch {
+      /* tenta seguinte */
+    }
+  }
+
+  for (const managerId of accessible) {
+    try {
+      const clients = await listGoogleClientAccountsUnderManager(
+        accessToken,
+        managerId,
+      );
+      if (!clients.some((c) => normalizeCustomerId(c.id) === cid)) continue;
+      try {
+        await googleAdsSearchOnce(
+          accessToken,
+          cid,
+          GOOGLE_PROBE_QUERY,
+          managerId,
+        );
+        return managerId;
+      } catch {
+        /* gestor listou mas sem permissão API */
+      }
+    } catch {
+      /* não é gestor */
+    }
+  }
+
+  return undefined;
+}
+
+async function fetchAccessibleCustomerIds(
+  accessToken: string,
+): Promise<string[]> {
   const { developerToken } = requireGoogleApiEnv();
   const res = await fetch(`${GOOGLE_ADS_BASE}/customers:listAccessibleCustomers`, {
     headers: {
@@ -214,59 +500,212 @@ export async function listGoogleAdAccounts(
     error?: { message?: string };
   };
   if (!res.ok) {
+    const raw = json.error?.message ?? "Não foi possível listar contas Google Ads.";
+    throw new GoogleAdsApiError(humanizeGoogleAdsError(raw));
+  }
+  return (json.resourceNames ?? []).map((r) => r.replace("customers/", ""));
+}
+
+const CUSTOMER_CLIENT_QUERY = `
+SELECT
+  customer_client.client_customer,
+  customer_client.descriptive_name,
+  customer_client.currency_code,
+  customer_client.manager,
+  customer_client.hidden,
+  customer_client.level,
+  customer_client.status
+FROM customer_client
+WHERE customer_client.level <= 2
+  AND customer_client.status = 'ENABLED'
+`;
+
+function parseClientCustomerId(resource: string): string {
+  return resource.replace("customers/", "").replace(/\D/g, "");
+}
+
+async function listGoogleClientAccountsUnderManager(
+  accessToken: string,
+  managerId: string,
+): Promise<GoogleAdAccountOption[]> {
+  const rows = await googleAdsSearchOnce<{
+    customerClient?: {
+      clientCustomer?: string;
+      descriptiveName?: string;
+      currencyCode?: string;
+      manager?: boolean;
+      hidden?: boolean;
+    };
+  }>(accessToken, managerId, CUSTOMER_CLIENT_QUERY, managerId);
+
+  const out: GoogleAdAccountOption[] = [];
+  for (const row of rows) {
+    const cc = row.customerClient;
+    if (!cc?.clientCustomer || cc.hidden) continue;
+    const id = parseClientCustomerId(cc.clientCustomer);
+    if (!id || id.length < 10) continue;
+    if (cc.manager && id === normalizeCustomerId(managerId)) continue;
+    out.push({
+      id,
+      name: cc.descriptiveName?.trim() || `Conta ${id}`,
+      currency: cc.currencyCode ?? "USD",
+      loginCustomerId: normalizeCustomerId(managerId),
+    });
+  }
+  return out;
+}
+
+async function enrichGoogleAccount(
+  accessToken: string,
+  customerId: string,
+  loginCustomerIds: string[],
+): Promise<GoogleAdAccountOption | null> {
+  const cid = normalizeCustomerId(customerId);
+  const query =
+    "SELECT customer.descriptive_name, customer.currency_code FROM customer LIMIT 1";
+  const attempts: (string | undefined)[] = [
+    undefined,
+    envLoginCustomerId() ?? undefined,
+    ...loginCustomerIds.filter((id) => id !== cid),
+    cid,
+  ];
+  const seen = new Set<string>();
+
+  for (const loginId of attempts) {
+    const key = loginId ?? "__direct__";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const rows = await googleAdsSearchOnce<{
+        customer?: { descriptiveName?: string; currencyCode?: string };
+      }>(accessToken, cid, query, loginId);
+      const row = rows[0]?.customer;
+      if (!row) continue;
+      return {
+        id: cid,
+        name: row.descriptiveName?.trim() || `Conta ${cid}`,
+        currency: row.currencyCode ?? "USD",
+      };
+    } catch {
+      /* tenta outro login-customer-id */
+    }
+  }
+  return null;
+}
+
+/** Lista customers acessíveis com o refresh token (directos + clientes via MCC). */
+export async function listGoogleAdAccounts(
+  refreshToken: string,
+): Promise<GoogleAdAccountOption[]> {
+  const accessToken = await refreshGoogleAccessToken(refreshToken);
+  const directIds = await fetchAccessibleCustomerIds(accessToken);
+
+  if (directIds.length === 0) {
     throw new GoogleAdsApiError(
-      json.error?.message ?? "Não foi possível listar contas Google Ads.",
+      "Nenhuma conta Google Ads acessível com este Gmail. Confirma: (1) autorizaste o mesmo Gmail em Definições que aceitou o convite na conta; (2) o convite foi aceite no Google Ads; (3) o developer token não está só em modo Test. Podes ligar com Customer ID manual.",
     );
   }
 
-  const accounts: GoogleAdAccountOption[] = [];
-  for (const resource of json.resourceNames ?? []) {
-    const id = resource.replace("customers/", "");
+  const byId = new Map<string, GoogleAdAccountOption>();
+
+  for (const id of directIds) {
+    byId.set(id, { id, name: `Conta ${id}`, currency: "USD" });
+  }
+
+  for (const managerId of directIds) {
     try {
-      const rows = await googleAdsSearch<{
-        customer?: { descriptiveName?: string; currencyCode?: string };
-      }>(
+      for (const client of await listGoogleClientAccountsUnderManager(
         accessToken,
-        id,
-        "SELECT customer.descriptive_name, customer.currency_code FROM customer LIMIT 1",
-      );
-      const row = rows[0]?.customer;
-      accounts.push({
-        id,
-        name: row?.descriptiveName?.trim() || `Conta ${id}`,
-        currency: row?.currencyCode ?? "USD",
-      });
+        managerId,
+      )) {
+        const existing = byId.get(client.id);
+        if (!existing || existing.name.startsWith("Conta ")) {
+          byId.set(client.id, client);
+        }
+      }
     } catch {
-      accounts.push({
-        id,
-        name: `Conta ${id}`,
-        currency: "USD",
-      });
+      /* não é gestora ou sem permissão para listar clientes */
     }
   }
-  return accounts.sort((a, b) => a.name.localeCompare(b.name, "pt"));
+
+  for (const id of [...byId.keys()]) {
+    const current = byId.get(id)!;
+    if (!current.name.startsWith("Conta ")) continue;
+    const enriched = await enrichGoogleAccount(accessToken, id, directIds);
+    if (enriched) byId.set(id, enriched);
+  }
+
+  const accounts = [...byId.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, "pt"),
+  );
+
+  if (accounts.length === 0) {
+    throw new GoogleAdsApiError(
+      "Nenhuma conta Google Ads listada com este Gmail — confirma o convite ou usa Customer ID manual.",
+    );
+  }
+
+  return accounts;
 }
 
 export async function verifyGoogleAdAccountAccess(
   refreshToken: string,
   customerId: string,
-): Promise<{ name: string; currency: string }> {
+  manualLoginCustomerId?: string,
+): Promise<{ name: string; currency: string; loginCustomerId?: string }> {
   const accessToken = await refreshGoogleAccessToken(refreshToken);
-  const rows = await googleAdsSearch<{
-    customer?: { descriptiveName?: string; currencyCode?: string };
-  }>(
-    accessToken,
-    customerId,
-    "SELECT customer.descriptive_name, customer.currency_code FROM customer LIMIT 1",
+  const cid = normalizeCustomerId(customerId);
+  const loginCustomerId = await resolveGoogleLoginCustomerId(
+    refreshToken,
+    cid,
+    manualLoginCustomerId,
   );
-  const row = rows[0]?.customer;
-  if (!row) {
-    throw new GoogleAdsApiError("Conta Google Ads não encontrada ou sem acesso.");
+
+  let accessible: string[] = [];
+  try {
+    accessible = await fetchAccessibleCustomerIds(accessToken);
+  } catch {
+    /* ignora */
   }
-  return {
-    name: row.descriptiveName?.trim() || normalizeCustomerId(customerId),
-    currency: row.currencyCode ?? "USD",
-  };
+
+  const query =
+    "SELECT customer.descriptive_name, customer.currency_code FROM customer LIMIT 1";
+
+  const attempts: (string | undefined)[] = [
+    loginCustomerId,
+    manualLoginCustomerId?.trim()
+      ? normalizeCustomerId(manualLoginCustomerId)
+      : undefined,
+    envLoginCustomerId() ?? undefined,
+    undefined,
+    ...accessible.filter((id) => id !== cid),
+    cid,
+  ];
+  const seen = new Set<string>();
+
+  for (const loginId of attempts) {
+    const key = loginId ?? "__direct__";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const rows = await googleAdsSearchOnce<{
+        customer?: { descriptiveName?: string; currencyCode?: string };
+      }>(accessToken, cid, query, loginId);
+      const row = rows[0]?.customer;
+      if (!row) continue;
+      return {
+        name: row.descriptiveName?.trim() || `Conta ${cid}`,
+        currency: row.currencyCode ?? "USD",
+        loginCustomerId: loginId,
+      };
+    } catch {
+      /* tenta outro login */
+    }
+  }
+
+  throw new GoogleAdsApiError(
+    humanizeGoogleAdsError("USER_PERMISSION_DENIED", cid),
+  );
 }
 
 /** Gasto num único dia (segments.date). */
@@ -274,6 +713,7 @@ export async function fetchGoogleAdSpendForDay(
   refreshToken: string,
   customerId: string,
   dateKey: string,
+  loginCustomerId?: string,
 ): Promise<{ spend: number; currency: string }> {
   const accessToken = await refreshGoogleAccessToken(refreshToken);
   const rows = await googleAdsSearch<{
@@ -283,6 +723,7 @@ export async function fetchGoogleAdSpendForDay(
     accessToken,
     customerId,
     `SELECT metrics.cost_micros, customer.currency_code FROM customer WHERE segments.date = '${dateKey}'`,
+    loginCustomerId,
   );
   let micros = 0;
   let currency = "USD";
@@ -307,6 +748,7 @@ export async function fetchGoogleAdInsightsForDay(
   refreshToken: string,
   customerId: string,
   dateKey: string,
+  loginCustomerId?: string,
 ): Promise<GoogleAdInsightsDay> {
   const accessToken = await refreshGoogleAccessToken(refreshToken);
   const rows = await googleAdsSearch<{
@@ -320,14 +762,15 @@ export async function fetchGoogleAdInsightsForDay(
     accessToken,
     customerId,
     `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, customer.currency_code FROM customer WHERE segments.date = '${dateKey}'`,
+    loginCustomerId,
   );
   const row = rows[0];
-  const micros = Number(row?.metrics?.costMicros ?? 0);
+  const micros = numFromGoogleMetrics(row?.metrics, "costMicros", "cost_micros");
   const spend = Number.isFinite(micros) ? micros / 1_000_000 : 0;
   return {
     spend,
-    impressions: Number(row?.metrics?.impressions ?? 0) || 0,
-    clicks: Number(row?.metrics?.clicks ?? 0) || 0,
+    impressions: numFromGoogleMetrics(row?.metrics, "impressions"),
+    clicks: numFromGoogleMetrics(row?.metrics, "clicks"),
     currency: row?.customer?.currencyCode ?? "USD",
   };
 }
@@ -338,125 +781,85 @@ export type CampaignInsightsRow = {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions: number;
+  conversionValue: number;
   currency: string;
+  status?: string;
+  statusLabel?: string;
 };
 
-/** Insights por campanha num dia. */
-export async function fetchGoogleCampaignInsightsForDay(
-  refreshToken: string,
-  customerId: string,
-  dateKey: string,
-): Promise<CampaignInsightsRow[]> {
-  const accessToken = await refreshGoogleAccessToken(refreshToken);
-  const rows = await googleAdsSearch<{
-    campaign?: { id?: string; name?: string };
-    metrics?: {
-      costMicros?: string;
-      impressions?: string;
-      clicks?: string;
-    };
-    customer?: { currencyCode?: string };
-  }>(
-    accessToken,
-    customerId,
-    `SELECT campaign.id, campaign.name, metrics.cost_micros, metrics.impressions, metrics.clicks, customer.currency_code FROM campaign WHERE segments.date = '${dateKey}'`,
-  );
+type GoogleCampaignStatusRow = {
+  campaign?: { id?: string; name?: string; status?: string };
+};
 
-  const out: CampaignInsightsRow[] = [];
-  for (const row of rows) {
-    const micros = Number(row?.metrics?.costMicros ?? 0);
-    const spend = Number.isFinite(micros) ? micros / 1_000_000 : 0;
-    const impressions = Number(row?.metrics?.impressions ?? 0) || 0;
-    const clicks = Number(row?.metrics?.clicks ?? 0) || 0;
-    if (spend <= 0 && impressions <= 0 && clicks <= 0) continue;
-    out.push({
-      campaignId: String(row?.campaign?.id ?? "").trim() || "unknown",
-      campaignName: row?.campaign?.name?.trim() || "Campanha",
-      spend,
-      impressions,
-      clicks,
-      currency: row?.customer?.currencyCode ?? "USD",
-    });
-  }
-  return out;
-}
-
-/** Campanhas activas/pausadas com métricas de hoje. */
-export async function fetchGoogleLiveCampaigns(
-  refreshToken: string,
-  customerId: string,
-  dateKey: string,
-): Promise<LiveCampaignRow[]> {
-  const accessToken = await refreshGoogleAccessToken(refreshToken);
-  const cid = normalizeCustomerId(customerId);
-
-  const statusRows = await googleAdsSearch<{
-    campaign?: { id?: string; name?: string; status?: string };
-  }>(
-    accessToken,
-    cid,
-    `SELECT campaign.id, campaign.name, campaign.status FROM campaign WHERE campaign.status IN ('ENABLED', 'PAUSED')`,
-  );
-
-  const metricsRows = await googleAdsSearch<{
-    campaign?: { id?: string };
-    metrics?: {
-      costMicros?: string;
-      impressions?: string;
-      clicks?: string;
-    };
-    customer?: { currencyCode?: string };
-  }>(
-    accessToken,
-    cid,
-    `SELECT campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, customer.currency_code FROM campaign WHERE segments.date = '${dateKey}'`,
-  );
-
+function buildGoogleCampaignInsightRows(
+  statusRows: GoogleCampaignStatusRow[],
+  metricsRows: GoogleCampaignDayRow[],
+): CampaignInsightsRow[] {
   const metricsById = new Map<
     string,
-    { spend: number; impressions: number; clicks: number; currency: string }
+    {
+      spend: number;
+      impressions: number;
+      clicks: number;
+      conversions: number;
+      conversionValue: number;
+      currency: string;
+    }
   >();
   let currency = "USD";
+
   for (const row of metricsRows) {
     const id = String(row?.campaign?.id ?? "").trim();
     if (!id) continue;
     if (row?.customer?.currencyCode) currency = row.customer.currencyCode;
-    const micros = Number(row?.metrics?.costMicros ?? 0);
+    const micros = numFromGoogleMetrics(row?.metrics, "costMicros", "cost_micros");
+    const spend = Number.isFinite(micros) ? micros / 1_000_000 : 0;
+    const { conversions, conversionValue } = googleConversionsFromMetrics(
+      row?.metrics,
+    );
     metricsById.set(id, {
-      spend: Number.isFinite(micros) ? micros / 1_000_000 : 0,
-      impressions: Number(row?.metrics?.impressions ?? 0) || 0,
-      clicks: Number(row?.metrics?.clicks ?? 0) || 0,
+      spend,
+      impressions: numFromGoogleMetrics(row?.metrics, "impressions") || 0,
+      clicks: numFromGoogleMetrics(row?.metrics, "clicks") || 0,
+      conversions,
+      conversionValue,
       currency: row?.customer?.currencyCode ?? currency,
     });
   }
 
-  const out: LiveCampaignRow[] = [];
+  const out: CampaignInsightsRow[] = [];
   const seen = new Set<string>();
 
   for (const row of statusRows) {
     const id = String(row?.campaign?.id ?? "").trim();
-    const status = row?.campaign?.status?.trim() || "UNKNOWN";
+    const status = row?.campaign?.status?.trim() || "";
     if (!id) continue;
-    const m = metricsById.get(id);
-    if (status !== "ENABLED" && !m) continue;
+    if (status !== "ENABLED" && status !== "PAUSED") continue;
 
-    const spend = m?.spend ?? 0;
-    const impressions = m?.impressions ?? 0;
-    const clicks = m?.clicks ?? 0;
+    const m = metricsById.get(id);
+    if (
+      !shouldIncludeCampaignForDay(status, {
+        spend: m?.spend,
+        impressions: m?.impressions,
+        clicks: m?.clicks,
+        conversions: m?.conversions,
+      })
+    ) {
+      continue;
+    }
+
     out.push({
       campaignId: id,
       campaignName: row?.campaign?.name?.trim() || `Campanha ${id}`,
-      platform: "google",
-      platformLabel: "Google",
-      adAccountId: cid,
-      adAccountName: cid,
+      spend: m?.spend ?? 0,
+      impressions: m?.impressions ?? 0,
+      clicks: m?.clicks ?? 0,
+      conversions: m?.conversions ?? 0,
+      conversionValue: m?.conversionValue ?? 0,
+      currency: m?.currency ?? currency,
       status,
       statusLabel: formatCampaignStatusLabel(status),
-      spend,
-      impressions,
-      clicks,
-      currency: m?.currency ?? currency,
-      ...metricsFromCampaignTotals(spend, impressions, clicks),
     });
     seen.add(id);
   }
@@ -466,19 +869,93 @@ export async function fetchGoogleLiveCampaigns(
     out.push({
       campaignId: id,
       campaignName: `Campanha ${id}`,
-      platform: "google",
-      platformLabel: "Google",
-      adAccountId: cid,
-      adAccountName: cid,
-      status: "ENABLED",
-      statusLabel: "Activa",
       spend: m.spend,
       impressions: m.impressions,
       clicks: m.clicks,
+      conversions: m.conversions,
+      conversionValue: m.conversionValue,
       currency: m.currency,
-      ...metricsFromCampaignTotals(m.spend, m.impressions, m.clicks),
+      status: "ENABLED",
+      statusLabel: "Activa",
     });
   }
 
-  return out.sort((a, b) => b.spend - a.spend);
+  return out;
+}
+
+/** Insights por campanha num dia (activas sempre; pausadas só com actividade no dia). */
+export async function fetchGoogleCampaignInsightsForDay(
+  refreshToken: string,
+  customerId: string,
+  dateKey: string,
+  loginCustomerId?: string,
+): Promise<CampaignInsightsRow[]> {
+  const accessToken = await refreshGoogleAccessToken(refreshToken);
+  const cid = normalizeCustomerId(customerId);
+
+  const statusRows = await googleAdsSearch<GoogleCampaignStatusRow>(
+    accessToken,
+    cid,
+    `SELECT campaign.id, campaign.name, campaign.status FROM campaign WHERE campaign.status IN ('ENABLED', 'PAUSED')`,
+    loginCustomerId,
+  );
+
+  const metricsRows = await fetchGoogleCampaignDayRows(
+    accessToken,
+    cid,
+    dateKey,
+    loginCustomerId,
+    false,
+  );
+
+  return buildGoogleCampaignInsightRows(statusRows, metricsRows);
+}
+
+/** Campanhas activas/pausadas com métricas de hoje. */
+export async function fetchGoogleLiveCampaigns(
+  refreshToken: string,
+  customerId: string,
+  dateKey: string,
+  loginCustomerId?: string,
+): Promise<LiveCampaignRow[]> {
+  const accessToken = await refreshGoogleAccessToken(refreshToken);
+  const cid = normalizeCustomerId(customerId);
+
+  const statusRows = await googleAdsSearch<GoogleCampaignStatusRow>(
+    accessToken,
+    cid,
+    `SELECT campaign.id, campaign.name, campaign.status FROM campaign WHERE campaign.status IN ('ENABLED', 'PAUSED')`,
+    loginCustomerId,
+  );
+
+  const metricsRows = await fetchGoogleCampaignDayRows(
+    accessToken,
+    cid,
+    dateKey,
+    loginCustomerId,
+    false,
+  );
+
+  const insightRows = buildGoogleCampaignInsightRows(statusRows, metricsRows);
+
+  return insightRows
+    .map((r) => ({
+      campaignId: r.campaignId,
+      campaignName: r.campaignName,
+      platform: "google" as const,
+      platformLabel: "Google",
+      adAccountId: cid,
+      adAccountName: cid,
+      status: r.status ?? "ENABLED",
+      statusLabel: r.statusLabel ?? "Activa",
+      spend: r.spend,
+      impressions: r.impressions,
+      clicks: r.clicks,
+      conversions: r.conversions,
+      conversionValue: r.conversionValue,
+      currency: r.currency,
+      roas: roasFromCampaign(r.spend, r.conversionValue),
+      ...metricsFromCampaignTotals(r.spend, r.impressions, r.clicks),
+    }))
+    .sort((a, b) => b.spend - a.spend);
 }

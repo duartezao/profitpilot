@@ -23,6 +23,11 @@ import {
   type AdAccountRow,
 } from "@/lib/ad-accounts";
 import { googleAdsServerConfigStatus } from "@/lib/google-ads";
+import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
+import {
+  dateKeyInTimezone,
+  normalizeStoreTimezone,
+} from "@/lib/store-timezone";
 
 export type { WorkspaceGoogleLogin };
 
@@ -34,6 +39,7 @@ export type AdSpendStoreView = {
   rangeLabel: string;
   minDate: string;
   yesterday: string;
+  today: string;
   calendar: AdSpendDayRow[];
   missingCount: number;
   yesterdayMissing: boolean;
@@ -47,8 +53,8 @@ export type AdSpendOverviewView = {
 };
 
 export type AdSpendView =
-  | { mode: "overview"; overview: AdSpendOverviewView }
-  | { mode: "store"; store: AdSpendStoreView };
+  | { mode: "overview"; overview: AdSpendOverviewView; lastSyncedAt: string | null }
+  | { mode: "store"; store: AdSpendStoreView; lastSyncedAt: string | null };
 
 export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | null> {
   const user = await getCurrentUser();
@@ -56,8 +62,8 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
 
   await connectToDatabase();
 
-  const stores = await Store.find(activeStoreQueryForUser(user))
-    .select("name currency importStartDate createdAt")
+    const stores = await Store.find(activeStoreQueryForUser(user))
+    .select("name currency importStartDate createdAt ianaTimezone")
     .sort({ name: 1 })
     .lean();
 
@@ -92,9 +98,14 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
     const googleAdsApiReady = googleAdsServerConfigStatus().apiReady;
 
     const yesterday = range.toKey;
+    const today = dateKeyInTimezone(
+      new Date(),
+      normalizeStoreTimezone(scoped.ianaTimezone),
+    );
 
     return {
       mode: "store",
+      lastSyncedAt: await resolveLastSyncedAtForStoreIds([String(scoped._id)]),
       store: {
         storeId: String(scoped._id),
         storeName: scoped.name,
@@ -103,6 +114,7 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
         rangeLabel,
         minDate: range.fromKey,
         yesterday,
+        today,
         calendar,
         missingCount: countMissingDays(calendar),
         yesterdayMissing: missingDays.some((d) => d.isYesterday),
@@ -117,5 +129,11 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
     stores.length > 0
       ? await buildStoreAdSpendSummaries(stores, baseCurrency)
       : [];
-  return { mode: "overview", overview: { summaries } };
+  return {
+    mode: "overview",
+    lastSyncedAt: await resolveLastSyncedAtForStoreIds(
+      stores.map((s) => String(s._id)),
+    ),
+    overview: { summaries },
+  };
 }

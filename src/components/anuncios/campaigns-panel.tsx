@@ -1,13 +1,23 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useTransition } from "react";
+import { useSearchParams } from "next/navigation";
+import { useState, useTransition } from "react";
 import { RefreshCw } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { syncAdAccountsNowAction } from "@/app/(app)/anuncios/ad-account-actions";
 import type { StoreCampaignsView } from "@/lib/ad-campaign-types";
 import { cn } from "@/lib/utils";
+import {
+  AD_API_SYNC_INTERVAL_MS,
+  LIVE_DATA_POLL_MS,
+} from "@/lib/ad-sync-constants";
+import {
+  periodFromSearchParams,
+  periodIncludesToday,
+  periodQueryFromSearchParams,
+} from "@/lib/period";
 
 function fmtMoney(v: number, currency: string): string {
   return `${v.toFixed(2).replace(".", ",")} ${currency}`;
@@ -18,13 +28,122 @@ function fmtMetric(v: number | null, suffix = ""): string {
   return `${v.toFixed(2).replace(".", ",")}${suffix}`;
 }
 
+function fmtRoas(v: number | null): string {
+  if (v == null) return "—";
+  return `${v.toFixed(2).replace(".", ",")}x`;
+}
+
+function MoneyCell({
+  amount,
+  currency,
+  inputAmount,
+  inputCurrency,
+  platformAmount,
+}: {
+  amount: number;
+  currency: string;
+  inputAmount?: number;
+  inputCurrency?: string;
+  platformAmount?: number;
+}) {
+  const showOrig =
+    inputCurrency &&
+    inputCurrency.toUpperCase() !== currency.toUpperCase() &&
+    inputAmount != null &&
+    inputAmount > 0;
+
+  return (
+    <>
+      <Sensitive>{fmtMoney(amount, currency)}</Sensitive>
+      {showOrig && (
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          orig. {fmtMoney(inputAmount, inputCurrency)}
+          {platformAmount != null &&
+            platformAmount > 0 &&
+            platformAmount !== inputAmount && (
+              <>
+                {" "}
+                · API {fmtMoney(platformAmount, inputCurrency)}
+              </>
+            )}
+        </p>
+      )}
+      {!showOrig &&
+        platformAmount != null &&
+        platformAmount > 0 &&
+        amount > platformAmount && (
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            API {fmtMoney(platformAmount, currency)}
+          </p>
+        )}
+    </>
+  );
+}
+
+function fmtConversions(v: number): string {
+  if (v <= 0) return "—";
+  return Number.isInteger(v) ? String(v) : v.toFixed(1).replace(".", ",");
+}
+
+function CampaignTotalsKpis({
+  totals,
+  multiDay,
+}: {
+  totals: StoreCampaignsView["totals"];
+  multiDay: boolean;
+}) {
+  const clicksLabel = multiDay ? "Cliques (total)" : "Cliques";
+  const items = [
+    {
+      label: "Gasto total",
+      value: fmtMoney(totals.spend, totals.currency),
+    },
+    {
+      label: clicksLabel,
+      value: totals.clicks.toLocaleString("pt-PT"),
+    },
+    {
+      label: "CPC médio",
+      value: fmtMetric(totals.cpc, ` ${totals.currency}`),
+    },
+    {
+      label: "CPM médio",
+      value: fmtMetric(totals.cpm, ` ${totals.currency}`),
+    },
+    {
+      label: "CTR médio",
+      value: fmtMetric(totals.ctr, "%"),
+    },
+    {
+      label: "ROAS",
+      value: fmtRoas(totals.roas),
+    },
+  ];
+
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className="rounded-lg border border-border bg-muted/20 px-3 py-2.5"
+        >
+          <p className="text-xs text-muted-foreground">{item.label}</p>
+          <p className="mt-1 text-sm font-semibold tabular-nums">
+            <Sensitive>{item.value}</Sensitive>
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function StatusBadge({ label }: { label: string }) {
   const active = label === "Activa";
   const paused = label === "Pausada";
   return (
     <span
       className={cn(
-        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+        "inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap",
         active && "border border-positive/30 bg-positive/10 text-positive",
         paused && "border border-warning/40 bg-warning/10 text-warning",
         !active && !paused && "border border-border bg-muted text-muted-foreground",
@@ -37,13 +156,15 @@ function StatusBadge({ label }: { label: string }) {
 
 async function fetchCampaigns(
   storeId: string,
+  periodQs: string,
   sync = false,
 ): Promise<StoreCampaignsView> {
-  const q = sync ? "&sync=1" : "";
-  const res = await fetch(
-    `/api/anuncios/campaigns?store=${encodeURIComponent(storeId)}${q}`,
-    { cache: "no-store" },
-  );
+  const q = new URLSearchParams(periodQs);
+  q.set("store", storeId);
+  if (sync) q.set("sync", "1");
+  const res = await fetch(`/api/anuncios/campaigns?${q.toString()}`, {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error("Falha ao carregar campanhas.");
   return res.json();
 }
@@ -51,89 +172,160 @@ async function fetchCampaigns(
 export function CampaignsPanel({
   storeId,
   hasLinkedAccounts,
+  embedded = false,
 }: {
   storeId: string;
   hasLinkedAccounts: boolean;
+  embedded?: boolean;
 }) {
+  const searchParams = useSearchParams();
+  const period = periodFromSearchParams(searchParams);
+  const periodQs = periodQueryFromSearchParams(searchParams);
+  const includesToday = periodIncludesToday(period);
   const queryClient = useQueryClient();
   const [syncing, startSync] = useTransition();
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const { data, isError, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["ad-campaigns", storeId],
-    queryFn: () => fetchCampaigns(storeId),
+    queryKey: ["ad-campaigns", storeId, period.key],
+    queryFn: () => fetchCampaigns(storeId, periodQs),
     enabled: hasLinkedAccounts,
-    staleTime: 30_000,
-    refetchInterval: hasLinkedAccounts ? 120_000 : false,
+    placeholderData: (prev) => prev,
+    staleTime: LIVE_DATA_POLL_MS - 10_000,
+    refetchInterval: includesToday ? LIVE_DATA_POLL_MS : false,
+  });
+
+  useQuery({
+    queryKey: ["ad-intraday-sync", storeId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/anuncios/sync-today?store=${encodeURIComponent(storeId)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as { synced?: boolean };
+      if (body.synced) {
+        await queryClient.invalidateQueries({
+          queryKey: ["ad-campaigns", storeId],
+        });
+      }
+      return body;
+    },
+    enabled: hasLinkedAccounts && includesToday,
+    refetchInterval: AD_API_SYNC_INTERVAL_MS,
+    staleTime: AD_API_SYNC_INTERVAL_MS - 60_000,
   });
 
   function runSync() {
     startSync(async () => {
+      setSyncError(null);
       const res = await syncAdAccountsNowAction(storeId);
       if (res.error) {
-        await refetch();
-        return;
+        setSyncError(res.error);
       }
       await queryClient.invalidateQueries({ queryKey: ["ad-campaigns", storeId] });
-      await fetchCampaigns(storeId, true);
+      const fresh = await fetchCampaigns(storeId, periodQs, true);
+      queryClient.setQueryData(["ad-campaigns", storeId, period.key], fresh);
       await refetch();
     });
   }
 
   if (!hasLinkedAccounts) {
+    const empty = (
+      <p className="text-sm text-muted-foreground">
+        Liga uma conta em Contas API para ver campanhas activas.
+      </p>
+    );
+    if (embedded) {
+      return (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Campanhas</h2>
+            <p className="text-sm text-muted-foreground">
+              Performance por campanha (requer conta API ligada).
+            </p>
+          </div>
+          {empty}
+        </div>
+      );
+    }
     return (
       <CollapsibleSection
         title="Campanhas"
-        description="Liga uma conta API (Meta, Google ou TikTok) para ver campanhas activas."
+        description="Liga uma conta API para ver campanhas activas."
       >
-        <p className="text-sm text-muted-foreground">
-          Sem contas API ligadas a esta loja.
-        </p>
+        {empty}
       </CollapsibleSection>
     );
   }
 
-  return (
-    <CollapsibleSection
-      title="Campanhas"
-      description={
-        data
-          ? `${data.campaigns.length} campanha${data.campaigns.length === 1 ? "" : "s"} · ${data.dateLabel} (${data.dateKey})`
-          : "Campanhas activas das contas API ligadas"
-      }
-      defaultOpen
-      badge={
-        data?.source === "live" ? (
-          <span className="rounded-md border border-positive/30 bg-positive/10 px-2 py-0.5 text-xs font-medium text-positive">
-            Ao vivo
-          </span>
-        ) : data?.source === "mixed" ? (
-          <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            Misto
-          </span>
-        ) : data?.source === "cache" && data.campaigns.length > 0 ? (
-          <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            Cache
-          </span>
-        ) : undefined
-      }
-    >
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          Estado e métricas de hoje por campanha (gasto, impressões, cliques, CPC,
-          CTR, CPM).
-        </p>
-        <button
-          type="button"
-          onClick={runSync}
-          disabled={syncing || isFetching}
-          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
-        >
-          <RefreshCw
-            className={cn("h-4 w-4", (syncing || isFetching) && "animate-spin")}
-          />
-          {syncing ? "A sincronizar…" : "Actualizar"}
-        </button>
+  const syncedLabel = data?.syncedAt
+    ? new Date(data.syncedAt).toLocaleString("pt-PT", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  const body = (
+    <>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-2">
+          {embedded && (
+            <>
+              <h2 className="text-lg font-semibold">Campanhas</h2>
+              <p className="text-sm text-muted-foreground">
+                {data
+                  ? `${data.campaigns.length} campanha${data.campaigns.length === 1 ? "" : "s"} · ${data.dateLabel}${
+                      data.daysInPeriod > 1 && data.daysWithData > 0
+                        ? ` · ${data.daysWithData} dia${data.daysWithData === 1 ? "" : "s"} com gasto`
+                        : ""
+                    }`
+                  : "A carregar…"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Período definido no selector do topo da página. Dias passados vêm
+                da BD (sem pedido à Google).
+              </p>
+            </>
+          )}
+          {!embedded && (
+            <p className="text-xs text-muted-foreground">
+              Performance por campanha no período seleccionado.
+            </p>
+          )}
+          {syncedLabel && (
+            <p className="text-xs text-muted-foreground">
+              Último sync: {syncedLabel}
+              {data?.source === "live" ? " · actualizado agora" : " · cache BD"}
+              {data?.displayCurrency && data?.fxDateKey
+                ? ` · valores em ${data.displayCurrency} (câmbio ${data.fxDateKey})`
+                : ""}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={runSync}
+            disabled={syncing || isFetching}
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+            title="Sincroniza hoje na API e actualiza a tabela"
+          >
+            <RefreshCw
+              className={cn("h-4 w-4", (syncing || isFetching) && "animate-spin")}
+            />
+            {syncing ? "A sincronizar…" : "Actualizar"}
+          </button>
+        </div>
       </div>
+
+      {syncError && (
+        <p className="mb-4 rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
+          {syncError}
+        </p>
+      )}
 
       {isError && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
@@ -160,67 +352,80 @@ export function CampaignsPanel({
 
       {data && data.campaigns.length === 0 && !isLoading && (
         <p className="text-sm text-muted-foreground">
-          Nenhuma campanha activa encontrada hoje. Clica em Actualizar depois de
-          ligar a conta API — ou regista o gasto manualmente na tabela abaixo.
+          Nenhuma campanha com dados neste período na BD.
+          {includesToday
+            ? " Clica em Actualizar para sincronizar hoje na API."
+            : " Os dados são guardados quando o sync corre (automático em «Hoje»)."}
         </p>
+      )}
+
+      {data && !isLoading && (
+        <CampaignTotalsKpis
+          totals={data.totals}
+          multiDay={data.daysInPeriod > 1}
+        />
       )}
 
       {data && data.campaigns.length > 0 && (
         <>
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[880px] text-sm">
+          <div className="hidden overflow-x-auto lg:block">
+            <table className="w-full min-w-[960px] border-collapse text-sm">
               <thead>
-                <tr className="text-left text-xs font-medium text-muted-foreground">
-                  <th className="px-4 py-3">Campanha</th>
-                  <th className="px-4 py-3">Plataforma</th>
-                  <th className="px-4 py-3">Conta</th>
-                  <th className="px-4 py-3">Estado</th>
-                  <th className="px-4 py-3 text-right">Gasto</th>
-                  <th className="px-4 py-3 text-right">Impr.</th>
-                  <th className="px-4 py-3 text-right">Cliques</th>
-                  <th className="px-4 py-3 text-right">CPC</th>
-                  <th className="px-4 py-3 text-right">CTR</th>
-                  <th className="px-4 py-3 text-right">CPM</th>
+                <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
+                  <th className="px-3 py-2.5 font-medium">Campanha</th>
+                  <th className="px-3 py-2.5 font-medium">Plataforma</th>
+                  <th className="px-3 py-2.5 font-medium">Estado</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Gasto</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Conv.</th>
+                  <th className="px-3 py-2.5 text-right font-medium">ROAS</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Cliques</th>
+                  <th className="px-3 py-2.5 text-right font-medium">CPC</th>
+                  <th className="px-3 py-2.5 text-right font-medium">CTR</th>
                 </tr>
               </thead>
               <tbody>
                 {data.campaigns.map((c) => (
                   <tr
                     key={`${c.platform}-${c.campaignId}`}
-                    className="border-t border-border hover:bg-muted/50"
+                    className="border-b border-border last:border-0 hover:bg-muted/40"
                   >
-                    <td className="max-w-[200px] px-4 py-3 font-medium">
-                      <Sensitive className="truncate">{c.campaignName}</Sensitive>
-                      <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                        {c.campaignId}
+                    <td className="max-w-[220px] px-3 py-2.5 align-top">
+                      <Sensitive className="block truncate font-medium leading-snug">
+                        {c.campaignName}
+                      </Sensitive>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        <Sensitive>{c.adAccountName}</Sensitive>
                       </p>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="px-3 py-2.5 align-top whitespace-nowrap text-muted-foreground">
                       {c.platformLabel}
                     </td>
-                    <td className="max-w-[120px] px-4 py-3 text-xs text-muted-foreground">
-                      <Sensitive className="truncate">{c.adAccountName}</Sensitive>
-                    </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2.5 align-top">
                       <StatusBadge label={c.statusLabel} />
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      <Sensitive>{fmtMoney(c.spend, c.currency)}</Sensitive>
+                    <td className="px-3 py-2.5 align-top text-right whitespace-nowrap tabular-nums">
+                      <MoneyCell
+                        amount={c.spend}
+                        currency={c.currency}
+                        inputAmount={c.spendInput}
+                        inputCurrency={c.inputCurrency}
+                        platformAmount={c.spendPlatformInput ?? c.spendPlatform}
+                      />
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      <Sensitive>{c.impressions.toLocaleString("pt-PT")}</Sensitive>
+                    <td className="px-3 py-2.5 align-top text-right whitespace-nowrap tabular-nums">
+                      <Sensitive>{fmtConversions(c.conversions)}</Sensitive>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
+                    <td className="px-3 py-2.5 align-top text-right whitespace-nowrap tabular-nums">
+                      <Sensitive>{fmtRoas(c.roas)}</Sensitive>
+                    </td>
+                    <td className="px-3 py-2.5 align-top text-right whitespace-nowrap tabular-nums">
                       <Sensitive>{c.clicks.toLocaleString("pt-PT")}</Sensitive>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
+                    <td className="px-3 py-2.5 align-top text-right whitespace-nowrap tabular-nums">
                       <Sensitive>{fmtMetric(c.cpc)}</Sensitive>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
+                    <td className="px-3 py-2.5 align-top text-right whitespace-nowrap tabular-nums">
                       <Sensitive>{fmtMetric(c.ctr, "%")}</Sensitive>
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      <Sensitive>{fmtMetric(c.cpm)}</Sensitive>
                     </td>
                   </tr>
                 ))}
@@ -228,28 +433,49 @@ export function CampaignsPanel({
             </table>
           </div>
 
-          <div className="space-y-3 md:hidden">
+          <div className="space-y-3 lg:hidden">
             {data.campaigns.map((c) => (
               <div
                 key={`${c.platform}-${c.campaignId}-m`}
                 className="rounded-lg border border-border bg-background p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <Sensitive className="font-medium leading-snug">
+                  <div className="min-w-0 flex-1">
+                    <Sensitive className="block font-medium leading-snug">
                       {c.campaignName}
                     </Sensitive>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {c.platformLabel} · <Sensitive>{c.adAccountName}</Sensitive>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {c.platformLabel}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      <Sensitive>{c.adAccountName}</Sensitive>
                     </p>
                   </div>
                   <StatusBadge label={c.statusLabel} />
                 </div>
-                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
                   <div>
                     <dt className="text-muted-foreground">Gasto</dt>
                     <dd className="mt-0.5 font-semibold tabular-nums">
-                      <Sensitive>{fmtMoney(c.spend, c.currency)}</Sensitive>
+                      <MoneyCell
+                        amount={c.spend}
+                        currency={c.currency}
+                        inputAmount={c.spendInput}
+                        inputCurrency={c.inputCurrency}
+                        platformAmount={c.spendPlatformInput ?? c.spendPlatform}
+                      />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">ROAS</dt>
+                    <dd className="mt-0.5 font-semibold tabular-nums">
+                      <Sensitive>{fmtRoas(c.roas)}</Sensitive>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">Conv.</dt>
+                    <dd className="mt-0.5 font-semibold tabular-nums">
+                      <Sensitive>{fmtConversions(c.conversions)}</Sensitive>
                     </dd>
                   </div>
                   <div>
@@ -276,6 +502,21 @@ export function CampaignsPanel({
           </div>
         </>
       )}
+    </>
+  );
+
+  if (embedded) return <div className="space-y-4">{body}</div>;
+
+  return (
+    <CollapsibleSection
+      title="Campanhas"
+      description={
+        data
+          ? `${data.campaigns.length} campanha${data.campaigns.length === 1 ? "" : "s"} · ${data.dateLabel}`
+          : "Campanhas activas"
+      }
+    >
+      {body}
     </CollapsibleSection>
   );
 }

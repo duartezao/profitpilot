@@ -4,8 +4,7 @@ import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { Workspace } from "@/models/Workspace";
 import {
   getTodayDateKey,
-  isAdSpendDayLockedForApiForStore,
-  isAdSpendTodayOpenForStore,
+  canApiWriteAdSpendForStore,
 } from "@/lib/ad-spend-lock";
 import {
   dateKeyInTimezone,
@@ -22,20 +21,22 @@ import {
 import {
   credentialTokenForPlatform,
   decryptAdCredentials,
-  loadActiveAdAccounts,
+  googleLoginCustomerIdFromCreds,
+  loadSyncAdAccountsForStore,
   markAdAccountSync,
   type AdAccountCredentials,
 } from "@/lib/ad-accounts";
 import { fetchMetaAdSpendForDay } from "@/lib/meta-ads";
 import { fetchGoogleAdSpendForDay } from "@/lib/google-ads";
 import { fetchTiktokAdSpendForDay } from "@/lib/tiktok-ads";
-import { syncAdCampaignMetricsForStoreDay } from "@/lib/ad-campaign-sync";
+import { syncAdCampaignMetricsForStoreDay, syncAdCampaignMetricsForStoreDays } from "@/lib/ad-campaign-sync";
 import { syncApiMetricsToDailyNote } from "@/lib/ad-note-sync";
 
 export type ApiAdSpendSyncResult = {
   storeId: string;
   today: string;
   updated: boolean;
+  campaignsSynced?: number;
   skippedReason?: "no_accounts" | "locked" | "no_data";
 };
 
@@ -57,15 +58,12 @@ async function upsertApiAdSpendForDay(
   baseCurrency: string,
   apiByPlatform: Map<AdPlatform, PlatformApiSpend>,
 ): Promise<boolean> {
-  if (
-    isAdSpendDayLockedForApiForStore(dateKey, storeTimeZone) ||
-    !isAdSpendTodayOpenForStore(dateKey, storeTimeZone)
-  ) {
+  const existing = await ManualAdSpend.findOne({ storeId, dateKey }).lean();
+  if (!canApiWriteAdSpendForStore(dateKey, storeTimeZone, Boolean(existing))) {
     return false;
   }
 
   const apiPlatforms = new Set(apiByPlatform.keys());
-  const existing = await ManualAdSpend.findOne({ storeId, dateKey }).lean();
 
   const preserved: AdSpendLineStored[] = (existing?.lines ?? [])
     .filter((l) => !apiPlatforms.has(l.platform as AdPlatform))
@@ -152,7 +150,12 @@ async function fetchSpendForAccount(
     case "meta":
       return fetchMetaAdSpendForDay(token, externalAccountId, dateKey);
     case "google":
-      return fetchGoogleAdSpendForDay(token, externalAccountId, dateKey);
+      return fetchGoogleAdSpendForDay(
+        token,
+        externalAccountId,
+        dateKey,
+        googleLoginCustomerIdFromCreds(creds),
+      );
     case "tiktok":
       return fetchTiktokAdSpendForDay(token, externalAccountId, dateKey);
     default:
@@ -160,9 +163,16 @@ async function fetchSpendForAccount(
   }
 }
 
-/** Sincroniza gasto de hoje a partir das contas de ads ligadas. */
+/** Sincroniza gasto API (hoje ou dia indicado) + campanhas. */
 export async function syncAdAccountsSpendForStore(
   storeId: string,
+  options?: {
+    campaignDateKeys?: string[];
+    dateKey?: string;
+    skipDailyNote?: boolean;
+    /** Só campanhas — não chama API de gasto (dia passado já com ManualAdSpend). */
+    skipSpendSync?: boolean;
+  },
 ): Promise<ApiAdSpendSyncResult> {
   const { Store } = await import("@/models/Store");
   const store = await Store.findById(storeId)
@@ -182,84 +192,132 @@ export async function syncAdAccountsSpendForStore(
     .lean();
   const baseCurrency = workspace?.baseCurrency ?? "EUR";
   const storeTz = normalizeStoreTimezone(store.ianaTimezone);
-  const today = dateKeyInTimezone(new Date(), storeTz);
+  const dateKey =
+    options?.dateKey ?? dateKeyInTimezone(new Date(), storeTz);
 
-  const accounts = await loadActiveAdAccounts(store._id);
+  const accounts = await loadSyncAdAccountsForStore(store._id);
   if (!accounts.length) {
-    return { storeId, today, updated: false, skippedReason: "no_accounts" };
+    return { storeId, today: dateKey, updated: false, skippedReason: "no_accounts" };
   }
 
-  /** Uma conta activa por plataforma (evita somar a mesma spend duas vezes). */
-  const accountByPlatform = new Map<AdPlatform, (typeof accounts)[number]>();
-  for (const acc of accounts) {
-    const platform = acc.platform as AdPlatform;
-    if (!accountByPlatform.has(platform)) {
-      accountByPlatform.set(platform, acc);
-    }
-  }
+  const existingSpend = await ManualAdSpend.findOne({ storeId: store._id, dateKey })
+    .select("dateKey source")
+    .lean();
+  const canWriteSpend =
+    !options?.skipSpendSync &&
+    canApiWriteAdSpendForStore(dateKey, storeTz, Boolean(existingSpend));
 
   const apiByPlatform = new Map<AdPlatform, PlatformApiSpend>();
   let anyError = false;
 
-  for (const acc of accountByPlatform.values()) {
-    const platform = acc.platform as AdPlatform;
-    try {
-      const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
-      const { spend, currency } = await fetchSpendForAccount(
-        platform,
-        creds,
-        acc.externalAccountId,
-        today,
-      );
-      const alloc = (acc.allocation ?? 100) / 100;
-      const part = spend * alloc;
-      const inputCurrency =
-        platform === "google" ? (currency || "USD").toUpperCase() : currency.toUpperCase();
+  if (canWriteSpend) {
+    for (const acc of accounts) {
+      const platform = acc.platform as AdPlatform;
+      try {
+        const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
+        const { spend, currency } = await fetchSpendForAccount(
+          platform,
+          creds,
+          acc.externalAccountId,
+          dateKey,
+        );
+        const alloc = (acc.allocation ?? 100) / 100;
+        const part = spend * alloc;
+        const inputCurrency =
+          platform === "google"
+            ? (currency || "USD").toUpperCase()
+            : currency.toUpperCase();
 
-      apiByPlatform.set(platform, {
-        spend: part,
-        currency: inputCurrency,
-        fees: {
-          extraFeeFixed: acc.apiExtraFeeFixed ?? 0,
-          agencyFeePercent: acc.apiAgencyFeePercent ?? 0,
-        },
-      });
-      await markAdAccountSync(acc._id, true);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Falha no sync.";
-      await markAdAccountSync(acc._id, false, msg);
-      anyError = true;
+        apiByPlatform.set(platform, {
+          spend: part,
+          currency: inputCurrency,
+          fees: {
+            extraFeeFixed: acc.apiExtraFeeFixed ?? 0,
+            agencyFeePercent: acc.apiAgencyFeePercent ?? 0,
+          },
+        });
+        await markAdAccountSync(acc._id, true);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Falha no sync.";
+        await markAdAccountSync(acc._id, false, msg);
+        anyError = true;
+      }
     }
   }
 
-  const updated = await upsertApiAdSpendForDay(
-    store.workspaceId,
-    store._id,
-    today,
-    storeTz,
-    baseCurrency,
-    apiByPlatform,
-  );
-
-  if (!updated && !anyError && apiByPlatform.size === 0) {
-    return { storeId, today, updated: false, skippedReason: "no_data" };
+  let updated = false;
+  if (canWriteSpend) {
+    updated = await upsertApiAdSpendForDay(
+      store.workspaceId,
+      store._id,
+      dateKey,
+      storeTz,
+      baseCurrency,
+      apiByPlatform,
+    );
   }
 
+  if (!updated && !anyError && apiByPlatform.size === 0 && canWriteSpend) {
+    return { storeId, today: dateKey, updated: false, skippedReason: "no_data" };
+  }
+
+  const campaignKeys = options?.campaignDateKeys?.length
+    ? options.campaignDateKeys
+    : [dateKey];
+  let campaignsSynced = 0;
   try {
-    await syncAdCampaignMetricsForStoreDay(storeId, today);
-    await syncApiMetricsToDailyNote(
-      String(store.workspaceId),
-      storeId,
-      today,
-    );
+    if (campaignKeys.length === 1) {
+      const r = await syncAdCampaignMetricsForStoreDay(storeId, campaignKeys[0]);
+      campaignsSynced = r.campaignsSynced;
+      if (!canWriteSpend && r.campaignsSynced > 0) {
+        for (const acc of accounts) {
+          await markAdAccountSync(acc._id, true);
+        }
+      }
+    } else {
+      const r = await syncAdCampaignMetricsForStoreDays(storeId, campaignKeys);
+      campaignsSynced = r.campaignsSynced;
+    }
   } catch {
-    /* campanhas/notas — não bloqueia spend */
+    /* campanhas — não bloqueia spend */
+  }
+  try {
+    if (!options?.skipDailyNote) {
+      await syncApiMetricsToDailyNote(
+        String(store.workspaceId),
+        storeId,
+        dateKeyInTimezone(new Date(), storeTz),
+      );
+    }
+  } catch {
+    /* notas — não bloqueia spend */
+  }
+
+  const didWork =
+    (updated && apiByPlatform.size > 0) || campaignsSynced > 0;
+
+  if (didWork) {
+    const { invalidateWorkspaceMetricsCache } = await import(
+      "@/lib/metrics-summary-cache"
+    );
+    const { invalidateAdCampaignsCache } = await import(
+      "@/lib/ad-campaigns-cache"
+    );
+    invalidateWorkspaceMetricsCache(String(store.workspaceId));
+    invalidateAdCampaignsCache(storeId);
   }
 
   return {
     storeId,
-    today,
+    today: dateKey,
     updated: updated && apiByPlatform.size > 0,
-    skippedReason: updated ? undefined : anyError ? "no_data" : "locked",
+    campaignsSynced,
+    skippedReason: didWork
+      ? undefined
+      : anyError
+        ? "no_data"
+        : canWriteSpend
+          ? "locked"
+          : "no_data",
   };
 }

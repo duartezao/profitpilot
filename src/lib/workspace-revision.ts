@@ -4,6 +4,8 @@ import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { OperationTask } from "@/models/OperationTask";
 import { TestCollection } from "@/models/TestCollection";
+import { ManualAdSpend } from "@/models/ManualAdSpend";
+import { AdCampaignDay } from "@/models/AdCampaignDay";
 
 async function latestUpdatedAt(
   model: mongoose.Model<{ updatedAt?: Date }>,
@@ -28,10 +30,12 @@ export async function getWorkspaceRevision(workspaceId: string): Promise<string>
   const wsOid = new mongoose.Types.ObjectId(workspaceId);
   const base = { workspaceId: wsOid, deletedAt: null };
 
-  const [storeTs, taskTs, collectionTs, storeAgg] = await Promise.all([
+  const [storeTs, taskTs, collectionTs, manualAdTs, campaignTs, storeAgg] = await Promise.all([
     latestUpdatedAt(Store, base),
     latestUpdatedAt(OperationTask, base),
     latestUpdatedAt(TestCollection, base),
+    latestUpdatedAt(ManualAdSpend, { workspaceId: wsOid }),
+    latestUpdatedAt(AdCampaignDay, { workspaceId: wsOid }),
     Store.aggregate<StoreRevisionAgg>([
       { $match: base },
       { $sort: { _id: 1 } },
@@ -66,5 +70,5 @@ export async function getWorkspaceRevision(workspaceId: string): Promise<string>
   );
   const opsSig = storeRow?.ops?.join("|") ?? "";
 
-  return `${storeRevisionTs}-${taskTs}-${collectionTs}-${opsSig}`;
+  return `${storeRevisionTs}-${taskTs}-${collectionTs}-${manualAdTs}-${campaignTs}-${opsSig}`;
 }

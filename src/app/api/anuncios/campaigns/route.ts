@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { loadStoreCampaignsLive } from "@/lib/ad-campaign-live";
+import { getCachedStoreCampaignsView } from "@/lib/ad-campaigns-cache";
 import {
   authErrorResponse,
   requireUser,
@@ -22,7 +22,12 @@ export async function GET(request: Request) {
     await requireWorkspaceStore(user, storeId, { activeOnly: true });
 
     const syncFirst = searchParams.get("sync") === "1";
-    const view = await loadStoreCampaignsLive(storeId, { syncFirst });
+    const view = await getCachedStoreCampaignsView(storeId, {
+      period: searchParams.get("period"),
+      from: searchParams.get("from"),
+      to: searchParams.get("to"),
+      dates: searchParams.get("dates"),
+    }, { syncFirst });
 
     return NextResponse.json(view, {
       headers: { "Cache-Control": "private, no-store" },

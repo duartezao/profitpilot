@@ -39,3 +39,17 @@ export function isAdSpendTodayOpenForStore(
 ): boolean {
   return dateKey === todayKeyForStore(storeTimeZone, now);
 }
+
+/**
+ * A API pode escrever gasto num dia se for hoje, ou se for um dia passado
+ * ainda sem registo em ManualAdSpend (preencher lacunas no sync da loja).
+ */
+export function canApiWriteAdSpendForStore(
+  dateKey: string,
+  storeTimeZone: string | null | undefined,
+  hasExistingRecord: boolean,
+  now = new Date(),
+): boolean {
+  if (isAdSpendTodayOpenForStore(dateKey, storeTimeZone, now)) return true;
+  return !hasExistingRecord;
+}

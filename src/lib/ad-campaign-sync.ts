@@ -2,9 +2,14 @@ import "server-only";
 import type { Types } from "mongoose";
 import { AdCampaignDay } from "@/models/AdCampaignDay";
 import {
+  ensureAdCampaignDayIndexes,
+  isMongoDuplicateKeyError,
+} from "@/lib/ad-campaign-indexes";
+import {
   credentialTokenForPlatform,
   decryptAdCredentials,
-  loadActiveAdAccounts,
+  googleLoginCustomerIdFromCreds,
+  loadSyncAdAccountsForStore,
   markAdAccountSync,
   type AdAccountCredentials,
 } from "@/lib/ad-accounts";
@@ -39,6 +44,7 @@ async function fetchCampaignRows(
         token,
         externalAccountId,
         dateKey,
+        googleLoginCustomerIdFromCreds(creds),
       );
     case "tiktok":
       return fetchTiktokCampaignInsightsForDay(
@@ -51,6 +57,58 @@ async function fetchCampaignRows(
   }
 }
 
+async function upsertOneCampaignRow(
+  workspaceId: Types.ObjectId,
+  storeId: Types.ObjectId,
+  adAccountId: Types.ObjectId,
+  platform: AdPlatform,
+  dateKey: string,
+  row: CampaignRow,
+  allocationPct: number,
+): Promise<void> {
+  const alloc = allocationPct / 100;
+  const campaignId = row.campaignId;
+  // Totais do dia vindos da API — substituição ($set), nunca soma incremental.
+  const setFields = {
+    workspaceId,
+    adAccountId,
+    campaignName: row.campaignName,
+    spend: row.spend * alloc,
+    currency: row.currency,
+    impressions: Math.round(row.impressions * alloc),
+    clicks: Math.round(row.clicks * alloc),
+    conversions: row.conversions * alloc,
+    conversionValue: row.conversionValue * alloc,
+    status: row.status ?? "",
+    statusLabel: row.statusLabel ?? "",
+    syncedAt: new Date(),
+  };
+
+  const byAccount = { storeId, adAccountId, platform, dateKey, campaignId };
+
+  const onAccount = await AdCampaignDay.findOneAndUpdate(
+    byAccount,
+    { $set: setFields },
+  );
+  if (onAccount) return;
+
+  const onLegacy = await AdCampaignDay.findOneAndUpdate(
+    { storeId, platform, dateKey, campaignId },
+    { $set: setFields },
+  );
+  if (onLegacy) return;
+
+  try {
+    await AdCampaignDay.create({ ...byAccount, ...setFields });
+  } catch (e) {
+    if (!isMongoDuplicateKeyError(e)) throw e;
+    await AdCampaignDay.updateOne(
+      { storeId, platform, dateKey, campaignId },
+      { $set: setFields },
+    );
+  }
+}
+
 async function upsertCampaignRows(
   workspaceId: Types.ObjectId,
   storeId: Types.ObjectId,
@@ -60,35 +118,34 @@ async function upsertCampaignRows(
   rows: CampaignRow[],
   allocationPct: number,
 ): Promise<number> {
-  const alloc = allocationPct / 100;
-  let count = 0;
+  const syncedIds: string[] = [];
 
   for (const row of rows) {
-    await AdCampaignDay.findOneAndUpdate(
-      {
-        storeId,
-        platform,
-        dateKey,
-        campaignId: row.campaignId,
-      },
-      {
-        $set: {
-          workspaceId,
-          adAccountId,
-          campaignName: row.campaignName,
-          spend: row.spend * alloc,
-          currency: row.currency,
-          impressions: Math.round(row.impressions * alloc),
-          clicks: Math.round(row.clicks * alloc),
-          syncedAt: new Date(),
-        },
-      },
-      { upsert: true },
+    syncedIds.push(row.campaignId);
+    await upsertOneCampaignRow(
+      workspaceId,
+      storeId,
+      adAccountId,
+      platform,
+      dateKey,
+      row,
+      allocationPct,
     );
-    count++;
   }
 
-  return count;
+  // Resposta vazia da API não apaga o que já estava na BD (evita perder campanhas ao actualizar).
+  if (!rows.length) return 0;
+
+  // Só remove órfãos desta conta — não apaga histórico de contas antigas/desligadas.
+  await AdCampaignDay.deleteMany({
+    storeId,
+    adAccountId,
+    platform,
+    dateKey,
+    campaignId: { $nin: syncedIds },
+  });
+
+  return syncedIds.length;
 }
 
 export type CampaignSyncResult = {
@@ -97,11 +154,13 @@ export type CampaignSyncResult = {
   campaignsSynced: number;
 };
 
-/** Sincroniza métricas por campanha (spend, impressões, cliques) para um dia. */
+/** Sincroniza métricas por campanha (spend, conversões, ROAS) para um dia. */
 export async function syncAdCampaignMetricsForStoreDay(
   storeId: string,
   dateKey: string,
 ): Promise<CampaignSyncResult> {
+  await ensureAdCampaignDayIndexes();
+
   const { Store } = await import("@/models/Store");
   const store = await Store.findById(storeId)
     .select("workspaceId")
@@ -110,22 +169,14 @@ export async function syncAdCampaignMetricsForStoreDay(
     return { storeId, dateKey, campaignsSynced: 0 };
   }
 
-  const accounts = await loadActiveAdAccounts(store._id);
+  const accounts = await loadSyncAdAccountsForStore(store._id);
   if (!accounts.length) {
     return { storeId, dateKey, campaignsSynced: 0 };
   }
 
-  const accountByPlatform = new Map<AdPlatform, (typeof accounts)[number]>();
-  for (const acc of accounts) {
-    const platform = acc.platform as AdPlatform;
-    if (!accountByPlatform.has(platform)) {
-      accountByPlatform.set(platform, acc);
-    }
-  }
-
   let campaignsSynced = 0;
 
-  for (const acc of accountByPlatform.values()) {
+  for (const acc of accounts) {
     const platform = acc.platform as AdPlatform;
     try {
       const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
@@ -153,4 +204,19 @@ export async function syncAdCampaignMetricsForStoreDay(
   }
 
   return { storeId, dateKey, campaignsSynced };
+}
+
+/** Sincroniza campanhas para vários dias (ex. últimos 7). */
+export async function syncAdCampaignMetricsForStoreDays(
+  storeId: string,
+  dateKeys: string[],
+): Promise<CampaignSyncResult> {
+  let campaignsSynced = 0;
+  const sorted = [...new Set(dateKeys)].sort();
+  for (const dateKey of sorted) {
+    const r = await syncAdCampaignMetricsForStoreDay(storeId, dateKey);
+    campaignsSynced += r.campaignsSynced;
+  }
+  const last = sorted[sorted.length - 1] ?? "";
+  return { storeId, dateKey: last, campaignsSynced };
 }

@@ -21,8 +21,13 @@ describe("applyLineUnitPrice", () => {
 });
 
 describe("applyLineUnitCost", () => {
-  it("mantém snapshot quando já existe custo na linha", () => {
+  it("usa custo resolvido pela data quando disponível", () => {
     const resolve = () => 99;
+    assert.equal(applyLineUnitCost("v1", new Date(), 12, resolve), 99);
+  });
+
+  it("mantém snapshot quando o custo resolvido é zero", () => {
+    const resolve = () => 0;
     assert.equal(applyLineUnitCost("v1", new Date(), 12, resolve), 12);
   });
 

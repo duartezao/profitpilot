@@ -3,20 +3,15 @@
 import { useActionState, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { RefreshCw } from "lucide-react";
 import type { AdAccountRow } from "@/lib/ad-accounts";
 import {
   addAdAccountAction,
   consumeMetaOAuthTokenAction,
   discoverAdAccountsAction,
-  syncAdAccountsNowAction,
-  updateAdAccountFeesAction,
   type AdAccountActionState,
   type AdAccountsDiscoverState,
 } from "@/app/(app)/anuncios/ad-account-actions";
-import { DeleteAdAccountButton } from "@/components/anuncios/delete-ad-account-button";
 import { AD_PLATFORM_LABELS, type AdPlatform } from "@/lib/ad-spend-platforms";
-import { CollapsibleSection } from "@/components/collapsible-section";
 import { hrefOAuthStart } from "@/lib/scope-query";
 
 const API_PLATFORMS = ["meta", "tiktok"] as const satisfies readonly AdPlatform[];
@@ -55,14 +50,16 @@ export function AdAccountsPanel({
   accounts,
   canEdit,
   onChanged,
+  embedded = false,
 }: {
   storeId: string;
   accounts: AdAccountRow[];
   canEdit: boolean;
   onChanged?: () => void;
+  /** Sem lista de contas ligadas (mostrada no pai). */
+  embedded?: boolean;
 }) {
   const searchParams = useSearchParams();
-  const apiAccounts = accounts.filter((a) => a.platform !== "google");
   const [addState, addAction, adding] = useActionState<
     AdAccountActionState,
     FormData
@@ -76,9 +73,7 @@ export function AdAccountsPanel({
   const [oauthMsg, setOauthMsg] = useState<string | null>(null);
   const [linkedLoginEmail, setLinkedLoginEmail] = useState("");
 
-  const errorCount = apiAccounts.filter((a) => a.status === "error").length;
   const selected = discovered.find((a) => a.id === selectedId);
-
   const metaOAuthStart = hrefOAuthStart(
     "/api/oauth/meta/start",
     storeId,
@@ -103,8 +98,8 @@ export function AdAccountsPanel({
           setLinkedLoginEmail(pending.loginEmail ?? "");
           setOauthMsg(
             pending.loginEmail
-              ? `Meta ligada como ${pending.loginEmail} — clica em Procurar contas.`
-              : "Token Meta recebido — clica em Procurar contas.",
+              ? `Meta: ${pending.loginEmail} — procura contas abaixo.`
+              : "Token Meta recebido — procura contas abaixo.",
           );
         }
       });
@@ -129,264 +124,142 @@ export function AdAccountsPanel({
       if (list.length === 1) setSelectedId(list[0].id);
       setOauthMsg(
         list.length
-          ? `Escolhe a conta (${list.length} encontrada${list.length === 1 ? "" : "s"}).`
-          : "Nenhuma conta encontrada com este token.",
+          ? `${list.length} conta${list.length === 1 ? "" : "s"} encontrada${list.length === 1 ? "" : "s"}.`
+          : "Nenhuma conta com este token.",
       );
     });
   }
 
+  if (!canEdit) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Sem permissão para ligar contas.
+      </p>
+    );
+  }
+
   return (
-    <CollapsibleSection
-      id="contas-ads"
-      title="Meta e TikTok (API)"
-      description="Sync automático opcional. Google está no bloco acima ou usa gasto manual."
-      defaultOpen={apiAccounts.length === 0 || errorCount > 0}
-      badge={
-        apiAccounts.length > 0 ? (
-          <span
-            className={`rounded-md border px-2 py-0.5 text-xs font-medium ${
-              errorCount > 0
-                ? "border-negative/40 bg-negative/10 text-negative"
-                : "border-border text-muted-foreground"
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {API_PLATFORMS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => {
+              setPlatform(p);
+              setDiscovered([]);
+              setSelectedId("");
+              setDiscoverError(null);
+              setOauthMsg(null);
+            }}
+            className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+              platform === p
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-border text-muted-foreground hover:bg-muted"
             }`}
           >
-            {apiAccounts.length} ligada{apiAccounts.length === 1 ? "" : "s"}
-            {errorCount > 0 ? ` · ${errorCount} erro` : ""}
-          </span>
-        ) : undefined
-      }
-    >
-      {canEdit && (
-        <div className="space-y-4 border-b border-border pb-4">
-          <div className="flex flex-wrap gap-2">
-            {API_PLATFORMS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => {
-                  setPlatform(p);
-                  setDiscovered([]);
-                  setSelectedId("");
-                  setDiscoverError(null);
-                  setOauthMsg(null);
-                }}
-                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
-                  platform === p
-                    ? "border-accent bg-accent/10 text-accent"
-                    : "border-border text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {AD_PLATFORM_LABELS[p]}
-              </button>
-            ))}
-          </div>
+            {AD_PLATFORM_LABELS[p]}
+          </button>
+        ))}
+      </div>
 
-          {platform === "meta" && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Link
-                href={metaOAuthStart}
-                className="rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"
-              >
-                Ligar com Meta (OAuth)
-              </Link>
-              <span className="text-xs text-muted-foreground">
-                ou cola System User token
-              </span>
-            </div>
-          )}
+      {platform === "meta" && (
+        <Link
+          href={metaOAuthStart}
+          className="inline-flex rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"
+        >
+          Login Meta (OAuth)
+        </Link>
+      )}
 
-          {oauthMsg && (
-            <p className="text-sm text-muted-foreground">{oauthMsg}</p>
-          )}
+      {oauthMsg && (
+        <p className="text-sm text-muted-foreground">{oauthMsg}</p>
+      )}
 
-          {addState.error && (
-            <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
-              {addState.error}
-            </p>
-          )}
-          {addState.ok && (
-            <p className="rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-sm text-positive">
-              Conta ligada.
-            </p>
-          )}
+      {addState.error && (
+        <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
+          {addState.error}
+        </p>
+      )}
+      {addState.ok && (
+        <p className="rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-sm text-positive">
+          Conta ligada.
+        </p>
+      )}
+
+      <div>
+        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+          {platform === "meta" ? "Access token" : "Token TikTok"}
+        </label>
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          autoComplete="off"
+          className={inputCls}
+          placeholder={platform === "meta" ? "EAA… ou OAuth acima" : "Token TikTok"}
+        />
+        <button
+          type="button"
+          disabled={discovering || token.trim().length < 10}
+          onClick={runDiscover}
+          className="mt-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+        >
+          {discovering ? "A procurar…" : "Procurar contas"}
+        </button>
+        {discoverError && (
+          <p className="mt-2 text-sm text-negative">{discoverError}</p>
+        )}
+        {!discoverError && discovered.length === 0 && token.trim().length >= 10 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Conta partilhada não aparece? Confirma que o token é do utilizador que
+            aceitou o convite no Business Manager e que tens permissão ads_read.
+          </p>
+        )}
+      </div>
+
+      {discovered.length > 0 && (
+        <form action={addAction} className="space-y-3 rounded-lg border border-border p-4">
+          <input type="hidden" name="storeId" value={storeId} />
+          <input type="hidden" name="platform" value={platform} />
+          <input type="hidden" name="linkedLoginEmail" value={linkedLoginEmail} />
+          <input type="hidden" name="accessToken" value={token} />
 
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              {platform === "meta" ? "Access token" : "Token TikTok"}
+              Escolher conta
             </label>
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              autoComplete="off"
+            <select
+              name="externalAccountId"
+              required
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
               className={inputCls}
-              placeholder={platform === "meta" ? "EAA…" : "Token TikTok"}
-            />
-            <button
-              type="button"
-              disabled={discovering || token.trim().length < 10}
-              onClick={runDiscover}
-              className="mt-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
             >
-              {discovering ? "A procurar…" : "Procurar contas"}
-            </button>
-            {discoverError && (
-              <p className="mt-2 text-sm text-negative">{discoverError}</p>
-            )}
+              <option value="">Seleciona…</option>
+              {discovered.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.id}) · {a.currency}
+                  {a.inactive ? " · inactiva" : ""}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {discovered.length > 0 && (
-            <form action={addAction} className="space-y-3">
-              <input type="hidden" name="storeId" value={storeId} />
-              <input type="hidden" name="platform" value={platform} />
-              <input
-                type="hidden"
-                name="linkedLoginEmail"
-                value={linkedLoginEmail}
-              />
-              <input type="hidden" name="accessToken" value={token} />
-
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Conta
-                </label>
-                <select
-                  name="externalAccountId"
-                  required
-                  value={selectedId}
-                  onChange={(e) => setSelectedId(e.target.value)}
-                  className={inputCls}
-                >
-                  <option value="">Escolhe uma conta…</option>
-                  {discovered.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.id}) · {a.currency}
-                      {a.inactive ? " · inactiva" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Nome na app (opcional)
-                  </label>
-                  <input
-                    name="accountName"
-                    defaultValue={selected?.name}
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Alocação (%)
-                  </label>
-                  <input
-                    name="allocation"
-                    type="number"
-                    min={1}
-                    max={100}
-                    defaultValue={100}
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-start gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  name="replacePlatformAccount"
-                  value="true"
-                  defaultChecked
-                  className="mt-1"
-                />
-                <span>
-                  Substituir outra conta {AD_PLATFORM_LABELS[platform]} desta loja.
-                </span>
-              </label>
-
-              <button
-                type="submit"
-                disabled={adding || !selectedId}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
-              >
-                {adding ? "A ligar…" : "Ligar conta"}
-              </button>
-            </form>
-          )}
-        </div>
+          <button
+            type="submit"
+            disabled={adding || !selectedId}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
+          >
+            {adding ? "A ligar…" : "Ligar conta"}
+          </button>
+        </form>
       )}
 
-      {apiAccounts.length === 0 ? (
+      {!embedded && accounts.filter((a) => a.platform !== "google").length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Nenhuma conta Meta/TikTok API — o gasto pode ficar só manual.
+          Nenhuma conta Meta/TikTok ligada.
         </p>
-      ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border">
-          {apiAccounts.map((a) => (
-            <li
-              key={a.id}
-              className="flex flex-wrap items-start justify-between gap-3 p-4"
-            >
-              <div className="min-w-0">
-                <p className="font-medium">{a.platformLabel}</p>
-                <p className="text-sm text-muted-foreground" data-sensitive>
-                  {a.accountName || a.externalAccountId}
-                </p>
-                {a.linkedLoginEmail && (
-                  <p className="text-xs text-muted-foreground" data-sensitive>
-                    Login: {a.linkedLoginEmail}
-                  </p>
-                )}
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {a.externalAccountId}
-                  {a.lastSyncError && (
-                    <span className="text-negative"> — {a.lastSyncError}</span>
-                  )}
-                </p>
-              </div>
-              {canEdit && (
-                <div className="flex items-center gap-2">
-                  <SyncNowButton storeId={storeId} />
-                  <DeleteAdAccountButton
-                    accountId={a.id}
-                    onDeleted={onChanged}
-                  />
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </CollapsibleSection>
-  );
-}
-
-function SyncNowButton({ storeId }: { storeId: string }) {
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <div className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        disabled={pending}
-        title="Sincronizar agora"
-        className="rounded-md border border-border p-2 text-muted-foreground hover:bg-muted disabled:opacity-50"
-        onClick={() => {
-          setError(null);
-          startTransition(async () => {
-            const res = await syncAdAccountsNowAction(storeId);
-            if (res.error) setError(res.error);
-          });
-        }}
-      >
-        <RefreshCw className={`h-4 w-4 ${pending ? "animate-spin" : ""}`} />
-      </button>
-      {error && (
-        <span className="max-w-[140px] text-right text-[10px] text-negative">
-          {error}
-        </span>
       )}
     </div>
   );

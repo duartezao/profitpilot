@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ProfitChart } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
@@ -25,6 +25,11 @@ import {
 import { parsePortfolioParam } from "@/lib/portfolio-scope";
 import type { DashboardSummary } from "@/lib/metrics";
 import type { PortfolioSummary } from "@/lib/portfolio-metrics";
+import {
+  AD_API_SYNC_INTERVAL_MS,
+  LIVE_DATA_POLL_MS,
+} from "@/lib/ad-sync-constants";
+import { LastSyncBadge } from "@/components/last-sync-badge";
 
 function summaryApiUrl(params: URLSearchParams): string {
   const q = new URLSearchParams(periodQueryFromSearchParams(params));
@@ -57,13 +62,14 @@ async function fetchPortfolio(
 
 export function DashboardClient() {
   const { workspaceId } = useWorkspace();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
   const portfolioParam = searchParams.get("portfolio");
   const isPortfolio = parsePortfolioParam(portfolioParam) !== null;
   const period = periodFromSearchParams(searchParams);
 
-  const { data, isError, isFetching, dataUpdatedAt } = useQuery<
+  const { data, isError, isFetching } = useQuery<
     DashboardSummary | PortfolioSummary
   >({
     queryKey: isPortfolio
@@ -74,7 +80,33 @@ export function DashboardClient() {
         ? fetchPortfolio(searchParams)
         : fetchSummary(searchParams),
     placeholderData: (prev) => prev,
-    refetchInterval: 120 * 1000,
+    staleTime: LIVE_DATA_POLL_MS - 10_000,
+    refetchInterval: LIVE_DATA_POLL_MS,
+  });
+
+  useQuery({
+    queryKey: ["ad-intraday-sync", workspaceId, storeId],
+    queryFn: async () => {
+      if (!storeId) return null;
+      const res = await fetch(
+        `/api/anuncios/sync-today?store=${encodeURIComponent(storeId)}`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as { synced?: boolean };
+      if (body.synced) {
+        await queryClient.invalidateQueries({
+          queryKey: ["metrics-summary", workspaceId, storeId],
+        });
+        await queryClient.invalidateQueries({
+          queryKey: ["ad-campaigns", storeId],
+        });
+      }
+      return body;
+    },
+    enabled: Boolean(storeId) && !isPortfolio,
+    refetchInterval: AD_API_SYNC_INTERVAL_MS,
+    staleTime: AD_API_SYNC_INTERVAL_MS - 60_000,
   });
 
   const portfolioData =
@@ -88,26 +120,11 @@ export function DashboardClient() {
   const periodLabel =
     workspaceData?.storeDashboard?.periodLabel ?? period.label;
 
-  const updatedAt = dataUpdatedAt
-    ? new Date(dataUpdatedAt).toLocaleTimeString("pt-PT")
-    : null;
+  const lastSyncedAt =
+    portfolioData?.lastSyncedAt ?? workspaceData?.lastSyncedAt ?? null;
 
   const liveBadge = (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span className="relative flex h-2 w-2">
-        <span
-          className={
-            isFetching
-              ? "absolute inline-flex h-full w-full animate-ping rounded-full bg-positive opacity-75"
-              : "hidden"
-          }
-        />
-        <span className="relative inline-flex h-2 w-2 rounded-full bg-positive" />
-      </span>
-      <span className="tabular-nums">
-        {updatedAt ? `Ao vivo · ${updatedAt}` : "A ligar…"}
-      </span>
-    </div>
+    <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
   );
 
   if (isPortfolio) {

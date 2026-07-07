@@ -2,7 +2,6 @@ import "server-only";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { syncStore } from "@/lib/shopify-sync";
-import { syncApiAdSpendForStore } from "@/lib/ad-spend-sync";
 import { getGlobalSyncIntervalMinutes } from "@/lib/sync-config";
 
 // Evita execuções sobrepostas no mesmo processo (ex. dev com instrumentation).
@@ -70,7 +69,6 @@ export async function runDueSyncs(): Promise<DueSyncResult> {
 
       try {
         await syncStore(String(s._id));
-        await syncApiAdSpendForStore(String(s._id));
         await Store.updateOne({ _id: s._id }, { lastSyncError: null });
         result.synced++;
       } catch (e) {

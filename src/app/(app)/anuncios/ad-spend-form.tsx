@@ -1,12 +1,13 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { saveManualAdSpendAction, type AdSpendState } from "./actions";
 import { Sensitive } from "@/components/privacy-mode";
 import {
   AdSpendPlatformFields,
   type PlatformDefaults,
 } from "./ad-spend-platform-fields";
+import type { AdPlatform } from "@/lib/ad-spend-platforms";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
@@ -17,6 +18,8 @@ export function AdSpendForm({
   storeName,
   baseCurrency,
   defaultDate,
+  todayKey,
+  apiLinkedPlatforms = [],
   platformDefaults,
   defaultCurrency = "USD",
   minDate,
@@ -28,6 +31,8 @@ export function AdSpendForm({
   storeName: string;
   baseCurrency: string;
   defaultDate: string;
+  todayKey: string;
+  apiLinkedPlatforms?: AdPlatform[];
   platformDefaults?: PlatformDefaults;
   defaultCurrency?: string;
   minDate?: string;
@@ -36,10 +41,13 @@ export function AdSpendForm({
   /** Dentro de CollapsibleSection — sem cabeçalho duplicado. */
   embedded?: boolean;
 }) {
+  const [selectedDate, setSelectedDate] = useState(defaultDate);
   const [state, action, pending] = useActionState<AdSpendState, FormData>(
     saveManualAdSpendAction,
     {},
   );
+
+  const isToday = selectedDate === todayKey;
 
   useEffect(() => {
     if (state.ok || state.conflict) {
@@ -91,7 +99,8 @@ export function AdSpendForm({
         <input
           name="date"
           type="date"
-          defaultValue={defaultDate}
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
           min={minDate}
           disabled={!canEdit}
           className={inputCls}
@@ -99,11 +108,20 @@ export function AdSpendForm({
         />
       </div>
 
+      {isToday && apiLinkedPlatforms.length > 0 && (
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          Hoje ({todayKey}): plataformas com conta API sincronizam sozinhas —
+          inclui fees no custo dos ads. Preenche só o que for manual.
+        </p>
+      )}
+
       <AdSpendPlatformFields
         defaults={platformDefaults}
         inputCurrency={defaultCurrency}
         disabled={!canEdit}
         showZeroOption={canEdit}
+        apiLinkedPlatforms={apiLinkedPlatforms}
+        lockedDate={isToday}
       />
 
       <div>

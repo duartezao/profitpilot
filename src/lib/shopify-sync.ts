@@ -1633,6 +1633,10 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
 
   try {
     await syncApiAdSpendForStore(storeId);
+    const { syncMissingAdMetricsForStore } = await import("@/lib/ad-metrics-backfill");
+    await syncMissingAdMetricsForStore(storeId, {
+      maxDays: incremental ? 14 : 45,
+    });
   } catch (e) {
     console.error("[sync] ad spend api", e);
   }

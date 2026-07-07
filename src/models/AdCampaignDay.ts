@@ -32,13 +32,19 @@ const AdCampaignDaySchema = new Schema(
     currency: { type: String, default: "USD" },
     impressions: { type: Number, min: 0, default: 0 },
     clicks: { type: Number, min: 0, default: 0 },
+    conversions: { type: Number, min: 0, default: 0 },
+    /** Valor de conversão (receita atribuída) na moeda da conta. */
+    conversionValue: { type: Number, min: 0, default: 0 },
+    status: { type: String, trim: true, default: "" },
+    statusLabel: { type: String, trim: true, default: "" },
     syncedAt: { type: Date, default: () => new Date() },
   },
   { timestamps: true },
 );
 
+/** Uma linha por conta API + campanha + dia — histórico preservado ao trocar de conta. */
 AdCampaignDaySchema.index(
-  { storeId: 1, platform: 1, dateKey: 1, campaignId: 1 },
+  { storeId: 1, adAccountId: 1, platform: 1, dateKey: 1, campaignId: 1 },
   { unique: true },
 );
 

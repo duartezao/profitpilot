@@ -19,8 +19,10 @@ import {
 import {
   GoogleAdsApiError,
   googleAdsServerConfigStatus,
+  isGooglePermissionError,
   listGoogleAdAccounts,
   resolveGoogleCustomerIdLocal,
+  resolveGoogleLoginCustomerId,
   verifyGoogleAdAccountAccess,
   type GoogleAdAccountOption,
 } from "@/lib/google-ads";
@@ -70,6 +72,7 @@ const addSchema = z
     apiAgencyFeePercent: z.coerce.number().min(0).max(100).optional(),
     linkedLoginEmail: z.string().trim().max(200).optional(),
     googleCredentialId: z.string().trim().optional(),
+    googleLoginCustomerId: z.string().trim().max(32).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.platform === "google") {
@@ -98,7 +101,13 @@ async function verifyPlatformAccount(
   externalAccountId: string,
   accessToken?: string,
   refreshToken?: string,
-): Promise<{ name: string; currency: string; externalAccountId?: string }> {
+  googleLoginCustomerId?: string,
+): Promise<{
+  name: string;
+  currency: string;
+  externalAccountId?: string;
+  loginCustomerId?: string;
+}> {
   switch (platform) {
     case "meta":
       return verifyMetaAdAccountAccess(accessToken!, externalAccountId);
@@ -111,7 +120,35 @@ async function verifyPlatformAccount(
           externalAccountId: local.id,
         };
       }
-      return verifyGoogleAdAccountAccess(refreshToken!, externalAccountId);
+      try {
+        return await verifyGoogleAdAccountAccess(
+          refreshToken!,
+          externalAccountId,
+          googleLoginCustomerId,
+        );
+      } catch (e) {
+        const msg = e instanceof GoogleAdsApiError ? e.message : String(e);
+        if (!isGooglePermissionError(msg)) throw e;
+
+        let loginCustomerId: string | undefined;
+        try {
+          loginCustomerId = await resolveGoogleLoginCustomerId(
+            refreshToken!,
+            externalAccountId,
+            googleLoginCustomerId,
+          );
+        } catch {
+          /* ignora */
+        }
+
+        const local = resolveGoogleCustomerIdLocal(externalAccountId);
+        return {
+          name: local.name,
+          currency: "EUR",
+          externalAccountId: local.id,
+          loginCustomerId,
+        };
+      }
     case "tiktok":
       return verifyTiktokAdvertiserAccess(accessToken!, externalAccountId);
     default:
@@ -146,6 +183,7 @@ export async function addAdAccountAction(
     apiAgencyFeePercent: formData.get("apiAgencyFeePercent") || 0,
     linkedLoginEmail: formData.get("linkedLoginEmail") || undefined,
     googleCredentialId: formData.get("googleCredentialId") || undefined,
+    googleLoginCustomerId: formData.get("googleLoginCustomerId") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -166,6 +204,7 @@ export async function addAdAccountAction(
     apiAgencyFeePercent,
     linkedLoginEmail,
     googleCredentialId,
+    googleLoginCustomerId,
   } = parsed.data;
 
   let refreshTokenResolved = refreshToken?.trim() ?? "";
@@ -192,12 +231,18 @@ export async function addAdAccountAction(
       externalAccountId,
       accessToken,
       platform === "google" ? refreshTokenResolved : refreshToken,
+      googleLoginCustomerId,
     );
     const externalIdResolved =
       verified.externalAccountId ?? externalAccountId.trim();
     const credentials =
       platform === "google"
-        ? { refreshToken: refreshTokenResolved }
+        ? {
+            refreshToken: refreshTokenResolved,
+            ...(verified.loginCustomerId
+              ? { loginCustomerId: verified.loginCustomerId }
+              : {}),
+          }
         : { accessToken: accessToken!.trim() };
 
     await createAdAccount({
@@ -251,7 +296,13 @@ export async function discoverGoogleCredentialAction(
     credentialId,
   );
   if (!cred) return { error: "Login Google não encontrado." };
-  return discoverAdAccountsAction("google", cred.refreshToken);
+  const res = await discoverAdAccountsAction("google", cred.refreshToken);
+  if (res.error && cred.loginEmail) {
+    return {
+      error: `${res.error} (Gmail usado: ${cred.loginEmail})`,
+    };
+  }
+  return res;
 }
 
 export async function saveWorkspaceGoogleLoginAction(
@@ -308,7 +359,7 @@ export async function discoverAdAccountsAction(
       if (!accounts.length) {
         return {
           error:
-            "Nenhuma ad account Meta encontrada. Confirma ads_read e acesso no Business Manager.",
+            "Nenhuma ad account Meta encontrada. Confirma ads_read, que o convite foi aceite, e que o token é do utilizador que recebeu o acesso (ou System User com permissão).",
         };
       }
       return { platform, meta: accounts };
@@ -323,7 +374,8 @@ export async function discoverAdAccountsAction(
       const accounts = await listGoogleAdAccounts(trimmed);
       if (!accounts.length) {
         return {
-          error: "Nenhuma conta Google Ads encontrada com este refresh token.",
+          error:
+            "Nenhuma conta Google Ads listada com este Gmail — confirma que é o mesmo que aceitou o convite, ou usa Customer ID manual.",
         };
       }
       return { platform, google: accounts };
@@ -408,7 +460,13 @@ export async function syncAdAccountsNowAction(
   if (!user?.workspaceId) return { error: "Sessão inválida." };
   assertStoreAccess(user.storeAccess, storeId);
   try {
-    await syncAdAccountsSpendForStore(storeId);
+    const { Store } = await import("@/models/Store");
+    const { dateKeyInTimezone, normalizeStoreTimezone } =
+      await import("@/lib/store-timezone");
+    const store = await Store.findById(storeId).select("ianaTimezone").lean();
+    const tz = normalizeStoreTimezone(store?.ianaTimezone);
+    const today = dateKeyInTimezone(new Date(), tz);
+    await syncAdAccountsSpendForStore(storeId, { campaignDateKeys: [today] });
     revalidatePath("/anuncios");
     revalidatePath("/definicoes");
     return { ok: true };

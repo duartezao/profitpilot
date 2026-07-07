@@ -28,6 +28,7 @@ import {
 import { canAccessStore, type StoreAccess } from "@/lib/store-access";
 import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import { sumManualCashByStores } from "@/lib/cash-entries";
+import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
 
 const INCOMING_PAYOUT_STATUSES = new Set([
   "pending",
@@ -133,6 +134,7 @@ export type WorkspaceTreasury = {
   incomingByDay: IncomingDayLine[];
   receivedByDay: IncomingDayLine[];
   generatedAt: string;
+  lastSyncedAt: string | null;
 };
 
 function normStatus(s?: string | null) {
@@ -402,6 +404,7 @@ export async function buildWorkspaceTreasury(
     incomingByDay: [],
     receivedByDay: [],
     generatedAt: new Date().toISOString(),
+    lastSyncedAt: null,
   };
   if (!workspaceId) return empty;
 
@@ -684,6 +687,9 @@ export async function buildWorkspaceTreasury(
   const manualInTotal = sum("manualIn");
   const manualOutTotal = sum("manualOut");
   const shopifyPendingTotal = sum("shopifyPending");
+  const lastSyncedAt = await resolveLastSyncedAtForStoreIds(
+    stores.map((s) => String(s._id)),
+  );
 
   return {
     currency,
@@ -716,5 +722,6 @@ export async function buildWorkspaceTreasury(
     incomingByDay: allIncomingByDay,
     receivedByDay: allReceivedByDay,
     generatedAt: new Date().toISOString(),
+    lastSyncedAt,
   };
 }

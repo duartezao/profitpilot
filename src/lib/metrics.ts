@@ -97,6 +97,7 @@ import {
   type SessionFunnelMetrics,
 } from "@/lib/session-metrics";
 import { getStoreDisplayUrl } from "@/lib/store-display";
+import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
 import {
   calcNetProfit,
   contributionMarginPct,
@@ -315,6 +316,8 @@ export type DashboardSummary = {
   profitWindowNote: string;
   /** ISO timestamp de quando os dados foram calculados. */
   generatedAt: string;
+  /** ISO do último sync (Shopify, sessões, payouts, ads API). */
+  lastSyncedAt: string | null;
   /** Metas mensais (MTD vs objectivo), se configuradas. */
   monthlyGoals: import("@/lib/monthly-goals").MonthlyGoalsProgress | null;
   /** Modo operação → impacto no financeiro (exclusões, lembretes). */
@@ -2218,6 +2221,7 @@ function emptySummary(currency = "EUR"): DashboardSummary {
     profitWindowStatus: "provisional",
     profitWindowNote: profitWindowNote("provisional", 30),
     monthlyGoals: null,
+    lastSyncedAt: null,
   };
 }
 
@@ -3154,6 +3158,11 @@ export async function buildWorkspaceSummary(
     fmtMoney,
   );
 
+  const syncStoreIds = storeId
+    ? [storeId]
+    : accessibleStores.map((s) => String(s._id));
+  const lastSyncedAt = await resolveLastSyncedAtForStoreIds(syncStoreIds);
+
   return {
     kpis,
     stores: sortedStores,
@@ -3176,6 +3185,7 @@ export async function buildWorkspaceSummary(
     profitWindowStatus,
     profitWindowNote: profitWindowNoteText,
     generatedAt: new Date().toISOString(),
+    lastSyncedAt,
     monthlyGoals: await buildMonthlyGoalsProgress(
       workspaceId,
       storeId,
