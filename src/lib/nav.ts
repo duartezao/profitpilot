@@ -30,10 +30,12 @@ export type NavItem = {
   icon: LucideIcon;
 };
 
-/**
- * Visão consolidada — mockup `assets/mockup-dashboard-consolidado.png`
- * Sidebar: Dashboard, Lojas, Lucro & Finanças, Payouts, Decisão, Notas, Anúncios, Definições
- */
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+/** Visão consolidada (todas as lojas). */
 export const workspaceNavItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Lojas", href: "/lojas", icon: Store },
@@ -45,29 +47,24 @@ export const workspaceNavItems: NavItem[] = [
   { label: "Definições", href: "/definicoes", icon: Settings },
 ];
 
-/**
- * Vista por loja — mockup `assets/mockup-dashboard-loja.png`
- * Sidebar: Dashboard, Métricas, Resumo, Produtos, Pedidos, Payouts, Anúncios, Reembolsos, Custos, Relatórios, Alertas, Configurações
- */
+/** Vista por loja — mesmos nomes que no consolidado quando a rota é igual. */
 export const storeNavItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Métricas", href: "/metricas", icon: BarChart3 },
-  { label: "Resumo", href: "/financas", icon: ClipboardList },
+  { label: "Lucro & Finanças", href: "/financas", icon: LineChart },
+  { label: "Decisão", href: "/decisao", icon: Scale },
   { label: "Produtos", href: "/produtos", icon: Package },
   { label: "Pedidos", href: "/pedidos", icon: ShoppingBag },
-  { label: "Payouts", href: "/payouts", icon: Banknote },
   { label: "Anúncios", href: "/anuncios", icon: Megaphone },
+  { label: "Payouts", href: "/payouts", icon: Banknote },
   { label: "Reembolsos", href: "/reembolsos", icon: RotateCcw },
   { label: "Chargebacks", href: "/chargebacks", icon: ShieldAlert },
   { label: "Custos", href: "/cogs", icon: Boxes },
-  { label: "Relatórios", href: "/notas", icon: NotebookPen },
+  { label: "Notas", href: "/notas", icon: NotebookPen },
   { label: "Alertas", href: "/alertas", icon: Bell },
-  { label: "Configurações", href: "/definicoes", icon: Settings },
+  { label: "Definições", href: "/definicoes", icon: Settings },
 ];
 
-/**
- * Modo operação — pipeline de lojas, coleções e produtos em teste.
- */
 export const operationsNavItems: NavItem[] = [
   { label: "Hoje", href: "/operacao", icon: Kanban },
   { label: "Tarefas", href: "/operacao/tarefas", icon: ListTodo },
@@ -87,6 +84,8 @@ export const storeRequiredPaths = new Set([
   "/pedidos",
   "/reembolsos",
   "/chargebacks",
+  "/cogs",
+  "/alertas",
 ]);
 
 export function navItemsForStoreScope(
@@ -97,7 +96,66 @@ export function navItemsForStoreScope(
   return storeId ? storeNavItems : workspaceNavItems;
 }
 
-/** Item especial da barra inferior — abre o menu com o resto das páginas. */
+/** Sidebar agrupada — mais fácil de escanear. */
+export function navGroupsForStoreScope(
+  storeId: string | null,
+  viewMode: AppViewMode = "financial",
+): NavGroup[] {
+  if (viewMode === "operations") {
+    return [{ label: "", items: operationsNavItems }];
+  }
+  if (!storeId) {
+    return [{ label: "", items: workspaceNavItems }];
+  }
+  const pick = (...hrefs: string[]) =>
+    storeNavItems.filter((i) => hrefs.includes(i.href));
+  return [
+    {
+      label: "Resumo",
+      items: pick("/dashboard", "/metricas", "/financas", "/decisao"),
+    },
+    {
+      label: "Operação",
+      items: pick(
+        "/produtos",
+        "/pedidos",
+        "/anuncios",
+        "/payouts",
+        "/reembolsos",
+        "/chargebacks",
+        "/cogs",
+      ),
+    },
+    {
+      label: "Relatórios",
+      items: pick("/notas", "/alertas"),
+    },
+    {
+      label: "Conta",
+      items: pick("/definicoes"),
+    },
+  ].filter((g) => g.items.length > 0);
+}
+
+/** Mantém a rota ao mudar de loja quando faz sentido. */
+export function pathAllowedForStoreScope(
+  pathname: string,
+  storeId: string | null,
+  viewMode: AppViewMode = "financial",
+): boolean {
+  if (viewMode === "operations") {
+    return operationsNavItems.some(
+      (i) => pathname === i.href || pathname.startsWith(`${i.href}/`),
+    );
+  }
+  if (storeId && workspaceOnlyPaths.has(pathname)) return false;
+  if (!storeId && storeRequiredPaths.has(pathname)) return false;
+  const items = navItemsForStoreScope(storeId, viewMode);
+  return items.some(
+    (i) => pathname === i.href || pathname.startsWith(`${i.href}/`),
+  );
+}
+
 export const MOBILE_MORE_HREF = "__more__";
 
 export const mobileMoreNavItem: NavItem = {
@@ -110,7 +168,7 @@ export function isMobileMoreNavItem(item: NavItem): boolean {
   return item.href === MOBILE_MORE_HREF;
 }
 
-/** Itens fixos na barra inferior (telemóvel). */
+/** Barra inferior — prioridade às tarefas diárias. */
 export function mobilePrimaryNavItems(
   storeId: string | null,
   viewMode: AppViewMode = "financial",
@@ -126,8 +184,8 @@ export function mobilePrimaryNavItems(
   if (storeId) {
     return [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "Métricas", href: "/metricas", icon: BarChart3 },
-      { label: "Produtos", href: "/produtos", icon: Package },
+      { label: "Anúncios", href: "/anuncios", icon: Megaphone },
+      { label: "Decisão", href: "/decisao", icon: Scale },
       mobileMoreNavItem,
     ];
   }
@@ -139,7 +197,6 @@ export function mobilePrimaryNavItems(
   ];
 }
 
-/** Restantes páginas da sidebar — acessíveis pelo menu «Mais». */
 export function mobileOverflowNavItems(
   storeId: string | null,
   viewMode: AppViewMode = "financial",
@@ -151,6 +208,22 @@ export function mobileOverflowNavItems(
       .map((i) => i.href),
   );
   return all.filter((i) => !primaryHrefs.has(i.href));
+}
+
+/** Secções do menu «Mais» (mobile). */
+export function mobileOverflowNavGroups(
+  storeId: string | null,
+  viewMode: AppViewMode = "financial",
+): NavGroup[] {
+  const overflow = new Set(
+    mobileOverflowNavItems(storeId, viewMode).map((i) => i.href),
+  );
+  return navGroupsForStoreScope(storeId, viewMode)
+    .map((g) => ({
+      label: g.label,
+      items: g.items.filter((i) => overflow.has(i.href)),
+    }))
+    .filter((g) => g.items.length > 0);
 }
 
 export function mobileNavForStoreScope(

@@ -36,14 +36,14 @@ export function SettingsNav({
   return (
     <nav
       aria-label="Secções de definições"
-      className="flex flex-wrap gap-2 rounded-lg border border-border bg-surface p-3"
+      className="sticky top-14 z-30 -mx-3 flex gap-2 overflow-x-auto border-b border-border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:rounded-lg sm:border sm:p-3"
     >
       {visible.map((l) => (
         <a
           key={l.id}
           href={`#${l.id}`}
           className={cn(
-            "rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
+            "shrink-0 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
         >
           {l.label}

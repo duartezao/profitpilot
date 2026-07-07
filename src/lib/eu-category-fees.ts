@@ -3,6 +3,14 @@ import type { Types } from "mongoose";
 import { EuCategoryFeeDay } from "@/models/EuCategoryFeeDay";
 import { Order } from "@/models/Order";
 import {
+  EU_CATEGORY_FEE_EFFECTIVE_FROM,
+  type EuCategoryFeeEntry,
+} from "@/lib/eu-category-fees-types";
+export {
+  EU_CATEGORY_FEE_EFFECTIVE_FROM,
+  type EuCategoryFeeEntry,
+} from "@/lib/eu-category-fees-types";
+import {
   getBaseCurrency,
   isCogsInputCurrency,
   resolveCogsRange,
@@ -16,9 +24,6 @@ import {
 import type { PeriodSlice } from "@/lib/ad-spend";
 import { startOfDay, addDays, formatDateInput, parseDateInput } from "@/lib/period";
 import type { CogsMode } from "@/lib/cogs-modes";
-
-/** Shopify EU: 3 € por categoria por encomenda — vigência global. */
-export const EU_CATEGORY_FEE_EFFECTIVE_FROM = "2026-06-29";
 
 export function isEuCategoryFeeDay(dateKey: string): boolean {
   return dateKey >= EU_CATEGORY_FEE_EFFECTIVE_FROM;
@@ -44,6 +49,28 @@ function resolveEuCategoryFeeRange(
     };
   }
   return range;
+}
+
+export async function listRecentEuCategoryFees(
+  storeId: Types.ObjectId,
+  baseCurrency: string,
+  limit = 24,
+): Promise<EuCategoryFeeEntry[]> {
+  const rows = await EuCategoryFeeDay.find({ storeId })
+    .sort({ dateKey: -1 })
+    .limit(limit)
+    .lean();
+
+  return rows.map((r) => ({
+    dateKey: r.dateKey,
+    label: formatDayLabel(r.dateKey),
+    amount: r.amount,
+    inputAmount: r.inputAmount ?? null,
+    inputCurrency: r.inputCurrency ?? null,
+    fxRate: r.fxRate ?? null,
+    note: r.note ?? "",
+    baseCurrency,
+  }));
 }
 
 export type EuCategoryFeeRow = {

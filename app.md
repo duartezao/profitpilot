@@ -356,7 +356,7 @@ Net Profit =
 * Importar COGS via **CSV** (modos `shopify` / `variant`)
 * **COGS por encomenda** — `manualCogs` na order, convertido para moeda base; lucro usa este valor em vez da soma das linhas.
 * **COGS por dia** — coleção `manualCogsDays` (espelho do ad spend manual); um valor por dia com vendas.
-* **Taxas EU por categoria (Shopify)** — nos modos `shopify` e `variant`, painel em `/cogs` para registar o **total diário** da taxa de 3 € por categoria por encomenda (vendas UE). Coleção `euCategoryFeeDays`. **Vigência desde 2026-06-29** — dias e encomendas anteriores não entram no painel nem no COGS. Soma ao COGS do dia no lucro e na % de COGS. Podes guardar **0** se não houve taxa ou já está incluída no custo do produto.
+* **Taxas EU por categoria (Shopify)** — taxa de 3 € por categoria por encomenda (vendas UE), cobrada na fatura Shopify. Coleção `euCategoryFeeDays`. **Vigência desde 2026-06-29**. Soma ao COGS do dia no lucro. **Fluxo simples no overview** (Dashboard da loja, Métricas, Notas): escolhes o dia da fatura + valor (+ nota opcional); **não é obrigatório** preencher todos os dias com vendas — só quando recebes a fatura. Podes usar **0** se não houve taxa. Já não está na página `/cogs` (evita confusão com COGS por produto/dia).
 * **COGS histórico** — coleção `cogsHistory` com versões por variante (`effectiveFrom` / `effectiveTo`). O lucro de cada encomenda usa o custo válido na **data da venda**; quando o fornecedor muda o preço, só se ajustam vendas a partir de `effectiveFrom` (não se reescreve o passado antes dessa data).
 * **Fornecedor externo (ex. Primeflow → Shopify)** — custo/preço entra via `InventoryItem.unitCost` e `variant.price` na Shopify. Quando o fornecedor faz desconto, a app regista `effectiveFrom` com `inventoryItem.updatedAt` / `variant.updatedAt` (quando a Shopify actualizou), não a hora do nosso sync. Cada sync rever variantes **já vendidas** para apanhar alterações tardias; `assimilatePendingCogsForStore` corrige encomendas a partir dessa data.
 * **Preço de venda histórico** — coleção `priceHistory` com o mesmo modelo de vigência. Cada linha de encomenda guarda `unitPrice` e `unitCost` no momento da importação; re-syncs não sobrescrevem snapshots já confirmados (>0). O backfill `backfillOrderLinePricesForStore` repõe preços antigos a partir do `originalUnitPriceSet` da Shopify (correção de dados importados antes desta regra).
@@ -1822,8 +1822,10 @@ Pipeline operacional de dropshipping.
 
 * **Desktop (`lg+`)**: sidebar **fixa** à esquerda (`AppSidebar`, altura `h-dvh`); **só a coluna principal faz scroll** (`layout.tsx`: `lg:h-dvh lg:overflow-hidden` + `lg:overflow-y-auto` no conteúdo). Lista de nav com scroll interno se for longa. Topbar fixa no topo da coluna (sticky).
 * **Telemóvel e tablet (`< lg`)**: sidebar oculta; **barra inferior fixa** (`BottomNav`) com itens principais + menu «Mais»; padding inferior no `main` para não tapar conteúdo.
-* **Seletor global** na topbar: workspace, loja (filtrada por período no modo financeiro se loja matada), portfolio multi-workspace, período (oculto em modo operação), toggle modo financeiro/operação.
+* **Seletor global** na topbar: workspace, loja (filtrada por período no modo financeiro se loja matada), portfolio multi-workspace (tablet+; oculto no telemóvel para reduzir confusão), período (oculto em modo operação), toggle modo financeiro/operação.
 * **Troca de modo**: navegação optimista para o hub correcto (`/dashboard` vs `/operacao`); `ScopeRouteGuard` e `ScopeSync` mantêm `?store=` coerente.
+* **Sidebar (loja seleccionada)**: grupos Resumo / Operação / Relatórios / Conta (`navGroupsForStoreScope`).
+* **Mudar loja**: mantém a rota actual quando a página é válida para o novo scope (ex. `/metricas` → outra loja fica em `/metricas`).
 
 ## Secções principais (menu)
 
@@ -1835,7 +1837,7 @@ Pipeline operacional de dropshipping.
 4. **Lucro & Finanças** — lucro real, taxas, P&L, saúde financeira, tesouraria.
 5. **Payouts** — quanto e quando recebes.
 6. **Decisão** — "o que fazer hoje", kill/scale, recomendações.
-7. **Notas & Relatórios** — diário, relatório diário automático, exportações.
+7. **Notas** — diário, relatório diário automático, exportações.
 8. **Anúncios** — ad spend por plataforma/campanha.
 9. **Definições** — conta, workspaces, equipa, lojas, capital.
 
@@ -1904,7 +1906,7 @@ Pipeline operacional de dropshipping.
 
 * App em ecrã inteiro (sem barra do browser), instalada no telemóvel.
 * KPIs empilhados, gráfico compacto, lista de lojas como cartões.
-* **Navegação inferior** (`< lg`): Dashboard, Lojas, Decisão, Mais (modo financeiro) ou Hoje, Tarefas, Coleções, Mais (modo operação).
+* **Navegação inferior** (`< lg`): consolidado — Dashboard, Lojas, Decisão, Mais; com loja — Dashboard, Anúncios, Decisão, Mais; modo operação — Hoje, Tarefas, Coleções, Mais. Menu «Mais» agrupado por secção.
 * Áreas de toque grandes, números tabulares legíveis.
 
 > Estes mockups são a base; podem ser refinados, mas a linguagem visual (sobriedade, flat, sem emojis/gradientes) é obrigatória.

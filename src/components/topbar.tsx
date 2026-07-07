@@ -75,32 +75,19 @@ export function Topbar({
     <header className="sticky top-0 z-50 shrink-0 overflow-visible border-b border-border bg-background">
       {/* Telemóvel + tablet — barra inferior como navegação principal até lg */}
       <div className="flex flex-col gap-2 overflow-visible px-3 py-2 sm:px-4 lg:hidden">
-        {/* Telemóvel: workspace + portfolio */}
-        <div className="grid min-w-0 grid-cols-2 gap-2 md:hidden">
-          <Suspense
-            fallback={
-              <div className="h-9 rounded-lg border border-border bg-muted" />
-            }
-          >
-            <WorkspaceSelector
-              workspaces={workspaces}
-              currentId={user.workspaceId}
-              menuPlacement="bottom"
-              className="min-w-0"
-            />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div className="h-9 rounded-lg border border-border bg-muted" />
-            }
-          >
-            <PortfolioScopeSelector
-              workspaces={workspaces}
-              userId={user.id}
-              className="min-w-0"
-            />
-          </Suspense>
-        </div>
+        {/* Telemóvel: só workspace — portfolio fica no tablet+ */}
+        <Suspense
+          fallback={
+            <div className="h-9 rounded-lg border border-border bg-muted md:hidden" />
+          }
+        >
+          <WorkspaceSelector
+            workspaces={workspaces}
+            currentId={user.workspaceId}
+            menuPlacement="bottom"
+            className="min-w-0 md:hidden"
+          />
+        </Suspense>
 
         {/* Telemóvel: loja em linha própria */}
         <Suspense

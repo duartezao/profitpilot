@@ -2,17 +2,31 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { MetricasClient } from "./metricas-client";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
+import { ShopifyExtraFeesSection } from "@/components/dashboard/shopify-extra-fees-section";
 import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
 import { getMetricPanelPreferencesForUser } from "@/lib/metric-panel-prefs";
 
 export const metadata: Metadata = { title: "Métricas" };
 
-function ReportSection({ storeId }: { storeId: string }) {
+function OverviewSection({ storeId }: { storeId: string }) {
   return (
-    <Suspense fallback={<div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />}>
-      <DailyReportPanel storeId={storeId} />
-    </Suspense>
+    <div className="space-y-4">
+      <Suspense
+        fallback={
+          <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
+        }
+      >
+        <ShopifyExtraFeesSection storeId={storeId} />
+      </Suspense>
+      <Suspense
+        fallback={
+          <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
+        }
+      >
+        <DailyReportPanel storeId={storeId} />
+      </Suspense>
+    </div>
   );
 }
 
@@ -46,7 +60,7 @@ export default async function MetricasPage({
       }
     >
       <div className="mx-auto max-w-7xl space-y-6">
-        {showReport && storeId && <ReportSection storeId={storeId} />}
+        {showReport && storeId && <OverviewSection storeId={storeId} />}
         <MetricasClient initialPanelPrefs={initialPanelPrefs} />
       </div>
     </Suspense>

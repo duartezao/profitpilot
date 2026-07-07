@@ -9,6 +9,7 @@ import { canAccessStore } from "@/lib/store-access";
 import { formatDateInput } from "@/lib/period";
 import { DailyNoteForm } from "./daily-note-form";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
+import { ShopifyExtraFeesSection } from "@/components/dashboard/shopify-extra-fees-section";
 import { CollapsibleSection } from "@/components/collapsible-section";
 
 export const metadata: Metadata = { title: "Notas & Relatórios" };
@@ -95,9 +96,22 @@ export default async function NotasPage({
       )}
 
       {scoped && (
-        <Suspense fallback={<div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />}>
-          <DailyReportPanel storeId={String(scoped._id)} />
-        </Suspense>
+        <div className="space-y-4">
+          <Suspense
+            fallback={
+              <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
+            }
+          >
+            <ShopifyExtraFeesSection storeId={String(scoped._id)} />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
+            }
+          >
+            <DailyReportPanel storeId={String(scoped._id)} />
+          </Suspense>
+        </div>
       )}
 
       <CollapsibleSection
