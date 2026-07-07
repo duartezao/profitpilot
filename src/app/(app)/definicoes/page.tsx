@@ -389,6 +389,8 @@ export default async function DefinicoesPage() {
                             normalizeSessionCountry(s.analyticsSessionCountry) ?? "",
                           cogsMode: (s.cogsMode ?? "shopify") as CogsMode,
                           cogsInputCurrency: s.cogsInputCurrency ?? "EUR",
+                          externalGatewayPayoutBusinessDays:
+                            s.externalGatewayPayoutBusinessDays ?? null,
                         }}
                       />
                       <FeeSchedulePanel

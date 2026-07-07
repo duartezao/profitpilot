@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { DailyMetric } from "@/models/DailyMetric";
 import { Dispute } from "@/models/Dispute";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import { Order } from "@/models/Order";
 import { fetchStoreDayFinancials } from "@/lib/metrics";
 import {
@@ -65,11 +66,13 @@ async function buildDayMetricPayload(
   const dayEnd = new Date(dateKey + "T23:59:59.999");
 
   const [orders, chargebackAgg, adRow, expenseRows] = await Promise.all([
-    Order.countDocuments({
-      workspaceId: wsOid,
-      storeId: storeOid,
-      orderDate: { $gte: dayStart, $lte: dayEnd },
-    }),
+    Order.countDocuments(
+      mergePaidOrderFilter({
+        workspaceId: wsOid,
+        storeId: storeOid,
+        orderDate: { $gte: dayStart, $lte: dayEnd },
+      }),
+    ),
     Dispute.aggregate<{ total: number }>([
       {
         $match: {

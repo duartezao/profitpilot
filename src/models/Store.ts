@@ -46,6 +46,9 @@ const SyncStateSchema = new Schema(
     resultSummary: { type: String, default: null },
     startedAt: { type: Date, default: null },
     updatedAt: { type: Date, default: null },
+    /** Reimportação total de encomendas (mantém COGS/ads). */
+    fullOrderResync: { type: Boolean, default: false },
+    ordersResyncManualCogs: { type: Schema.Types.Mixed, default: null },
   },
   { _id: false },
 );
@@ -109,6 +112,16 @@ const StoreSchema = new Schema(
     // para o "tenho € ou não?" desta loja.
     startingBalance: { type: Number, default: 0 },
     startingBalanceDate: { type: Date },
+    /**
+     * Gateway externo (Multibanco, PayPal, etc.): dias úteis após cada encomenda
+     * paga até o dinheiro cair na conta. null/0 = não projectar (só Shopify Payments).
+     */
+    externalGatewayPayoutBusinessDays: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 60,
+    },
     lastSyncAt: { type: Date },
     /** Rotação incremental: próximo lote de variantes vendidas a rever no catálogo. */
     catalogRefreshOffset: { type: Number, default: 0 },

@@ -83,7 +83,9 @@ export function TreasuryClient() {
             title: scopeStore.cashOnHandTitle,
           },
           {
-            label: "A receber (Shopify)",
+            label: scopeStore.externalGatewayPayoutBusinessDays
+              ? "A receber"
+              : "A receber (Shopify)",
             value: scopeStore.shopifyPendingFmt,
             title: scopeStore.shopifyPendingTitle,
           },
@@ -228,9 +230,10 @@ export function TreasuryClient() {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Saldo em conta = saldo inicial + payouts recebidos − COGS − envio − ad
-            spend (desde o início da loja). Quando a Shopify marca o payout como
-            pago, o valor entra em «recebido» após sincronizar.
+            Saldo em conta = saldo inicial + recebido − COGS − envio − ad spend
+            (desde o início da loja). Shopify Payments: entra em «recebido» quando
+            o payout está pago. Gateway externo: projectado em Definições → dias
+            úteis após cada encomenda paga.
           </p>
 
           <div className="rounded-lg border border-border bg-surface">
@@ -250,8 +253,8 @@ export function TreasuryClient() {
             <div className="border-b border-border p-5">
               <h2 className="text-lg font-semibold">A caminho, por dia</h2>
               <p className="text-sm text-muted-foreground">
-                Payouts agendados e vendas pendentes — totais por dia, não por
-                transação.
+                Payouts agendados, vendas pendentes na Shopify e entradas
+                projectadas do gateway externo — totais por dia.
               </p>
             </div>
             <IncomingTimeline

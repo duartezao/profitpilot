@@ -8,7 +8,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 
 * **Visão consolidada** — ver todas as lojas ao mesmo tempo num único dashboard, e fazer drill-down loja a loja.
 * **Histórico permanente** — guardar todos os dados (mesmo de lojas removidas ou de plataformas que cancelaste), sem depender da retenção limitada da Shopify/WooCommerce.
-* **Lucro real (Net Profit)** — não apenas revenue bruto, mas o lucro depois de COGS, envio, taxas de pagamento, ad spend, chargebacks, custos de apps e impostos. **REV** nas métricas = vendas líquidas (Shopify Net sales).
+* **Lucro real (Net Profit)** — não apenas revenue bruto, mas o lucro depois de COGS, envio, taxas de pagamento, ad spend, chargebacks, custos de apps e impostos. **REV** nas métricas = vendas líquidas (Shopify Net sales) de encomendas **já pagas** (`paid`, parcialmente pagas/reembolsadas). **Pendentes** (ex. Multibanco à espera) ficam em `/pedidos` mas **não entram** em REV/lucro até pagarem; **expiradas/anuladas** são removidas no sync.
 
 > Alternativa própria ao **Triple Whale** e **Polar Analytics**, focada em dropshipping, com controlo total dos dados.
 
@@ -186,6 +186,7 @@ Futuro:
   * **Snapshots diários**: no máximo 3 dias em falta por execução (30 na primeira sync).
   * Sessões/funil: dias históricos na BD (gzip); só dias em falta ou o dia atual voltam à Shopify.
 * **Sync manual** (`Sincronizar agora` em `/lojas`) — em passos via `POST /api/stores/[storeId]/sync` (20 encomendas por pedido) com **barra de progresso** e cancelar. **Primeira sync**: importação completa desde `importStartDate`. **Syncs seguintes** (`lastSyncAt` definido): só encomendas **novas/alteradas** (`updated_at` desde última sync), custos só de **variantes vendidas em falta**, payouts recentes, sessões em falta + hoje. **Retoma** importação interrompida (mantém cursor/fase). Botão mostra «Atualizar dados» quando já houve sync concluída.
+* **Reimportar encomendas** (Definições → Dados da loja) — `POST /api/stores/[storeId]/sync` com `action: start_orders_resync`: apaga encomendas desde `importStartDate`, reimporta tudo da Shopify (`created_at`), recalcula taxas desde essa data e **mantém** COGS por variante, ad spend, sessões, notas e configurações; repõe COGS manuais por encomenda.
 * Estado de sincronização visível por loja (última sync, erros, atraso)
 
 ### Ligação à Shopify — Client ID + Chave secreta (Client Credentials Grant)
@@ -621,7 +622,7 @@ Principais dificuldades: 0
 |---|---|
 | DIA | Dia selecionado |
 | LOJA | URL público da loja (`displayUrl`, ex. `minhaloja.com`) |
-| REV | Vendas líquidas do dia (subtotal após descontos − reembolsos, alinhado com Shopify Net sales) |
+| REV | Vendas líquidas do dia (subtotal após descontos − reembolsos) — **só encomendas pagas** |
 | COGS | Custo dos produtos vendidos no dia (cost per item × unidades) |
 | REFUNDS | Reembolsos do dia (informativo — já reflectidos na REV) |
 | ADSPEND | Valor **só** quando registado em Anúncios (`manualAdSpend`); dias por preencher mostram `—` e **não** entram no lucro |
@@ -1064,7 +1065,7 @@ Lucro após taxas =
 
 **O que defines à mão para ficar exato:**
 
-* **Saldo inicial (banca) por loja** — defines, **em cada loja**, quanto tens nessa data na **moeda base do workspace** (ex. EUR na conta de payout), não na moeda da loja Shopify; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria. **Retirar banca**: botão com confirmação zera o saldo inicial — tesouraria e finanças deixam de contar esse valor (histórico de vendas mantém-se).
+* **Saldo inicial (banca) por loja** — defines, **em cada loja**, quanto tens nessa data na **moeda base do workspace** (ex. EUR na conta de payout), não na moeda da loja Shopify; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria. **Gateway externo**: campo «Payout gateway externo (dias úteis)» — cada encomenda **paga** entra em «a receber» / «recebido» N dias úteis (seg–sex) após a data da venda (valor ≈ total − reembolsos − taxas). Deixa vazio se usas só Shopify Payments. **Retirar banca**: botão com confirmação zera o saldo inicial — tesouraria e finanças deixam de contar esse valor (histórico de vendas mantém-se).
 * **Injeções de capital** — em Definições → **Capital no negócio**: regista quando depositas ou levantas dinheiro da conta do negócio (com data, valor e confirmação), sem alterar o saldo inicial por engano.
 * **Contas a pagar a fornecedores** — quanto e quando pagas o produto (AliExpress/CJ/etc.), para a saída de caixa ser real. (Em dropshipping é o que mais mexe no caixa.)
 * **Reserva para impostos/IVA** — defines uma % a separar; a app guarda esse valor à parte e mostra o caixa "limpo".
@@ -1288,6 +1289,7 @@ Lucro após taxas =
 * `feeSchedule[]` — histórico: `effectiveFromKey`, `processingPercent`, `processingFixed`, `transactionFeePercent` (taxa só aplica a encomendas desde esse dia; dias anteriores mantêm fees gravados). Se `store.currency` ≠ moeda base do workspace (payout), soma-se automaticamente **+2%** de conversão de moeda Shopify em cada encomenda (`shopifyCurrencyConversionPercent`).
 * `startingBalance` (saldo inicial de caixa **desta loja**, na moeda base do workspace — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
+* `externalGatewayPayoutBusinessDays` (dias úteis até o payout cair na conta quando usas gateway externo — Multibanco, PayPal, etc.; null = só Shopify Payments na tesouraria)
 * `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
 * `ianaTimezone` (fuso IANA da loja, ex. `Europe/Lisbon` — define o dia civil de revenue/orders e **ads**; default `Europe/Lisbon`)
 * `timezoneSource` (`shopify` = sincronizado automaticamente da Shopify no sync; `manual` = override do utilizador em Definições → Lojas, **não é** sobrescrito pelo sync). Volta a `shopify` escolhendo «Automático (Shopify)».
@@ -1383,7 +1385,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `fees` (objeto: `processing`, `transactionFee`, `currencyConversion`, `total`)
 * `feesSource` (real / estimated)
 * `refundedAmount`
-* `financialStatus`
+* `financialStatus` — `pending`/`authorized` guardados mas **excluídos** de REV/lucro; `paid` (e estados com reembolso) contam; `expired`/`voided` apagados no sync
 * `country`
 * `createdAt`
 

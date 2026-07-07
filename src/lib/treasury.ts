@@ -14,6 +14,7 @@ import {
   orderModeCogsSumExpr,
   shippingSumBaseExpr,
 } from "@/lib/order-money";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import type { CogsMode } from "@/lib/cogs-modes";
 import { endOfDay, formatRangeLabel, orderDateMatch } from "@/lib/period";
 import {
@@ -29,6 +30,7 @@ import { canAccessStore, type StoreAccess } from "@/lib/store-access";
 import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import { sumManualCashByStores } from "@/lib/cash-entries";
 import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
+import { buildExternalGatewayTreasury } from "@/lib/external-gateway-treasury";
 
 const INCOMING_PAYOUT_STATUSES = new Set([
   "pending",
@@ -42,8 +44,8 @@ export type IncomingDayLine = {
   dateLabel: string;
   amount: number;
   amountFmt: string;
-  /** Payout agendado vs vendas pendentes vs já recebido. */
-  kind: "payout" | "pending" | "received";
+  /** Payout agendado vs vendas pendentes vs já recebido vs gateway externo. */
+  kind: "payout" | "pending" | "received" | "external_gateway";
   kindLabel: string;
 };
 
@@ -81,10 +83,12 @@ export type StoreTreasuryLine = {
   /** Levantamentos manuais desde `sinceDate`. */
   manualOut: number;
   manualOutFmt: string;
-  /** Por pagar na Shopify + payouts a caminho. */
+  /** Por pagar na Shopify + payouts a caminho + gateway externo projectado. */
   shopifyPending: number;
   shopifyPendingFmt: string;
   shopifyPendingTitle: string;
+  /** Dias úteis configurados para payout de gateway externo (null = só Shopify Payments). */
+  externalGatewayPayoutBusinessDays: number | null;
   /** Saldo em conta ≈ inicial + recebido − saídas conhecidas. */
   cashOnHand: number;
   cashOnHandFmt: string;
@@ -337,7 +341,7 @@ async function sumOrderOutflowsSince(
     const cogsExpr =
       cogsMode === "order" ? orderModeCogsSumExpr : cogsSumBaseExpr;
     const cogsRows = await Order.aggregate<{ cogs: number }>([
-      { $match: { storeId, ...dateMatch } },
+      { $match: mergePaidOrderFilter({ storeId, ...dateMatch }) },
       { $group: { _id: null, cogs: cogsExpr } },
     ]);
     cogs = cogsRows[0]?.cogs ?? 0;
@@ -347,7 +351,7 @@ async function sumOrderOutflowsSince(
   }
 
   const shippingRows = await Order.aggregate<{ shipping: number }>([
-    { $match: { storeId, ...dateMatch } },
+    { $match: mergePaidOrderFilter({ storeId, ...dateMatch }) },
     { $group: { _id: null, shipping: shippingSumBaseExpr } },
   ]);
 
@@ -425,7 +429,7 @@ export async function buildWorkspaceTreasury(
 
   let stores = await Store.find(storeQuery)
     .select(
-      "name currency cogsMode startingBalance startingBalanceDate importStartDate createdAt ianaTimezone paymentsBalance payoutsError",
+      "name currency cogsMode startingBalance startingBalanceDate importStartDate createdAt ianaTimezone paymentsBalance payoutsError externalGatewayPayoutBusinessDays",
     )
     .lean();
 
@@ -588,18 +592,6 @@ export async function buildWorkspaceTreasury(
     );
     const startingBalance = startingBalanceRaw;
 
-    const outflowsTotal = out.cogs + out.shipping + out.adSpend;
-    const manual = manualCashMap.get(sid) ?? { manualIn: 0, manualOut: 0 };
-    const shopifyPending = available + incoming;
-    const cashOnHand =
-      startingBalance +
-      received +
-      manual.manualIn -
-      outflowsTotal -
-      manual.manualOut;
-    const projectedCash = cashOnHand + shopifyPending;
-    const projected = projectedCash;
-
     const incomingByDay = await buildIncomingByDay(
       storePayouts,
       storePendingTx,
@@ -615,6 +607,42 @@ export async function buildWorkspaceTreasury(
       fmtBase,
       payoutToBase,
     );
+
+    const externalDays = s.externalGatewayPayoutBusinessDays ?? null;
+    const externalGateway = await buildExternalGatewayTreasury(
+      s._id,
+      externalDays ?? 0,
+      since,
+      todayKey,
+      s.ianaTimezone ?? null,
+      fmtBase,
+    );
+
+    if (externalGateway) {
+      incoming += externalGateway.incoming;
+      received += externalGateway.received;
+    }
+
+    const mergedIncomingByDay = [
+      ...incomingByDay,
+      ...(externalGateway?.incomingByDay ?? []),
+    ];
+    const mergedReceivedByDay = [
+      ...receivedByDay,
+      ...(externalGateway?.receivedByDay ?? []),
+    ];
+
+    const outflowsTotal = out.cogs + out.shipping + out.adSpend;
+    const manual = manualCashMap.get(sid) ?? { manualIn: 0, manualOut: 0 };
+    const shopifyPending = available + incoming;
+    const cashOnHand =
+      startingBalance +
+      received +
+      manual.manualIn -
+      outflowsTotal -
+      manual.manualOut;
+    const projectedCash = cashOnHand + shopifyPending;
+    const projected = projectedCash;
 
     return {
       storeId: sid,
@@ -657,9 +685,10 @@ export async function buildWorkspaceTreasury(
       projected,
       projectedFmt: formatCurrencyCompact(projected, currency),
       projectedTitle: fmtBase(projected),
-      incomingByDay,
-      receivedByDay,
+      incomingByDay: mergedIncomingByDay,
+      receivedByDay: mergedReceivedByDay,
       payoutsError: s.payoutsError ?? null,
+      externalGatewayPayoutBusinessDays: externalDays,
     };
   }),
   );

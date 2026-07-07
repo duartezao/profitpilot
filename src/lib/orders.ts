@@ -12,6 +12,10 @@ import {
   orderProfitBase,
   orderRefundedBase,
 } from "@/lib/order-money";
+import {
+  mergePaidOrderFilter,
+  orderCountsTowardProfit,
+} from "@/lib/order-financial-status";
 import { Order } from "@/models/Order";
 import type { CurrentUser } from "@/lib/auth";
 import { findStoreForUser } from "@/lib/store-scope";
@@ -101,9 +105,14 @@ function buildStats(
   fmt: (v: number) => string,
   fmtPct: (v: number) => string,
 ): OrderListStats {
-  const count = orders.length;
-  const revenue = orders.reduce((s, o) => s + orderNetRevenueBase(o), 0);
-  const refunded = orders.reduce((s, o) => s + orderRefundedBase(o), 0);
+  const paid = orders.filter((o) =>
+    orderCountsTowardProfit(
+      (o as { financialStatus?: string | null }).financialStatus,
+    ),
+  );
+  const count = paid.length;
+  const revenue = paid.reduce((s, o) => s + orderNetRevenueBase(o), 0);
+  const refunded = paid.reduce((s, o) => s + orderRefundedBase(o), 0);
   const aov = count > 0 ? revenue / count : 0;
   const refundRate = revenue > 0 ? (refunded / revenue) * 100 : 0;
 
@@ -161,8 +170,9 @@ export async function listStoreOrders(
     .lean();
 
   const rows: OrderListRow[] = orders.map((o) => {
-    const profit = orderProfitBase(o);
-    const refunded = orderRefundedBase(o);
+    const counts = orderCountsTowardProfit(o.financialStatus);
+    const profit = counts ? orderProfitBase(o) : 0;
+    const refunded = counts ? orderRefundedBase(o) : 0;
     return {
       id: String(o._id),
       name: o.name ?? "—",
@@ -176,10 +186,10 @@ export async function listStoreOrders(
           })
         : "—",
       financialStatusLabel: statusLabel(o.financialStatus),
-      revenueFmt: fmt(orderNetRevenueBase(o)),
-      profitFmt: fmt(profit),
-      refundedFmt: fmt(refunded),
-      positive: profit >= 0,
+      revenueFmt: counts ? fmt(orderNetRevenueBase(o)) : "—",
+      profitFmt: counts ? fmt(profit) : "—",
+      refundedFmt: counts ? fmt(refunded) : "—",
+      positive: counts ? profit >= 0 : true,
       hasRefund: refunded > 0,
     };
   });
@@ -241,17 +251,20 @@ export async function listStoreOrdersForExport(
     )
     .lean();
 
-  const rows: OrderExportRow[] = orders.map((o) => ({
-    name: o.name ?? "—",
-    orderDateIso: o.orderDate ? new Date(o.orderDate).toISOString() : "",
-    financialStatus: statusLabel(o.financialStatus),
-    revenue: orderNetRevenueBase(o),
-    cogs: o.amountsBase?.cogs ?? o.cogs ?? 0,
-    shipping: o.amountsBase?.shipping ?? o.shipping ?? 0,
-    fees: o.amountsBase?.fees ?? o.fees ?? 0,
-    profit: orderProfitBase(o),
-    refunded: orderRefundedBase(o),
-  }));
+  const rows: OrderExportRow[] = orders.map((o) => {
+    const counts = orderCountsTowardProfit(o.financialStatus);
+    return {
+      name: o.name ?? "—",
+      orderDateIso: o.orderDate ? new Date(o.orderDate).toISOString() : "",
+      financialStatus: statusLabel(o.financialStatus),
+      revenue: counts ? orderNetRevenueBase(o) : 0,
+      cogs: counts ? (o.amountsBase?.cogs ?? o.cogs ?? 0) : 0,
+      shipping: counts ? (o.amountsBase?.shipping ?? o.shipping ?? 0) : 0,
+      fees: counts ? (o.amountsBase?.fees ?? o.fees ?? 0) : 0,
+      profit: counts ? orderProfitBase(o) : 0,
+      refunded: counts ? orderRefundedBase(o) : 0,
+    };
+  });
 
   return {
     rows,
@@ -288,15 +301,17 @@ export async function listStoreRefunds(
   }
 
   const [allInPeriod, refundedOrders] = await Promise.all([
-    Order.find({
-      workspaceId: wsId,
-      storeId: store._id,
-      ...(storeTz
-      ? orderDateMatchInTimezone(period, storeTz)
-      : orderDateMatch(period)),
-    })
+    Order.find(
+      mergePaidOrderFilter({
+        workspaceId: wsId,
+        storeId: store._id,
+        ...(storeTz
+          ? orderDateMatchInTimezone(period, storeTz)
+          : orderDateMatch(period)),
+      }),
+    )
       .select(
-        "totalPrice subtotal netRevenue refunded amountsBase",
+        "financialStatus totalPrice subtotal netRevenue refunded amountsBase cogs shipping fees manualCogs",
       )
       .lean(),
     Order.find({

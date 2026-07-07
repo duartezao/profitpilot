@@ -111,6 +111,14 @@ const storeSchema = z.object({
     ),
   cogsMode: z.enum(COGS_MODES).optional(),
   cogsInputCurrency: z.enum(COGS_INPUT_CURRENCIES).optional(),
+  externalGatewayPayoutBusinessDays: z.preprocess(
+    (v) => {
+      if (v === "" || v === null || v === undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    },
+    z.number().int().min(0).max(60).nullable(),
+  ),
 });
 
 export async function updateStoreSettingsAction(
@@ -136,6 +144,8 @@ export async function updateStoreSettingsAction(
     displayUrl: String(formData.get("displayUrl") ?? ""),
     cogsMode: String(formData.get("cogsMode") ?? ""),
     cogsInputCurrency: String(formData.get("cogsInputCurrency") ?? ""),
+    externalGatewayPayoutBusinessDays:
+      formData.get("externalGatewayPayoutBusinessDays") ?? "",
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -172,6 +182,7 @@ export async function updateStoreSettingsAction(
         displayUrl: normalizeDisplayUrl(d.displayUrl),
         ...(cogsMode ? { cogsMode } : {}),
         ...(cogsInputCurrency ? { cogsInputCurrency } : {}),
+        externalGatewayPayoutBusinessDays: d.externalGatewayPayoutBusinessDays,
       },
     },
   );
@@ -185,6 +196,7 @@ export async function updateStoreSettingsAction(
   revalidatePath("/cogs");
   revalidatePath("/financas");
   revalidatePath("/tesouraria");
+  revalidatePath("/payouts");
   revalidatePath("/metricas");
   revalidatePath("/", "layout");
   return { ok: true };

@@ -11,6 +11,7 @@ import {
 } from "./store-data-actions";
 import type { FeeConfig } from "@/lib/fee-schedule";
 import { DecimalInput } from "@/components/decimal-input";
+import { StoreSyncButton } from "@/components/store-sync-button";
 
 const COMMON_TIMEZONES = [
   "Europe/Lisbon",
@@ -61,6 +62,7 @@ export function StoreDataPanel({
   canDelete: boolean;
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [ordersResyncAck, setOrdersResyncAck] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [ack, setAck] = useState(false);
   const [tzValue, setTzValue] = useState(
@@ -269,6 +271,46 @@ export function StoreDataPanel({
               {reconfigPending ? "A guardar…" : "Guardar reconfiguração"}
             </button>
           </form>
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
+          <div className="flex items-start gap-2">
+            <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">Reimportar encomendas</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Apaga todas as encomendas desde {importFloorKey} e volta a
+                buscá-las à Shopify com estados financeiros actualizados
+                (pendentes expiradas, pagamentos Multibanco, etc.). Mantém
+                custos COGS por variante, ad spend, sessões, notas e
+                configurações da loja. COGS manuais por encomenda são
+                repostos após a reimportação.
+              </p>
+            </div>
+          </div>
+
+          <label className="mt-4 flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={ordersResyncAck}
+              onChange={(e) => setOrdersResyncAck(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-border"
+            />
+            <span className="text-muted-foreground">
+              Compreendo que as encomendas serão apagadas e reimportadas —
+              pode demorar alguns minutos.
+            </span>
+          </label>
+
+          <div className="mt-3">
+            <StoreSyncButton
+              storeId={storeId}
+              mode="orders_resync"
+              disabled={!ordersResyncAck}
+            />
+          </div>
         </div>
       )}
 

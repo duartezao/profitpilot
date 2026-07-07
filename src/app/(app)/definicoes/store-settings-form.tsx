@@ -33,6 +33,7 @@ export type StoreValues = {
   analyticsSessionCountry: string;
   cogsMode: CogsMode;
   cogsInputCurrency: string;
+  externalGatewayPayoutBusinessDays: number | null;
 };
 
 function currencySymbol(currency: string) {
@@ -203,6 +204,33 @@ export function StoreSettingsForm({
               className={inputCls}
             />
           </div>
+        </div>
+        <div className="mt-4">
+          <label className={labelCls}>
+            Payout gateway externo (dias úteis)
+          </label>
+          <input
+            name="externalGatewayPayoutBusinessDays"
+            type="number"
+            min={0}
+            max={60}
+            step={1}
+            defaultValue={
+              store.externalGatewayPayoutBusinessDays != null
+                ? store.externalGatewayPayoutBusinessDays
+                : ""
+            }
+            disabled={!canEdit}
+            className={inputCls}
+            placeholder="Desactivado"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Para Multibanco, PayPal ou outro gateway fora da Shopify Payments:
+            quantos dias úteis (seg–sex) após cada encomenda{" "}
+            <strong className="font-medium">paga</strong> o dinheiro cai na
+            conta. Usado na tesouraria e projeção de «a receber». Deixa vazio
+            se usas só Shopify Payments.
+          </p>
         </div>
         {canEdit &&
           (store.startingBalance !== 0 || Boolean(store.startingBalanceDate)) && (

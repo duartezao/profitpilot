@@ -11,6 +11,10 @@ import {
 import { convertToBaseCurrency } from "@/lib/fx";
 import { buildOrderAmountsBase } from "@/lib/order-money";
 import { orderNetRevenue } from "@/lib/order-revenue";
+import {
+  mergePaidOrderFilter,
+  orderCountsTowardProfit,
+} from "@/lib/order-financial-status";
 import { SHOPIFY_API_VERSION } from "@/lib/shopify";
 import {
   dateKeyInTimezone,
@@ -259,9 +263,9 @@ export async function applyOrderFeesFromShopify(
     ];
   }
 
-  const orders = await Order.find(orderFilter)
+  const orders = await Order.find(mergePaidOrderFilter(orderFilter))
     .select(
-      "shopifyId orderDate totalPrice subtotal refunded shipping cogs manualCogs fees feesSource",
+      "shopifyId orderDate totalPrice subtotal refunded shipping cogs manualCogs fees feesSource financialStatus",
     )
     .lean();
 
@@ -270,6 +274,7 @@ export async function applyOrderFeesFromShopify(
   const bulk: AnyBulkWriteOperation[] = [];
 
   for (const order of orders) {
+    if (!orderCountsTowardProfit(order.financialStatus)) continue;
     const orderDate = new Date(order.orderDate);
     const orderDateKey = dateKeyInTimezone(orderDate, tz);
     const totalPrice = num(order.totalPrice);

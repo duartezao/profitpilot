@@ -12,6 +12,7 @@ import {
   cancelChunkedSync,
   getChunkedSyncStatus,
   runChunkedSyncStep,
+  startChunkedOrdersFullResync,
   startChunkedSync,
 } from "@/lib/store-sync-chunked";
 
@@ -21,7 +22,7 @@ export const maxDuration = 120;
 const ROLES_THAT_CAN_EDIT = ["owner", "admin", "editor"] as const;
 
 const bodySchema = z.object({
-  action: z.enum(["start", "step", "cancel"]),
+  action: z.enum(["start", "start_orders_resync", "step", "cancel"]),
 });
 
 type RouteCtx = { params: Promise<{ storeId: string }> };
@@ -84,6 +85,9 @@ export async function POST(request: Request, ctx: RouteCtx) {
     switch (parsed.data.action) {
       case "start":
         status = await startChunkedSync(storeId);
+        break;
+      case "start_orders_resync":
+        status = await startChunkedOrdersFullResync(storeId);
         break;
       case "step":
         status = await runChunkedSyncStep(storeId);
