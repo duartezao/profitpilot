@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { expenseAmountForPeriod } from "../src/lib/expense-proration.ts";
+import {
+  expenseAmountForDay,
+  expenseAmountForPeriod,
+} from "../src/lib/expense-proration.ts";
 
 describe("expenseAmountForPeriod", () => {
   it("conta despesa pontual só no dia de início", () => {
@@ -29,30 +32,64 @@ describe("expenseAmountForPeriod", () => {
     assert.equal(amount, 0);
   });
 
-  it("rateia mensal por dias do mês", () => {
+  it("mensal cobra uma vez no dia de início do mês", () => {
     const amount = expenseAmountForPeriod(
       {
-        amountBase: 30,
+        amountBase: 21,
         frequency: "monthly",
-        startDateKey: "2026-03-01",
+        startDateKey: "2026-07-06",
       },
-      new Date(2026, 2, 1),
-      new Date(2026, 2, 15),
+      new Date(2026, 6, 1),
+      new Date(2026, 6, 31),
     );
-    assert.ok(amount > 14 && amount < 16);
+    assert.equal(amount, 21);
   });
 
-  it("respeita data de fim", () => {
+  it("mensal não espalha pelos outros dias do mês", () => {
+    const onBilling = expenseAmountForDay(
+      {
+        amountBase: 21,
+        frequency: "monthly",
+        startDateKey: "2026-07-06",
+      },
+      "2026-07-06",
+    );
+    const otherDay = expenseAmountForDay(
+      {
+        amountBase: 21,
+        frequency: "monthly",
+        startDateKey: "2026-07-06",
+      },
+      "2026-07-07",
+    );
+    assert.equal(onBilling, 21);
+    assert.equal(otherDay, 0);
+  });
+
+  it("respeita data de fim na mensal", () => {
     const amount = expenseAmountForPeriod(
       {
         amountBase: 30,
         frequency: "monthly",
-        startDateKey: "2026-03-01",
+        startDateKey: "2026-03-15",
         endDateKey: "2026-03-10",
       },
       new Date(2026, 2, 1),
       new Date(2026, 2, 31),
     );
-    assert.ok(amount > 9 && amount < 11);
+    assert.equal(amount, 0);
+  });
+
+  it("anual cobra na data de aniversário", () => {
+    const amount = expenseAmountForPeriod(
+      {
+        amountBase: 120,
+        frequency: "yearly",
+        startDateKey: "2025-03-10",
+      },
+      new Date(2026, 2, 1),
+      new Date(2026, 2, 31),
+    );
+    assert.equal(amount, 120);
   });
 });

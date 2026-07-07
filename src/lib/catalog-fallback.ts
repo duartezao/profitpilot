@@ -115,12 +115,18 @@ function pickSiblingValue(
 ): number {
   if (!productId) return 0;
   const siblings = ctx.byProduct.get(productId) ?? [];
+  let best = 0;
   for (const sib of siblings) {
     if (sib.variantId === variantId) continue;
     const value = field === "price" ? sib.price : sib.unitCost;
-    if (value > 0) return value;
+    if (value <= 0) continue;
+    if (field === "unitCost") {
+      if (value > best) best = value;
+    } else if (best <= 0) {
+      best = value;
+    }
   }
-  return 0;
+  return best;
 }
 
 /** Preço de venda: variante → outra variante → mínimo do produto. */

@@ -190,13 +190,16 @@ export async function fetchGoogleAdSpendForDay(
     customerId,
     `SELECT metrics.cost_micros, customer.currency_code FROM customer WHERE segments.date = '${dateKey}'`,
   );
-  const row = rows[0];
-  const micros = Number(row?.metrics?.costMicros ?? 0);
+  let micros = 0;
+  let currency = "USD";
+  for (const row of rows) {
+    micros += Number(row?.metrics?.costMicros ?? 0);
+    if (row?.customer?.currencyCode) {
+      currency = row.customer.currencyCode;
+    }
+  }
   const spend = Number.isFinite(micros) ? micros / 1_000_000 : 0;
-  return {
-    spend,
-    currency: row?.customer?.currencyCode ?? "USD",
-  };
+  return { spend, currency };
 }
 
 export type GoogleAdInsightsDay = {
@@ -233,4 +236,53 @@ export async function fetchGoogleAdInsightsForDay(
     clicks: Number(row?.metrics?.clicks ?? 0) || 0,
     currency: row?.customer?.currencyCode ?? "USD",
   };
+}
+
+export type CampaignInsightsRow = {
+  campaignId: string;
+  campaignName: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  currency: string;
+};
+
+/** Insights por campanha num dia. */
+export async function fetchGoogleCampaignInsightsForDay(
+  refreshToken: string,
+  customerId: string,
+  dateKey: string,
+): Promise<CampaignInsightsRow[]> {
+  const accessToken = await refreshGoogleAccessToken(refreshToken);
+  const rows = await googleAdsSearch<{
+    campaign?: { id?: string; name?: string };
+    metrics?: {
+      costMicros?: string;
+      impressions?: string;
+      clicks?: string;
+    };
+    customer?: { currencyCode?: string };
+  }>(
+    accessToken,
+    customerId,
+    `SELECT campaign.id, campaign.name, metrics.cost_micros, metrics.impressions, metrics.clicks, customer.currency_code FROM campaign WHERE segments.date = '${dateKey}'`,
+  );
+
+  const out: CampaignInsightsRow[] = [];
+  for (const row of rows) {
+    const micros = Number(row?.metrics?.costMicros ?? 0);
+    const spend = Number.isFinite(micros) ? micros / 1_000_000 : 0;
+    const impressions = Number(row?.metrics?.impressions ?? 0) || 0;
+    const clicks = Number(row?.metrics?.clicks ?? 0) || 0;
+    if (spend <= 0 && impressions <= 0 && clicks <= 0) continue;
+    out.push({
+      campaignId: String(row?.campaign?.id ?? "").trim() || "unknown",
+      campaignName: row?.campaign?.name?.trim() || "Campanha",
+      spend,
+      impressions,
+      clicks,
+      currency: row?.customer?.currencyCode ?? "USD",
+    });
+  }
+  return out;
 }

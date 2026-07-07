@@ -12,6 +12,16 @@ export type DailyNoteReportFields = {
   obs?: string;
 };
 
+export type DailyNoteApiSnapshot = {
+  cpc?: number | null;
+  ctr?: number | null;
+  cpm?: number | null;
+  currency?: string;
+  bestCampaign?: string;
+  campaignSuggestion?: string;
+  syncedAt?: Date;
+};
+
 const ReportFieldsSchema = new Schema(
   {
     productsTested: { type: String, trim: true, default: "" },
@@ -22,6 +32,19 @@ const ReportFieldsSchema = new Schema(
     dayNumber: { type: String, trim: true, default: "" },
     difficulties: { type: String, trim: true, default: "" },
     obs: { type: String, trim: true, default: "" },
+  },
+  { _id: false },
+);
+
+const ApiSnapshotSchema = new Schema(
+  {
+    cpc: { type: Number, default: null },
+    ctr: { type: Number, default: null },
+    cpm: { type: Number, default: null },
+    currency: { type: String, trim: true, default: "USD" },
+    bestCampaign: { type: String, trim: true, default: "" },
+    campaignSuggestion: { type: String, trim: true, default: "" },
+    syncedAt: { type: Date },
   },
   { _id: false },
 );
@@ -45,6 +68,7 @@ const DailyNoteSchema = new Schema(
       enum: ["good", "bad", "neutral"],
     },
     reportFields: { type: ReportFieldsSchema, default: () => ({}) },
+    apiSnapshot: { type: ApiSnapshotSchema, default: null },
   },
   { timestamps: true },
 );

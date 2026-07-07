@@ -14,7 +14,20 @@ export function scopeQueryFromSearchParams(params: URLSearchParams): string {
 
 export function hrefWithScope(path: string, params: URLSearchParams): string {
   const qs = scopeQueryFromSearchParams(params);
-  return qs ? `${path}?${qs}` : path;
+  if (!qs) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}${qs}`;
+}
+
+/** OAuth start — garante `store` no query string sem URLs inválidas. */
+export function hrefOAuthStart(
+  apiPath: "/api/oauth/google/start" | "/api/oauth/meta/start",
+  storeId: string,
+  params: URLSearchParams,
+): string {
+  const q = new URLSearchParams(scopeQueryFromSearchParams(params));
+  q.set("store", storeId);
+  return `${apiPath}?${q.toString()}`;
 }
 
 export type ScopeInput = PeriodInput & {

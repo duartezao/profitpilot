@@ -320,7 +320,7 @@ Net Profit =
   − Taxas de pagamento (Stripe/PayPal/Shopify Payments)
   − Chargebacks
   − Descontos / cupões (já refletidos na revenue líquida)
-  − Taxas de apps e subscrições (rateadas)
+  − Taxas de apps e subscrições (no dia de cobrança)
   − Impostos (IVA/sales tax, se aplicável)
   − Custos fixos (rateados: domínio, ferramentas, salários)
 ```
@@ -408,22 +408,18 @@ Net Profit =
 
 ## Ligação Google Ads
 
-> Usa a **Google Ads API** ([docs](https://developers.google.com/google-ads/api/rest/auth)). Precisa de 3 coisas: credenciais OAuth, **developer token** e o **customer ID**.
+> Usa a **Google Ads API** ([docs](https://developers.google.com/google-ads/api/rest/auth)). Precisa de credenciais OAuth, **developer token** e o **customer ID**.
 
 1. Criar um projeto no **Google Cloud Console** e gerar **Client ID + Client Secret** (OAuth 2.0), scope `https://www.googleapis.com/auth/adwords`.
 2. Obter um **developer token** no API Center da conta **Google Ads manager (MCC)** (`ads.google.com/aw/apicenter`).
-3. O utilizador autoriza (OAuth) e a app guarda o **refresh token**; o access token é renovado automaticamente (válido ~1h).
-4. Indicar o **customer ID** (10 dígitos) da conta; se for via manager, enviar também o header **`login-customer-id`**.
-5. O spend vem de uma query **GAQL** ao `GoogleAdsService.search`:
+3. Redirect URI: `GOOGLE_ADS_OAUTH_REDIRECT_URI` → `/api/oauth/google/callback`.
+4. Em `/anuncios` → **Ligar com Google (OAuth)** → login → **Procurar contas** → escolher customer ID.
+5. O utilizador autoriza (OAuth) e a app guarda o **refresh token**; o access token é renovado automaticamente.
+6. O gasto vem em **USD** (moeda da conta) e converte para a moeda base do workspace. Query **GAQL** ao `GoogleAdsService.search` (`metrics.cost_micros` ÷ 1.000.000).
+7. **Fees na conta API** — fee fixa extra + % agência; aplicam-se em cada sync automático.
+8. **Trocar conta** — ao ligar outra conta Google na mesma loja, a anterior é desligada; o **histórico de gasto** (`manualAdSpend`) mantém-se.
 
-```
-SELECT campaign.name, metrics.cost_micros, metrics.impressions,
-       metrics.clicks, metrics.ctr, metrics.average_cpc
-FROM campaign
-WHERE segments.date DURING LAST_7_DAYS
-```
-
-> Nota: `metrics.cost_micros` vem em **micros** (1.000.000 micros = 1 unidade de moeda) — a app divide por 1.000.000 para obter o valor real.
+> Nota: `metrics.cost_micros` vem em **micros** (1.000.000 micros = 1 unidade de moeda).
 
 ## Ligação TikTok Ads
 
@@ -433,13 +429,14 @@ WHERE segments.date DURING LAST_7_DAYS
 ## Assistente "Ligar conta de ads" (o que a app mostra)
 
 * Botões **"Ligar Meta"**, **"Ligar Google Ads"**, **"Ligar TikTok"** com guia passo-a-passo.
-* Após autorizar, **lista as ad accounts disponíveis** para a pessoa escolher quais associar (e a que loja).
+* Após autorizar, **lista as ad accounts disponíveis** para a pessoa escolher quais associar à **loja actual**.
+* **OAuth por loja** — cada loja pode usar um email Google/Meta diferente; o token fica guardado só nessa loja (cookies OAuth temporários também são por `storeId`).
 * **Testar ligação** + estado (token válido, último sync, erros) e **reautenticação com 1 clique** quando expira.
 
 ## Várias contas por loja
 * Uma loja pode ter **mais do que uma conta de ads ligada ao mesmo tempo** (ex.: uma conta Meta **e** uma conta Google).
 * Podes ligar **múltiplas contas da mesma plataforma** (ex.: 2 ad accounts Meta para a mesma loja).
-* Cada conta de ads é **associada a uma loja** (ou repartida entre lojas, com % de alocação, caso uma conta sirva várias lojas).
+* Cada conta de ads é **associada a uma loja**; tokens e credenciais **não são partilhados** entre lojas.
 * Vista do ad spend **por plataforma** (quanto foi Meta vs Google vs TikTok) e **somado** no total da loja.
 
 ## Dados recolhidos por conta
@@ -589,7 +586,7 @@ Cada loja deve ter:
 
 > Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
 
-**Estado (implementado):** painel «Resumo» em `/notas`, `/metricas` (loja seleccionada) e na **Dashboard consolidada** (todas as lojas). Ontem por defeito, `?date=YYYY-MM-DD` opcional, com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** quando a loja tem contas de ads ligadas por API (Meta/Google/TikTok). Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
+**Estado (implementado):** painel «Resumo» em `/notas`, `/metricas` (loja seleccionada) e na **Dashboard consolidada** (todas as lojas). Ontem por defeito, `?date=YYYY-MM-DD` opcional, com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** (total + bloco por plataforma Meta/Google/TikTok quando há mais de uma) e **lista das campanhas** (top por spend) quando a loja tem contas API ligadas — dados vindos da coleção `ad_campaign_days` (sync no mesmo ciclo do ad spend). Campos **MELHOR CAMPANHA** e **SUGESTÃO ADS** vêm do snapshot API na nota diária (`apiSnapshot`, preenchido automaticamente no sync). Campos manuais (produtos/coleções testadas, OBS, dificuldades, scale) vêm da **nota diária** dessa loja e dia (`reportFields` + observações). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
 
 **Diário ou semanal (toggle):** o painel «Resumo» tem dois modos. O **diário** gera para o dia escolhido (com campos manuais da nota). O **semanal** (`?period=week`) agrega os **7 dias até à data** escolhida (REV, refunds, ad spend, despesas, profit somados; funil e CPC/CTR/CPM recalculados sobre os totais da semana) — cabeçalho `SEMANA: dd/mm – dd/mm`. Em ambos, na vista consolidada/todas as lojas gera **um bloco por loja** (vista de texto por defeito) e por loja mostra também o cartão visual.
 
@@ -1429,38 +1426,43 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## adAccounts
 
-> Contas de ads ligadas. Uma loja pode ter várias (Meta + Google + TikTok, ou várias da mesma plataforma).
+> Contas de ads ligadas. Uma loja pode ter várias (Meta + Google + TikTok, ou várias da mesma plataforma). **Cada loja tem OAuth independente** — podes usar emails/contas Google ou Meta diferentes por loja; o token fica encriptado na conta (`storeId`), não partilhado no workspace.
 
 * `_id`
-* `storeId` (ou array de storeIds com % de alocação se a conta servir várias lojas)
+* `storeId` (cada ligação é sempre por loja)
 * `platform` (meta / google / tiktok)
 * `externalAccountId` (Meta: `act_<id>` / Google: customer ID 10 dígitos / TikTok: advertiser id)
 * `accountName`
-* `credentials` (encriptado AES-256-GCM — Meta: `accessToken` (system user); Google: `clientId`, `clientSecret`, `refreshToken`, `developerToken`, `loginCustomerId`; TikTok: `accessToken`)
+* `linkedLoginEmail` (email usado no OAuth — informativo)
+* `credentials` (encriptado AES-256-GCM — Meta: `accessToken`; Google: `refreshToken`; TikTok: `accessToken`)
 * `allocation` (% do spend atribuído a esta loja, default 100%)
 * `status` (active / error / disconnected)
 * `lastSyncAt`
 * `createdAt`
 
-## adSpend
+## adSpend / adCampaignDay
 
-> Gasto em ads por dia e por conta/plataforma, para o cálculo do lucro real.
+> Gasto e métricas de ads por dia e por campanha, para relatórios e decisão.
+
+**Implementado** na coleção `ad_campaign_days` (`AdCampaignDay`):
 
 * `_id`
+* `workspaceId`
 * `storeId`
 * `adAccountId`
 * `platform` (meta / tiktok / google)
+* `dateKey` (YYYY-MM-DD)
 * `campaignId`
 * `campaignName`
-* `date`
 * `spend`
 * `impressions`
 * `clicks`
-* `conversions`
 * `currency`
-* `spendBaseCurrency`
+* `syncedAt`
 
-> Guardado ao nível de **campanha + dia**. Os totais por plataforma e por loja são agregados a partir daqui, o que permite tanto a **média por campanha** como o **total (full)** no relatório diário.
+> Guardado ao nível de **campanha + dia** (sync automático quando a conta API sincroniza o spend de hoje). CPC/CTR/CPM são calculados na leitura (`spend/cliques`, etc.). Os totais por plataforma e por loja agregam a partir daqui.
+
+**Pendente (roadmap):** `conversions`, `spendBaseCurrency`, toggle média vs total no UI do relatório.
 
 ## manualAdSpend
 
@@ -1488,7 +1490,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## expenses
 
-> Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário** com rateio diário (mensal/anual). Despesas de workspace aplicam-se a todas as lojas; despesas com `storeId` só à loja indicada.
+> Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário**: **pontual** só no dia indicado; **mensal** uma vez por mês no dia de início (`startDateKey`); **anual** na data de aniversário. Despesas de **workspace** contam no consolidado (não se repartem por loja); despesas com `storeId` só à loja indicada.
 
 * `_id`
 * `workspaceId` (gasto da conta) ou `storeId` (gasto de uma loja)
@@ -1617,6 +1619,7 @@ Pipeline operacional de dropshipping.
 * `mood` (good / bad / neutral, opcional)
 * `attachments` (array de URLs)
 * `reportFields` (campos manuais do relatório diário: `productsTested`, `collectionsTested`, `collectionsTestedList`, `nextCollection`, `bestSellerCollection`, `dayNumber`, `difficulties`, `obs`)
+* `apiSnapshot` (preenchido no sync de ads API: `cpc`, `ctr`, `cpm`, `currency`, `bestCampaign`, `campaignSuggestion`, `syncedAt`)
 * `createdAt`
 
 ## dailyMetrics
@@ -1890,8 +1893,9 @@ Pipeline operacional de dropshipping.
 
 ![Decisão](assets/mockup-decisao.png)
 
-* **"O que fazer hoje"**: 3 ações prioritárias com semáforo (verde/amarelo/vermelho).
-* **Tabela Kill / Scale / Manter**: por produto/campanha, com tag de status, ROAS, BER, Margem, Gasto.
+* **"O que fazer hoje"**: 3 ações prioritárias com semáforo (verde/amarelo/vermelho), incluindo sugestões **scale/descale por campanha** quando há dados API sincronizados.
+* **Tabela Kill / Scale / Manter**: por produto (loja seleccionada) ou por loja (consolidado).
+* **Tabela Campanhas — Scale / Descale** (loja seleccionada, com `ad_campaign_days`): campanha, plataforma, CPC, CTR, CPM, gasto e motivo heurístico.
 * **Card Tesouraria**: Disponível, A caminho, A pagar, Saldo projetado.
 
 ## Mobile (PWA instalada)
@@ -1938,7 +1942,7 @@ Pipeline operacional de dropshipping.
 
 ## Fase 2 — Lucro Real
 * COGS automático da Shopify (cost per item) + manual + CSV + cogsHistory — **feito**
-* Ad spend manual (`/anuncios`) + integração em métricas — **feito**; ligação **Meta / Google / TikTok** API — **feito** (tokens + discover); OAuth Meta redirect — **feito** (`/api/oauth/meta/*`)
+* Ad spend manual (`/anuncios`) + integração em métricas — **feito**; ligação **Meta / Google / TikTok** API — **feito** (tokens + discover); OAuth Meta — **feito** (`/api/oauth/meta/*`); OAuth Google — **feito** (`/api/oauth/google/*`); fees extra por conta API — **feito**
 * Refunds no cálculo e páginas `/pedidos` + `/reembolsos` — **feito**; chargebacks — página `/chargebacks` + sync Shopify Payments disputes — **feito** (entrada no lucro via taxas Shopify; alertas por implementar)
 * Cálculo de Net Profit, margem, ROAS/MER, **BER** e **POAS** nos KPIs estendidos — **feito**
 * Aviso COGS em falta por período + lucro sempre visível + gráfico lucro consolidado + sparklines — **feito**

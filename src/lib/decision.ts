@@ -8,7 +8,21 @@ import {
 } from "@/lib/metrics";
 import { buildWorkspaceTreasury, type WorkspaceTreasury } from "@/lib/treasury";
 import type { PeriodInput } from "@/lib/period";
+import {
+  resolvePeriod,
+  formatDateInput,
+  addDays,
+  startOfDay,
+} from "@/lib/period";
 import type { StoreAccess } from "@/lib/store-access";
+import { loadStoreAdMetricsFromDb } from "@/lib/ad-campaign-metrics";
+import {
+  buildCampaignDecisions,
+  pickBestCampaign,
+  type CampaignDecisionRow,
+} from "@/lib/campaign-decision";
+
+export type { CampaignDecisionRow };
 
 export type DecisionStatus = "scale" | "maintain" | "kill";
 
@@ -33,6 +47,7 @@ export type DecisionSummary = {
   periodLabel: string;
   actions: TodayAction[];
   rows: DecisionRow[];
+  campaignRows: CampaignDecisionRow[];
   treasury: {
     available: string;
     incoming: string;
@@ -111,14 +126,52 @@ function buildStoreRows(
   });
 }
 
+function dayKeysFromPeriod(period: ReturnType<typeof resolvePeriod>): string[] {
+  if (period.specificDates?.length) {
+    return [...period.specificDates].sort().slice(0, 31);
+  }
+  const keys: string[] = [];
+  let cur = startOfDay(period.start);
+  const end = startOfDay(period.end);
+  while (cur <= end && keys.length < 31) {
+    keys.push(formatDateInput(cur));
+    cur = addDays(cur, 1);
+  }
+  return keys;
+}
+
+function buildCampaignActions(rows: CampaignDecisionRow[]): TodayAction[] {
+  const actions: TodayAction[] = [];
+  const best = pickBestCampaign(rows);
+  if (best?.status === "scale") {
+    actions.push({
+      level: "positive",
+      text: `${best.name} (${best.platformLabel}) — scale (+10–15% budget). ${best.reason}`,
+    });
+  }
+  const descale = rows.find((r) => r.status === "descale");
+  if (descale) {
+    actions.push({
+      level: "negative",
+      text: `${descale.name} (${descale.platformLabel}) — descale. ${descale.reason}`,
+    });
+  }
+  return actions;
+}
+
 function buildTodayActions(input: {
   rows: DecisionRow[];
+  campaignRows: CampaignDecisionRow[];
   treasury: WorkspaceTreasury | null;
   storeId?: string;
   missingAdSpendDays: number;
   cogsIncomplete: boolean;
 }): TodayAction[] {
   const actions: TodayAction[] = [];
+
+  if (input.campaignRows.length) {
+    actions.push(...buildCampaignActions(input.campaignRows));
+  }
 
   const scaleRows = input.rows.filter((r) => r.status === "scale");
   if (scaleRows[0]) {
@@ -207,6 +260,7 @@ export async function buildDecisionSummary(
   periodInput?: PeriodInput,
   storeAccess: StoreAccess = "all",
 ): Promise<DecisionSummary> {
+  const period = resolvePeriod(periodInput);
   const [pnl, treasury, productRanking] = await Promise.all([
     buildWorkspacePnl(workspaceId, periodInput, storeId, storeAccess),
     buildWorkspaceTreasury(workspaceId, storeId, storeAccess).catch(() => null),
@@ -214,6 +268,23 @@ export async function buildDecisionSummary(
       ? buildStoreProductRanking(workspaceId, storeId, periodInput, 20)
       : Promise.resolve(null),
   ]);
+
+  let campaignRows: CampaignDecisionRow[] = [];
+  if (storeId) {
+    const dayKeys = dayKeysFromPeriod(period);
+    const metrics = await loadStoreAdMetricsFromDb(storeId, dayKeys);
+    if (metrics?.campaigns.length) {
+      const storeLine = pnl.stores[0];
+      campaignRows = buildCampaignDecisions(metrics.campaigns, {
+        storeRevenue: storeLine?.revenue ?? pnl.totals.revenue,
+        totalAdSpend: storeLine?.adSpend ?? pnl.totals.adSpend,
+      });
+      campaignRows.sort((a, b) => {
+        const order = { descale: 0, maintain: 1, scale: 2 };
+        return order[a.status] - order[b.status];
+      });
+    }
+  }
 
   let rows: DecisionRow[];
   if (storeId && productRanking && productRanking.products.length > 0) {
@@ -230,6 +301,7 @@ export async function buildDecisionSummary(
 
   const actions = buildTodayActions({
     rows,
+    campaignRows,
     treasury,
     storeId,
     missingAdSpendDays: pnl.missingAdSpendDays,
@@ -243,6 +315,7 @@ export async function buildDecisionSummary(
     periodLabel: productRanking?.periodLabel ?? pnl.periodLabel,
     actions,
     rows,
+    campaignRows,
     treasury: treasury ? treasuryCard(treasury, storeId) : null,
     generatedAt: new Date().toISOString(),
   };

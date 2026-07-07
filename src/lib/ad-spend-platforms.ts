@@ -14,6 +14,8 @@ export type AdSpendLineInput = {
   spend: number;
   extraFeeFixed: number;
   agencyFeePercent: number;
+  /** Moeda do gasto desta linha (ex. USD na Google). */
+  inputCurrency?: string;
 };
 
 export type AdSpendLineStored = {

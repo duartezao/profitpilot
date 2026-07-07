@@ -4,18 +4,21 @@ import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { Workspace } from "@/models/Workspace";
 import {
   getTodayDateKey,
-  isAdSpendDayLockedForApi,
-  isAdSpendTodayOpen,
+  isAdSpendDayLockedForApiForStore,
+  isAdSpendTodayOpenForStore,
 } from "@/lib/ad-spend-lock";
 import {
   dateKeyInTimezone,
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
 import {
-  type AdSpendLineInput,
+  type AdSpendLineStored,
   type AdPlatform,
 } from "@/lib/ad-spend-platforms";
-import { buildAdSpendDayFromLines } from "@/lib/ad-spend-save";
+import {
+  buildAdSpendLineFromInput,
+  summarizeAdSpendLines,
+} from "@/lib/ad-spend-save";
 import {
   credentialTokenForPlatform,
   decryptAdCredentials,
@@ -26,6 +29,8 @@ import {
 import { fetchMetaAdSpendForDay } from "@/lib/meta-ads";
 import { fetchGoogleAdSpendForDay } from "@/lib/google-ads";
 import { fetchTiktokAdSpendForDay } from "@/lib/tiktok-ads";
+import { syncAdCampaignMetricsForStoreDay } from "@/lib/ad-campaign-sync";
+import { syncApiMetricsToDailyNote } from "@/lib/ad-note-sync";
 
 export type ApiAdSpendSyncResult = {
   storeId: string;
@@ -34,51 +39,82 @@ export type ApiAdSpendSyncResult = {
   skippedReason?: "no_accounts" | "locked" | "no_data";
 };
 
-async function mergePlatformSpendFromApi(
+type PlatformApiSpend = {
+  spend: number;
+  currency: string;
+  fees: { extraFeeFixed: number; agencyFeePercent: number };
+};
+
+/**
+ * Substitui linhas das plataformas ligadas à API; mantém outras plataformas
+ * e o histórico sem reconverter (idempotente em cada sync).
+ */
+async function upsertApiAdSpendForDay(
   workspaceId: Types.ObjectId,
   storeId: Types.ObjectId,
   dateKey: string,
-  platform: AdPlatform,
-  spendInput: number,
-  inputCurrency: string,
+  storeTimeZone: string | null | undefined,
   baseCurrency: string,
+  apiByPlatform: Map<AdPlatform, PlatformApiSpend>,
 ): Promise<boolean> {
-  if (isAdSpendDayLockedForApi(dateKey) || !isAdSpendTodayOpen(dateKey)) {
+  if (
+    isAdSpendDayLockedForApiForStore(dateKey, storeTimeZone) ||
+    !isAdSpendTodayOpenForStore(dateKey, storeTimeZone)
+  ) {
     return false;
   }
 
+  const apiPlatforms = new Set(apiByPlatform.keys());
   const existing = await ManualAdSpend.findOne({ storeId, dateKey }).lean();
-  const otherLines = (existing?.lines ?? []).filter(
-    (l) => l.platform !== platform,
-  );
 
-  const inputs: AdSpendLineInput[] = otherLines.map((l) => ({
-    platform: l.platform as AdPlatform,
-    spend: l.inputAmount ?? l.amount,
-    extraFeeFixed: l.inputExtraFee ?? 0,
-    agencyFeePercent: l.agencyFeePercent ?? 0,
-  }));
+  const preserved: AdSpendLineStored[] = (existing?.lines ?? [])
+    .filter((l) => !apiPlatforms.has(l.platform as AdPlatform))
+    .map((l) => ({
+      platform: l.platform as AdPlatform,
+      inputAmount: Number(l.inputAmount ?? 0),
+      inputCurrency: l.inputCurrency ?? "USD",
+      amount: Number(l.amount ?? 0),
+      fxRate: l.fxRate ?? null,
+      extraFee: Number(l.extraFee ?? 0),
+      inputExtraFee: l.inputExtraFee ?? null,
+      agencyFeePercent: Number(l.agencyFeePercent ?? 0),
+      agencyFeeAmount: Number(l.agencyFeeAmount ?? 0),
+      inputAgencyFeeAmount: l.inputAgencyFeeAmount ?? null,
+    }));
 
-  if (spendInput > 0) {
-    inputs.push({
-      platform,
-      spend: spendInput,
-      extraFeeFixed: 0,
-      agencyFeePercent: 0,
-    });
+  const apiLines: AdSpendLineStored[] = [];
+  for (const [platform, data] of apiByPlatform) {
+    const hasValue =
+      data.spend > 0 ||
+      data.fees.extraFeeFixed > 0 ||
+      data.fees.agencyFeePercent > 0;
+    if (!hasValue) continue;
+
+    apiLines.push(
+      await buildAdSpendLineFromInput(
+        {
+          platform,
+          spend: data.spend,
+          extraFeeFixed: data.fees.extraFeeFixed,
+          agencyFeePercent: data.fees.agencyFeePercent,
+          inputCurrency: data.currency,
+        },
+        data.currency,
+        baseCurrency,
+        dateKey,
+      ),
+    );
   }
 
-  if (!inputs.length) {
-    await ManualAdSpend.deleteOne({ storeId, dateKey });
+  const allLines = [...preserved, ...apiLines];
+  if (!allLines.length) {
+    if (existing) {
+      await ManualAdSpend.deleteOne({ storeId, dateKey });
+    }
     return true;
   }
 
-  const built = await buildAdSpendDayFromLines(
-    inputs,
-    inputCurrency,
-    baseCurrency,
-    dateKey,
-  );
+  const built = summarizeAdSpendLines(allLines);
 
   await ManualAdSpend.findOneAndUpdate(
     { storeId, dateKey },
@@ -90,7 +126,7 @@ async function mergePlatformSpendFromApi(
         amount: built.amount,
         extraFee: built.extraFee,
         inputAmount: built.inputAmount,
-        inputCurrency: built.inputCurrency,
+        inputCurrency: built.inputCurrency === "MIXED" ? null : built.inputCurrency,
         fxRate: built.fxRate,
         inputExtraFee: built.inputExtraFee,
         lines: built.lines,
@@ -153,13 +189,19 @@ export async function syncAdAccountsSpendForStore(
     return { storeId, today, updated: false, skippedReason: "no_accounts" };
   }
 
-  const spendByPlatform = new Map<
-    AdPlatform,
-    { spend: number; currency: string }
-  >();
+  /** Uma conta activa por plataforma (evita somar a mesma spend duas vezes). */
+  const accountByPlatform = new Map<AdPlatform, (typeof accounts)[number]>();
+  for (const acc of accounts) {
+    const platform = acc.platform as AdPlatform;
+    if (!accountByPlatform.has(platform)) {
+      accountByPlatform.set(platform, acc);
+    }
+  }
+
+  const apiByPlatform = new Map<AdPlatform, PlatformApiSpend>();
   let anyError = false;
 
-  for (const acc of accounts) {
+  for (const acc of accountByPlatform.values()) {
     const platform = acc.platform as AdPlatform;
     try {
       const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
@@ -171,10 +213,16 @@ export async function syncAdAccountsSpendForStore(
       );
       const alloc = (acc.allocation ?? 100) / 100;
       const part = spend * alloc;
-      const prev = spendByPlatform.get(platform);
-      spendByPlatform.set(platform, {
-        spend: (prev?.spend ?? 0) + part,
-        currency: prev?.currency ?? currency,
+      const inputCurrency =
+        platform === "google" ? (currency || "USD").toUpperCase() : currency.toUpperCase();
+
+      apiByPlatform.set(platform, {
+        spend: part,
+        currency: inputCurrency,
+        fees: {
+          extraFeeFixed: acc.apiExtraFeeFixed ?? 0,
+          agencyFeePercent: acc.apiAgencyFeePercent ?? 0,
+        },
       });
       await markAdAccountSync(acc._id, true);
     } catch (e) {
@@ -184,28 +232,34 @@ export async function syncAdAccountsSpendForStore(
     }
   }
 
-  let updated = false;
-  for (const [platform, { spend, currency }] of spendByPlatform) {
-    const ok = await mergePlatformSpendFromApi(
-      store.workspaceId,
-      store._id,
-      today,
-      platform,
-      spend,
-      currency,
-      baseCurrency,
-    );
-    if (ok && spend > 0) updated = true;
+  const updated = await upsertApiAdSpendForDay(
+    store.workspaceId,
+    store._id,
+    today,
+    storeTz,
+    baseCurrency,
+    apiByPlatform,
+  );
+
+  if (!updated && !anyError && apiByPlatform.size === 0) {
+    return { storeId, today, updated: false, skippedReason: "no_data" };
   }
 
-  if (!updated && !anyError && spendByPlatform.size === 0) {
-    return { storeId, today, updated: false, skippedReason: "no_data" };
+  try {
+    await syncAdCampaignMetricsForStoreDay(storeId, today);
+    await syncApiMetricsToDailyNote(
+      String(store.workspaceId),
+      storeId,
+      today,
+    );
+  } catch {
+    /* campanhas/notas — não bloqueia spend */
   }
 
   return {
     storeId,
     today,
-    updated,
-    skippedReason: updated ? undefined : anyError ? "no_data" : "no_data",
+    updated: updated && apiByPlatform.size > 0,
+    skippedReason: updated ? undefined : anyError ? "no_data" : "locked",
   };
 }

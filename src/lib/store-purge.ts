@@ -10,6 +10,7 @@ import { CashEntry } from "@/models/CashEntry";
 import { Expense } from "@/models/Expense";
 import { Dispute } from "@/models/Dispute";
 import { AdAccount } from "@/models/AdAccount";
+import { AdCampaignDay } from "@/models/AdCampaignDay";
 import { DailyMetric } from "@/models/DailyMetric";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
@@ -36,6 +37,7 @@ export type StorePurgeCounts = {
   expenses: number;
   disputes: number;
   adAccounts: number;
+  adCampaignDays: number;
   dailyMetrics: number;
 };
 
@@ -64,6 +66,7 @@ export async function purgeStoreCompletely(
     expenses,
     disputes,
     adAccounts,
+    adCampaignDays,
     dailyMetrics,
   ] = await Promise.all([
     Order.deleteMany({ storeId: storeOid }),
@@ -81,6 +84,7 @@ export async function purgeStoreCompletely(
     Expense.deleteMany({ storeId: storeOid }),
     Dispute.deleteMany({ storeId: storeOid }),
     AdAccount.deleteMany({ storeId: storeOid }),
+    AdCampaignDay.deleteMany({ storeId: storeOid }),
     DailyMetric.deleteMany({ storeId: storeOid }),
   ]);
 
@@ -110,6 +114,7 @@ export async function purgeStoreCompletely(
     expenses: expenses.deletedCount,
     disputes: disputes.deletedCount,
     adAccounts: adAccounts.deletedCount,
+    adCampaignDays: adCampaignDays.deletedCount,
     dailyMetrics: dailyMetrics.deletedCount,
   };
 }

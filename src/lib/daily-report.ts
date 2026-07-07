@@ -10,6 +10,7 @@ import {
   fetchStoreAdInsightsForDay,
   aggregateStoreAdInsightsForPeriod,
 } from "@/lib/ad-insights";
+import { loadStoreAdMetricsForDay, loadStoreAdMetricsFromDb } from "@/lib/ad-campaign-metrics";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { parseDateInput, formatDateInput, addDays, startOfDay } from "@/lib/period";
 import { buildCollectionReportBlock } from "@/lib/collection-operations";
@@ -40,6 +41,34 @@ function pushLine(lines: string[], line: string): void {
 
 function pushIf(lines: string[], condition: boolean, line: string): void {
   if (condition) lines.push(line);
+}
+
+function fmtAdMoney(n: number, currency: string): string {
+  const c = currency.toUpperCase();
+  if (c === "USD") return `$${fmtReportNumber(n)}`;
+  if (c === "EUR") return `${fmtReportNumber(n)}€`;
+  return `${fmtReportNumber(n)} ${c}`;
+}
+
+function pushAdMetricsBlock(
+  lines: string[],
+  label: string,
+  cpc: number | null,
+  ctr: number | null,
+  cpm: number | null,
+  currency: string,
+  spend?: number,
+): void {
+  const parts: string[] = [];
+  if (spend != null && spend > 0) {
+    parts.push(`Spend ${fmtAdMoney(spend, currency)}`);
+  }
+  if (cpc != null) parts.push(`CPC ${fmtAdMoney(cpc, currency)}`);
+  if (ctr != null) parts.push(`CTR ${fmtReportPct(ctr)}`);
+  if (cpm != null) parts.push(`CPM ${fmtAdMoney(cpm, currency)}`);
+  if (!parts.length) return;
+  pushLine(lines, `— ${label} —`);
+  pushLine(lines, parts.join("   "));
 }
 
 function pushManualField(
@@ -162,17 +191,66 @@ export async function buildDailyReportText(opts: {
     `CVR %: ${fmtReportPct(financials.cvrPct)}`,
   );
 
-  const adInsights = await fetchStoreAdInsightsForDay(opts.storeId, opts.dateKey);
+  const adMetrics = await loadStoreAdMetricsForDay(opts.storeId, opts.dateKey);
+  const adInsights =
+    adMetrics != null
+      ? {
+          spend: adMetrics.total.spend,
+          impressions: adMetrics.total.impressions,
+          clicks: adMetrics.total.clicks,
+          cpc: adMetrics.total.cpc,
+          ctr: adMetrics.total.ctr,
+          cpm: adMetrics.total.cpm,
+        }
+      : await fetchStoreAdInsightsForDay(opts.storeId, opts.dateKey);
+
   if (adInsights) {
-    if (adInsights.cpc != null) {
-      pushLine(lines, `CPC: ${fmtReportMoney(adInsights.cpc, currency)}`);
+    const adCurrency =
+      adMetrics?.byPlatform[0]?.currency ??
+      adMetrics?.campaigns[0]?.currency ??
+      "USD";
+    pushAdMetricsBlock(
+      lines,
+      "ADS (total)",
+      adInsights.cpc,
+      adInsights.ctr,
+      adInsights.cpm,
+      adCurrency,
+      adInsights.spend,
+    );
+    if (adMetrics && adMetrics.byPlatform.length > 1) {
+      for (const p of adMetrics.byPlatform) {
+        pushAdMetricsBlock(
+          lines,
+          p.platformLabel.toUpperCase(),
+          p.cpc,
+          p.ctr,
+          p.cpm,
+          p.currency,
+          p.spend,
+        );
+      }
     }
-    if (adInsights.ctr != null) {
-      pushLine(lines, `CTR %: ${fmtReportPct(adInsights.ctr)}`);
+    const topCampaigns = (adMetrics?.campaigns ?? []).slice(0, 8);
+    if (topCampaigns.length) {
+      pushLine(lines, "");
+      pushLine(lines, "— Campanhas —");
+      for (const c of topCampaigns) {
+        const parts = [`${c.campaignName} (${c.platformLabel})`];
+        if (c.spend > 0) parts.push(fmtAdMoney(c.spend, c.currency));
+        if (c.cpc != null) parts.push(`CPC ${fmtAdMoney(c.cpc, c.currency)}`);
+        if (c.ctr != null) parts.push(`CTR ${fmtReportPct(c.ctr)}`);
+        pushLine(lines, parts.join(" · "));
+      }
     }
-    if (adInsights.cpm != null) {
-      pushLine(lines, `CPM: ${fmtReportMoney(adInsights.cpm, currency)}`);
-    }
+  }
+
+  const apiSnap = storeNote?.apiSnapshot;
+  if (apiSnap?.bestCampaign?.trim()) {
+    pushLine(lines, `MELHOR CAMPANHA: ${apiSnap.bestCampaign.trim()}`);
+  }
+  if (apiSnap?.campaignSuggestion?.trim()) {
+    pushLine(lines, `SUGESTÃO ADS: ${apiSnap.campaignSuggestion.trim()}`);
   }
 
   pushManualField(lines, "Produtos testados", rf?.productsTested);
@@ -399,16 +477,44 @@ export async function buildWeeklyReportText(opts: {
     `CVR %: ${fmtReportPct(financials.cvrPct)}`,
   );
 
-  const adInsights = await aggregateStoreAdInsightsForPeriod(opts.storeId, keys);
+  const adMetrics = await loadStoreAdMetricsFromDb(opts.storeId, keys);
+  const adInsights =
+    adMetrics != null
+      ? {
+          spend: adMetrics.total.spend,
+          impressions: adMetrics.total.impressions,
+          clicks: adMetrics.total.clicks,
+          cpc: adMetrics.total.cpc,
+          ctr: adMetrics.total.ctr,
+          cpm: adMetrics.total.cpm,
+        }
+      : await aggregateStoreAdInsightsForPeriod(opts.storeId, keys);
   if (adInsights) {
-    if (adInsights.cpc != null) {
-      pushLine(lines, `CPC: ${fmtReportMoney(adInsights.cpc, currency)}`);
-    }
-    if (adInsights.ctr != null) {
-      pushLine(lines, `CTR %: ${fmtReportPct(adInsights.ctr)}`);
-    }
-    if (adInsights.cpm != null) {
-      pushLine(lines, `CPM: ${fmtReportMoney(adInsights.cpm, currency)}`);
+    const adCurrency =
+      adMetrics?.byPlatform[0]?.currency ??
+      adMetrics?.campaigns[0]?.currency ??
+      "USD";
+    pushAdMetricsBlock(
+      lines,
+      "ADS (total)",
+      adInsights.cpc,
+      adInsights.ctr,
+      adInsights.cpm,
+      adCurrency,
+      adInsights.spend,
+    );
+    if (adMetrics && adMetrics.byPlatform.length > 1) {
+      for (const p of adMetrics.byPlatform) {
+        pushAdMetricsBlock(
+          lines,
+          p.platformLabel.toUpperCase(),
+          p.cpc,
+          p.ctr,
+          p.cpm,
+          p.currency,
+          p.spend,
+        );
+      }
     }
   }
 

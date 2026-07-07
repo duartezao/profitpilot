@@ -8,7 +8,10 @@ import {
   expenseCategoryLabel,
   expenseFrequencyLabel,
 } from "@/lib/expense-constants";
-import { expenseAmountForPeriod } from "@/lib/expense-proration";
+import {
+  expenseAmountForDay,
+  expenseAmountForPeriod,
+} from "@/lib/expense-proration";
 import type { ResolvedPeriod } from "@/lib/period";
 import { parseDateInput } from "@/lib/period";
 
@@ -93,15 +96,26 @@ type ExpenseLean = {
   endDateKey?: string | null;
 };
 
+function matchesExpenseScope(
+  e: ExpenseLean,
+  storeId?: string | null,
+  workspaceOnly = false,
+): boolean {
+  const eStoreId = e.storeId ? String(e.storeId) : null;
+  if (workspaceOnly) return eStoreId === null;
+  if (storeId) return eStoreId === storeId;
+  return true;
+}
+
 function sumExpensesForScope(
   expenses: ExpenseLean[],
   period: PeriodSlice,
   storeId?: string | null,
+  workspaceOnly = false,
 ): number {
   let total = 0;
   for (const e of expenses) {
-    const eStoreId = e.storeId ? String(e.storeId) : null;
-    if (storeId && eStoreId !== null && eStoreId !== storeId) continue;
+    if (!matchesExpenseScope(e, storeId, workspaceOnly)) continue;
     total += expenseAmountForPeriod(
       {
         amountBase: e.amountBase,
@@ -144,13 +158,34 @@ export function sumLoadedExpensesForDay(
   dateKey: string,
   storeId?: string | null,
 ): number {
+  let total = 0;
+  for (const e of expenses) {
+    if (!matchesExpenseScope(e, storeId)) continue;
+    total += expenseAmountForDay(
+      {
+        amountBase: e.amountBase,
+        frequency: e.frequency as ExpenseFrequency,
+        startDateKey: e.startDateKey,
+        endDateKey: e.endDateKey,
+      },
+      dateKey,
+    );
+  }
+  return total;
+}
+
+/** Despesas ao nível do workspace (sem loja) num dia. */
+export function sumWorkspaceExpensesForDay(
+  expenses: ExpenseLean[],
+  dateKey: string,
+): number {
   const day = parseDateInput(dateKey);
   if (!day) return 0;
   const slice: PeriodSlice = {
     start: new Date(day.getFullYear(), day.getMonth(), day.getDate()),
     end: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999),
   };
-  return sumExpensesForScope(expenses, slice, storeId);
+  return sumExpensesForScope(expenses, slice, undefined, true);
 }
 
 export function sumLoadedExpensesByStore(
@@ -161,16 +196,6 @@ export function sumLoadedExpensesByStore(
   const out = new Map<string, number>();
   for (const sid of storeIds) {
     out.set(sid, sumExpensesForScope(expenses, period, sid));
-  }
-  const workspaceLevel = sumExpensesForScope(
-    expenses.filter((e) => !e.storeId),
-    period,
-  );
-  if (workspaceLevel > 0 && storeIds.length > 0) {
-    const share = workspaceLevel / storeIds.length;
-    for (const sid of storeIds) {
-      out.set(sid, (out.get(sid) ?? 0) + share);
-    }
   }
   return out;
 }
@@ -192,13 +217,7 @@ export async function sumOperatingExpensesForPeriod(
   if (!storeId) {
     return sumExpensesForScope(expenses, period);
   }
-  const forStore = expenses.filter(
-    (e) => e.storeId && String(e.storeId) === storeId,
-  );
-  const workspace = expenses.filter((e) => !e.storeId);
-  return (
-    sumExpensesForScope(forStore, period) + sumExpensesForScope(workspace, period)
-  );
+  return sumExpensesForScope(expenses, period, storeId);
 }
 
 /** Por loja no consolidado (despesas da loja + quota igual de despesas workspace). */
@@ -218,17 +237,6 @@ export async function sumOperatingExpensesByStore(
   const out = new Map<string, number>();
   for (const sid of storeIds) {
     out.set(String(sid), sumExpensesForScope(expenses, period, String(sid)));
-  }
-  const workspaceLevel = sumExpensesForScope(
-    expenses.filter((e) => !e.storeId),
-    period,
-  );
-  if (workspaceLevel > 0 && storeIds.length > 0) {
-    const share = workspaceLevel / storeIds.length;
-    for (const sid of storeIds) {
-      const key = String(sid);
-      out.set(key, (out.get(key) ?? 0) + share);
-    }
   }
   return out;
 }
