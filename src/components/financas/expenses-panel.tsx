@@ -46,7 +46,7 @@ export function ExpensesPanel({
     <CollapsibleSection
       id="despesas-fixos"
       title="Apps, subscrições e fixos"
-      description="Custos fora de COGS e ads — rateio diário no lucro."
+      description="Custos fora de COGS e ads — pontual só no dia; mensal/anual na data de cobrança."
       badge={
         expenses.length > 0 ? (
           <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">

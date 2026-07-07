@@ -6,7 +6,7 @@ import mongoose from "mongoose";
 import { z } from "zod";
 import { connectToDatabase } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { createAdAccount, softDeleteAdAccount } from "@/lib/ad-accounts";
+import { createAdAccount, softDeleteAdAccount, updateAdAccountApiFees } from "@/lib/ad-accounts";
 import { AD_PLATFORMS, type AdPlatform } from "@/lib/ad-spend-platforms";
 import { assertStoreAccess, findStoreForUser } from "@/lib/store-scope";
 import { syncAdAccountsSpendForStore } from "@/lib/ad-api-sync";
@@ -28,8 +28,18 @@ import {
   verifyTiktokAdvertiserAccess,
   type TiktokAdvertiserOption,
 } from "@/lib/tiktok-ads";
+import {
+  adOAuthLoginEmailCookie,
+  adOAuthTokenCookie,
+  legacyOAuthTokenCookie,
+} from "@/lib/ad-oauth";
 
 export type AdAccountActionState = { ok?: boolean; error?: string };
+
+export type AdOAuthPending = {
+  token: string;
+  loginEmail?: string;
+};
 
 export type AdAccountsDiscoverState = {
   platform?: AdPlatform;
@@ -49,6 +59,9 @@ const addSchema = z
     accessToken: z.string().trim().optional(),
     refreshToken: z.string().trim().optional(),
     allocation: z.coerce.number().min(1).max(100).optional(),
+    apiExtraFeeFixed: z.coerce.number().min(0).optional(),
+    apiAgencyFeePercent: z.coerce.number().min(0).max(100).optional(),
+    linkedLoginEmail: z.string().trim().max(200).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.platform === "google") {
@@ -109,6 +122,9 @@ export async function addAdAccountAction(
     accessToken: formData.get("accessToken") || undefined,
     refreshToken: formData.get("refreshToken") || undefined,
     allocation: formData.get("allocation") || 100,
+    apiExtraFeeFixed: formData.get("apiExtraFeeFixed") || 0,
+    apiAgencyFeePercent: formData.get("apiAgencyFeePercent") || 0,
+    linkedLoginEmail: formData.get("linkedLoginEmail") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -118,8 +134,20 @@ export async function addAdAccountAction(
   const store = await findStoreForUser(user, storeId, "_id");
   if (!store) return { error: "Loja não encontrada." };
 
-  const { platform, externalAccountId, accountName, accessToken, refreshToken, allocation } =
-    parsed.data;
+  const {
+    platform,
+    externalAccountId,
+    accountName,
+    accessToken,
+    refreshToken,
+    allocation,
+    apiExtraFeeFixed,
+    apiAgencyFeePercent,
+    linkedLoginEmail,
+  } = parsed.data;
+
+  const replaceOther =
+    String(formData.get("replacePlatformAccount") ?? "") === "true";
 
   try {
     const verified = await verifyPlatformAccount(
@@ -141,6 +169,10 @@ export async function addAdAccountAction(
       accountName: accountName || verified.name,
       credentials,
       allocation,
+      apiExtraFeeFixed: apiExtraFeeFixed ?? 0,
+      apiAgencyFeePercent: apiAgencyFeePercent ?? 0,
+      linkedLoginEmail: linkedLoginEmail ?? "",
+      replaceOtherOnPlatform: replaceOther,
     });
     try {
       await syncAdAccountsSpendForStore(storeId);
@@ -263,13 +295,78 @@ export async function syncAdAccountsNowAction(
   }
 }
 
-const META_OAUTH_COOKIE = "meta_oauth_token";
+const META_OAUTH_COOKIE = legacyOAuthTokenCookie("meta");
+const GOOGLE_OAUTH_COOKIE = legacyOAuthTokenCookie("google");
 
-/** Lê token Meta guardado após OAuth (consumido uma vez). */
-export async function consumeMetaOAuthTokenAction(): Promise<string | null> {
+async function consumeOAuthPending(
+  platform: "meta" | "google",
+  storeId: string,
+): Promise<AdOAuthPending | null> {
+  if (!mongoose.isValidObjectId(storeId)) return null;
+
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) return null;
+  assertStoreAccess(user.storeAccess, storeId);
+
   const jar = await cookies();
-  const token = jar.get(META_OAUTH_COOKIE)?.value;
+  const scopedCookie = adOAuthTokenCookie(platform, storeId);
+  let token = jar.get(scopedCookie)?.value ?? null;
+  if (token) {
+    jar.delete(scopedCookie);
+  } else {
+    const legacy =
+      platform === "meta" ? META_OAUTH_COOKIE : GOOGLE_OAUTH_COOKIE;
+    token = jar.get(legacy)?.value ?? null;
+    if (token) jar.delete(legacy);
+  }
   if (!token) return null;
-  jar.delete(META_OAUTH_COOKIE);
-  return token;
+
+  const emailCookie = adOAuthLoginEmailCookie(platform, storeId);
+  const loginEmail = jar.get(emailCookie)?.value?.trim() || undefined;
+  jar.delete(emailCookie);
+
+  return { token, loginEmail };
+}
+
+/** Lê token Meta guardado após OAuth desta loja (consumido uma vez). */
+export async function consumeMetaOAuthTokenAction(
+  storeId: string,
+): Promise<AdOAuthPending | null> {
+  return consumeOAuthPending("meta", storeId);
+}
+
+/** Lê refresh token Google guardado após OAuth desta loja (consumido uma vez). */
+export async function consumeGoogleOAuthTokenAction(
+  storeId: string,
+): Promise<AdOAuthPending | null> {
+  return consumeOAuthPending("google", storeId);
+}
+
+export async function updateAdAccountFeesAction(
+  _prev: AdAccountActionState,
+  formData: FormData,
+): Promise<AdAccountActionState> {
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) return { error: "Sessão inválida." };
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão." };
+  }
+
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const apiExtraFeeFixed = Number(formData.get("apiExtraFeeFixed") ?? 0);
+  const apiAgencyFeePercent = Number(formData.get("apiAgencyFeePercent") ?? 0);
+
+  if (!accountId) return { error: "Conta em falta." };
+  if (apiExtraFeeFixed < 0 || apiAgencyFeePercent < 0 || apiAgencyFeePercent > 100) {
+    return { error: "Fees inválidas." };
+  }
+
+  const ok = await updateAdAccountApiFees(user.workspaceId, accountId, {
+    apiExtraFeeFixed,
+    apiAgencyFeePercent,
+  });
+  if (!ok) return { error: "Conta não encontrada." };
+
+  revalidatePath("/anuncios");
+  return { ok: true };
 }

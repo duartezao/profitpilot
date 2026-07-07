@@ -13,6 +13,9 @@ export type AdAccountRow = {
   externalAccountId: string;
   accountName: string;
   allocation: number;
+  apiExtraFeeFixed: number;
+  apiAgencyFeePercent: number;
+  linkedLoginEmail: string;
   status: string;
   lastSyncAt: string | null;
   lastSyncError: string | null;
@@ -67,6 +70,9 @@ export async function listAdAccountsForStore(
     externalAccountId: r.externalAccountId,
     accountName: r.accountName ?? "",
     allocation: r.allocation ?? 100,
+    apiExtraFeeFixed: r.apiExtraFeeFixed ?? 0,
+    apiAgencyFeePercent: r.apiAgencyFeePercent ?? 0,
+    linkedLoginEmail: r.linkedLoginEmail?.trim() ?? "",
     status: r.status ?? "active",
     lastSyncAt: r.lastSyncAt ? r.lastSyncAt.toISOString() : null,
     lastSyncError: r.lastSyncError ?? null,
@@ -81,8 +87,19 @@ export async function createAdAccount(opts: {
   accountName?: string;
   credentials: AdAccountCredentials;
   allocation?: number;
+  apiExtraFeeFixed?: number;
+  apiAgencyFeePercent?: number;
+  linkedLoginEmail?: string;
+  replaceOtherOnPlatform?: boolean;
 }): Promise<string> {
   await connectToDatabase();
+
+  if (opts.replaceOtherOnPlatform !== false) {
+    await disconnectPlatformAccounts(opts.storeId, opts.platform, {
+      exceptExternalId: opts.externalAccountId.trim(),
+    });
+  }
+
   const credentials = encryptAdCredentials(
     opts.credentials as unknown as Record<string, string>,
   );
@@ -94,9 +111,55 @@ export async function createAdAccount(opts: {
     accountName: opts.accountName?.trim() ?? "",
     credentials,
     allocation: opts.allocation ?? 100,
+    apiExtraFeeFixed: opts.apiExtraFeeFixed ?? 0,
+    apiAgencyFeePercent: opts.apiAgencyFeePercent ?? 0,
+    linkedLoginEmail: opts.linkedLoginEmail?.trim() ?? "",
     status: "active",
   });
   return String(doc._id);
+}
+
+/** Desliga outras contas da mesma plataforma (histórico de gasto manual mantém-se). */
+export async function disconnectPlatformAccounts(
+  storeId: Types.ObjectId,
+  platform: AdPlatform,
+  options?: { exceptExternalId?: string },
+): Promise<number> {
+  await connectToDatabase();
+  const filter: Record<string, unknown> = {
+    storeId,
+    platform,
+    deletedAt: null,
+  };
+  if (options?.exceptExternalId) {
+    filter.externalAccountId = { $ne: options.exceptExternalId.trim() };
+  }
+  const res = await AdAccount.updateMany(filter, {
+    $set: { deletedAt: new Date(), status: "disconnected" },
+  });
+  return res.modifiedCount;
+}
+
+export async function updateAdAccountApiFees(
+  workspaceId: string,
+  accountId: string,
+  fees: { apiExtraFeeFixed: number; apiAgencyFeePercent: number },
+): Promise<boolean> {
+  await connectToDatabase();
+  const res = await AdAccount.updateOne(
+    {
+      _id: accountId,
+      workspaceId: new mongoose.Types.ObjectId(workspaceId),
+      deletedAt: null,
+    },
+    {
+      $set: {
+        apiExtraFeeFixed: fees.apiExtraFeeFixed,
+        apiAgencyFeePercent: fees.apiAgencyFeePercent,
+      },
+    },
+  );
+  return res.modifiedCount > 0;
 }
 
 export async function softDeleteAdAccount(

@@ -261,14 +261,20 @@ export async function countMissingCogsByDay(
   return new Map(rows.map((r) => [r._id, r.count]));
 }
 
-function pickCostAtDate(entries: HistoryEntry[], orderDate: Date): number | null {
+function pickCostAtDate(
+  entries: HistoryEntry[],
+  orderDate: Date,
+  acceptZero = false,
+): number | null {
   let best: HistoryEntry | null = null;
   for (const e of entries) {
     if (e.effectiveFrom > orderDate) continue;
     if (e.effectiveTo && orderDate >= e.effectiveTo) continue;
     if (!best || e.effectiveFrom > best.effectiveFrom) best = e;
   }
-  return best?.cost ?? null;
+  if (!best) return null;
+  if (acceptZero) return best.cost;
+  return best.cost > 0 ? best.cost : null;
 }
 
 export type { CostResolver } from "@/lib/line-snapshots";
@@ -326,12 +332,13 @@ function resolveWithProductSiblings(
   if (direct > 0) return direct;
   const productId = variantToProduct.get(variantId);
   if (!productId) return 0;
+  let best = 0;
   for (const siblingId of variantsByProduct.get(productId) ?? []) {
     if (siblingId === variantId) continue;
     const siblingValue = resolveDirect(siblingId, orderDate);
-    if (siblingValue > 0) return siblingValue;
+    if (siblingValue > best) best = siblingValue;
   }
-  return 0;
+  return best;
 }
 
 type LineItemRow = {
@@ -409,7 +416,11 @@ export function buildCostResolver(
     buildVariantProductIndex(productCosts);
 
   const resolveDirect = (variantId: string, orderDate: Date): number => {
-    const manual = pickCostAtDate(manualHist.get(variantId) ?? [], orderDate);
+    const manual = pickCostAtDate(
+      manualHist.get(variantId) ?? [],
+      orderDate,
+      true,
+    );
     if (manual != null) return manual;
 
     const shopify = pickCostAtDate(shopifyHist.get(variantId) ?? [], orderDate);
@@ -420,7 +431,7 @@ export function buildCostResolver(
     if (c.manual != null && (!c.manualFrom || orderDate >= c.manualFrom)) {
       return c.manual;
     }
-    return c.shopify;
+    return c.shopify > 0 ? c.shopify : 0;
   };
 
   return (variantId: string, orderDate: Date): number =>
@@ -576,8 +587,7 @@ export async function closeManualCostHistory(
 export const SOLD_VARIANT_BATCH = 50;
 
 /**
- * Variantes vendidas que ainda não foram consultadas na Shopify (sem registo em ProductCost).
- * Se já existe registo com custo 0, não voltamos a pedir — evita loop e contador inflado.
+ * Variantes vendidas sem custo resolvido no catálogo (novas ou com unitCost 0).
  */
 export async function listVariantIdsNeedingCostSync(
   storeId: Types.ObjectId,
@@ -596,15 +606,20 @@ export async function listVariantIdsNeedingCostSync(
   const variantIds = sold.map((r) => String(r._id)).filter(Boolean);
   if (!variantIds.length) return [];
 
-  const alreadySynced = await ProductCost.find({
+  const catalog = await ProductCost.find({
     storeId,
     variantId: { $in: variantIds },
   })
-    .select("variantId")
+    .select("variantId unitCost manualCost")
     .lean();
 
-  const synced = new Set(alreadySynced.map((c) => String(c.variantId)));
-  return variantIds.filter((id) => !synced.has(id)).slice(0, limit);
+  const resolved = new Set(
+    catalog
+      .filter((c) => c.manualCost != null || num(c.unitCost) > 0)
+      .map((c) => String(c.variantId)),
+  );
+
+  return variantIds.filter((id) => !resolved.has(id)).slice(0, limit);
 }
 
 /** Total de variantes distintas nas encomendas da loja. */

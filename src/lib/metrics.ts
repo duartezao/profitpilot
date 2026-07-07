@@ -114,6 +114,7 @@ import {
   sumLoadedExpenses,
   sumLoadedExpensesForDay,
   sumLoadedExpensesByStore,
+  sumWorkspaceExpensesForDay,
   type ExpenseLeanRow,
 } from "@/lib/expenses";
 import {
@@ -1290,16 +1291,6 @@ async function buildConsolidatedDailyProfitSeries(
     refunds: 0,
   };
 
-  const opExByStore =
-    expenseRows.length > 0
-      ? sumLoadedExpensesByStore(
-          expenseRows,
-          slice,
-          stores.map((s) => String(s._id)),
-        )
-      : new Map<string, number>();
-  const dayCount = Math.max(dayKeysInSlice(slice, storeTimeZone).length, 1);
-
   const points = dayKeysInSlice(slice, storeTimeZone).map((dateKey) => {
     const byStore: ProfitChartStoreSlice[] = [];
     let totalProfit = 0;
@@ -1326,7 +1317,11 @@ async function buildConsolidatedDailyProfitSeries(
       const storeKey = storeDayKey(dateKey, meta.storeId);
       const hasEntry = adByStoreDay.has(storeKey);
       const ad = hasEntry ? adByStoreDay.get(storeKey)! : 0;
-      const storeOpEx = (opExByStore.get(meta.storeId) ?? 0) / dayCount;
+      const storeOpEx = sumLoadedExpensesForDay(
+        expenseRows,
+        dateKey,
+        meta.storeId,
+      );
       const profit = calcProfit(o, hasEntry ? ad : 0, storeOpEx);
       byStore.push({
         storeId: meta.storeId,
@@ -1338,6 +1333,9 @@ async function buildConsolidatedDailyProfitSeries(
       point[meta.key] = profit;
       totalProfit += profit;
     }
+
+    const workspaceOpEx = sumWorkspaceExpensesForDay(expenseRows, dateKey);
+    totalProfit -= workspaceOpEx;
 
     const d = parseDateInput(dateKey);
     point.label = d
@@ -1433,56 +1431,18 @@ async function buildDailyProfitSeries(
   expenseRows: ExpenseLeanRow[] = [],
   expenseStoreId?: string | null,
 ): Promise<ProfitChartPoint[]> {
-  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
   const dateKeys = dayKeysInSlice(slice, storeTimeZone);
-  const todayKey = tz
-    ? dateKeyInTimezone(new Date(), tz)
-    : formatDateInput(new Date());
 
-  const snapshots = tz
-    ? await loadSnapshotProfitsByDay(storeOids, dateKeys, todayKey)
-    : new Map<string, number>();
-
-  const missingKeys = dateKeys.filter(
-    (k) => k >= todayKey || !snapshots.has(k),
-  );
-
-  let orderByDay = new Map<
-    string,
-    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds" | "orders">
-  >();
-  let adByDay = new Map<string, number>();
-  if (missingKeys.length && tz) {
-    const missingSlice = sliceFromDateKeys(missingKeys, tz);
-    [orderByDay, adByDay] = await Promise.all([
-      aggregateDailyOrders(
-        wsId,
-        storeOids,
-        missingSlice,
-        storeTimeZone,
-        cogsMode,
-      ),
-      aggregateDailyAdSpend(storeOids, missingSlice, storeTimeZone),
-    ]);
-  } else if (missingKeys.length) {
-    [orderByDay, adByDay] = await Promise.all([
-      aggregateDailyOrders(
-        wsId,
-        storeOids,
-        slice,
-        storeTimeZone,
-        cogsMode,
-      ),
-      aggregateDailyAdSpend(storeOids, slice, storeTimeZone),
-    ]);
-  }
-
-  const periodOpEx =
-    expenseRows.length > 0
-      ? sumLoadedExpenses(expenseRows, slice, expenseStoreId)
-      : 0;
-  const dayCount = Math.max(dayKeysInSlice(slice, storeTimeZone).length, 1);
-  const dayOpEx = periodOpEx / dayCount;
+  const [orderByDay, adByDay] = await Promise.all([
+    aggregateDailyOrders(
+      wsId,
+      storeOids,
+      slice,
+      storeTimeZone,
+      cogsMode,
+    ),
+    aggregateDailyAdSpend(storeOids, slice, storeTimeZone),
+  ]);
 
   const zeroAgg = {
     revenue: 0,
@@ -1493,30 +1453,13 @@ async function buildDailyProfitSeries(
   };
 
   return dateKeys.map((dateKey) => {
-    const snapProfit = snapshots.get(dateKey);
-    if (snapProfit != null && dateKey < todayKey) {
-      const d = parseDateInput(dateKey);
-      const label = d
-        ? d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })
-        : dateKey;
-      const dateLabel = d
-        ? d.toLocaleDateString("pt-PT", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          })
-        : dateKey;
-      return {
-        dateKey,
-        label,
-        dateLabel,
-        profit: snapProfit,
-        profitFmt: fmtMoney(snapProfit),
-      };
-    }
-
     const o = orderByDay.get(dateKey) ?? zeroAgg;
     const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
+    const dayOpEx = sumLoadedExpensesForDay(
+      expenseRows,
+      dateKey,
+      expenseStoreId ?? undefined,
+    );
     const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx);
     const d = parseDateInput(dateKey);
     const label = d
@@ -1598,13 +1541,6 @@ async function buildStoreDailyMetrics(
         : countMissingCogsByDay([storeOid], slice, storeTimeZone),
     ]);
 
-  const periodOpEx =
-    expenseRows.length > 0
-      ? sumLoadedExpenses(expenseRows, slice, String(storeOid))
-      : 0;
-  const dayCount = Math.max(dayKeysInSlice(slice, storeTimeZone).length, 1);
-  const dayOpEx = periodOpEx / dayCount;
-
   return dayKeysInSlice(slice, storeTimeZone)
     .map((dateKey) => {
     const o = orderByDay.get(dateKey) ?? {
@@ -1616,6 +1552,11 @@ async function buildStoreDailyMetrics(
       orders: 0,
     };
     const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
+    const dayOpEx = sumLoadedExpensesForDay(
+      expenseRows,
+      dateKey,
+      String(storeOid),
+    );
     const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx);
     const missingCogs =
       cogsMode === "day" && o.orders > 0 && o.cogs === 0

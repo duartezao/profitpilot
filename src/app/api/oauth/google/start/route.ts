@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getCurrentUser } from "@/lib/auth";
+import { resolveGoogleOAuthRedirectUri } from "@/lib/google-oauth";
 import { assertStoreAccess } from "@/lib/store-scope";
 import {
   adOAuthStateCookie,
@@ -10,11 +11,7 @@ import {
   parseOAuthStoreId,
 } from "@/lib/ad-oauth";
 
-function anunciosDest(
-  request: Request,
-  storeId: string,
-  extra?: Record<string, string>,
-) {
+function anunciosDest(request: Request, storeId: string, extra?: Record<string, string>) {
   const dest = new URL("/anuncios", request.url);
   dest.searchParams.set("store", storeId);
   dest.hash = "contas-ads";
@@ -25,8 +22,8 @@ function anunciosDest(
 }
 
 export async function GET(request: Request) {
-  const appId = process.env.META_APP_ID?.trim();
-  const redirectUri = process.env.META_OAUTH_REDIRECT_URI?.trim();
+  const clientId = process.env.GOOGLE_ADS_CLIENT_ID?.trim();
+  const redirectUri = resolveGoogleOAuthRedirectUri(request);
   const { searchParams } = new URL(request.url);
   const storeId = parseOAuthStoreId(searchParams.get("store"));
 
@@ -49,25 +46,29 @@ export async function GET(request: Request) {
     );
   }
 
-  if (!appId || !redirectUri) {
+  if (!clientId || !redirectUri) {
     return NextResponse.redirect(
-      anunciosDest(request, storeId, { oauth_error: "config" }),
+      anunciosDest(request, storeId, {
+        oauth_error: !clientId
+          ? "google_config_client_id"
+          : "google_config_redirect",
+      }),
     );
   }
 
   const state = randomBytes(16).toString("hex");
   const jar = await cookies();
-  jar.set(adOAuthStateCookie("meta"), state, oauthCookieOptions(600));
-  jar.set(adOAuthStoreCookie("meta"), storeId, oauthCookieOptions(600));
+  jar.set(adOAuthStateCookie("google"), state, oauthCookieOptions(600));
+  jar.set(adOAuthStoreCookie("google"), storeId, oauthCookieOptions(600));
 
-  const scope = "ads_read,business_management";
-  const authUrl = new URL("https://www.facebook.com/v25.0/dialog/oauth");
-  authUrl.searchParams.set("client_id", appId);
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
-  authUrl.searchParams.set("state", state);
-  authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("auth_type", "rerequest");
+  authUrl.searchParams.set("scope", "https://www.googleapis.com/auth/adwords");
+  authUrl.searchParams.set("access_type", "offline");
+  authUrl.searchParams.set("prompt", "consent select_account");
+  authUrl.searchParams.set("state", state);
 
   return NextResponse.redirect(authUrl.toString());
 }

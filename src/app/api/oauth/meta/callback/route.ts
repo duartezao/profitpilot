@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-
-const META_OAUTH_STATE = "meta_oauth_state";
-const META_OAUTH_STORE = "meta_oauth_store";
-const META_OAUTH_COOKIE = "meta_oauth_token";
+import { getCurrentUser } from "@/lib/auth";
+import { assertStoreAccess } from "@/lib/store-scope";
+import {
+  adOAuthLoginEmailCookie,
+  adOAuthStateCookie,
+  adOAuthStoreCookie,
+  adOAuthTokenCookie,
+  legacyOAuthTokenCookie,
+  oauthCookieOptions,
+  parseOAuthStoreId,
+} from "@/lib/ad-oauth";
 
 export async function GET(request: Request) {
   const appId = process.env.META_APP_ID?.trim();
@@ -18,26 +25,41 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
-  const error = searchParams.get("error_description") ?? searchParams.get("error");
+  const error =
+    searchParams.get("error_description") ?? searchParams.get("error");
 
   const jar = await cookies();
-  const expectedState = jar.get(META_OAUTH_STATE)?.value;
-  const storeId = jar.get(META_OAUTH_STORE)?.value ?? "";
-  jar.delete(META_OAUTH_STATE);
-  jar.delete(META_OAUTH_STORE);
+  const expectedState = jar.get(adOAuthStateCookie("meta"))?.value;
+  const storeId = parseOAuthStoreId(jar.get(adOAuthStoreCookie("meta"))?.value);
+  jar.delete(adOAuthStateCookie("meta"));
+  jar.delete(adOAuthStoreCookie("meta"));
+
+  const dest = new URL("/anuncios", request.url);
+  if (storeId) dest.searchParams.set("store", storeId);
+  dest.hash = "contas-ads";
+
+  if (!storeId) {
+    dest.searchParams.set("oauth_error", "store_required");
+    return NextResponse.redirect(dest);
+  }
+
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  try {
+    assertStoreAccess(user.storeAccess, storeId);
+  } catch {
+    dest.searchParams.set("oauth_error", "store_access");
+    return NextResponse.redirect(dest);
+  }
 
   if (error || !code) {
-    const dest = new URL("/anuncios", request.url);
-    if (storeId) dest.searchParams.set("store", storeId);
-    dest.hash = "contas-ads";
     dest.searchParams.set("oauth_error", error ?? "cancelled");
     return NextResponse.redirect(dest);
   }
 
   if (!state || state !== expectedState) {
-    const dest = new URL("/anuncios", request.url);
-    if (storeId) dest.searchParams.set("store", storeId);
-    dest.hash = "contas-ads";
     dest.searchParams.set("oauth_error", "state");
     return NextResponse.redirect(dest);
   }
@@ -54,25 +76,34 @@ export async function GET(request: Request) {
     error?: { message?: string };
   };
 
-  const dest = new URL("/anuncios", request.url);
-  if (storeId) dest.searchParams.set("store", storeId);
-  dest.hash = "contas-ads";
-
   if (!res.ok || !json.access_token) {
-    dest.searchParams.set(
-      "oauth_error",
-      json.error?.message ?? "token",
-    );
+    dest.searchParams.set("oauth_error", json.error?.message ?? "token");
     return NextResponse.redirect(dest);
   }
 
-  jar.set(META_OAUTH_COOKIE, json.access_token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 300,
-    path: "/",
-  });
+  let loginEmail = "";
+  try {
+    const meRes = await fetch(
+      `https://graph.facebook.com/v25.0/me?fields=email,name&access_token=${encodeURIComponent(json.access_token)}`,
+      { cache: "no-store" },
+    );
+    const me = (await meRes.json()) as { email?: string };
+    loginEmail = me.email?.trim() ?? "";
+  } catch {
+    /* opcional */
+  }
+
+  const tokenCookie = adOAuthTokenCookie("meta", storeId);
+  jar.set(tokenCookie, json.access_token, oauthCookieOptions(300));
+  jar.delete(legacyOAuthTokenCookie("meta"));
+  if (loginEmail) {
+    jar.set(
+      adOAuthLoginEmailCookie("meta", storeId),
+      loginEmail,
+      oauthCookieOptions(300),
+    );
+  }
+
   dest.searchParams.set("oauth", "meta");
   return NextResponse.redirect(dest);
 }

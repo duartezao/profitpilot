@@ -215,3 +215,67 @@ export async function fetchMetaAdInsightsForDay(
     currency: row?.account_currency ?? "USD",
   };
 }
+
+export type CampaignInsightsRow = {
+  campaignId: string;
+  campaignName: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  currency: string;
+};
+
+/** Insights por campanha num dia. */
+export async function fetchMetaCampaignInsightsForDay(
+  accessToken: string,
+  adAccountId: string,
+  dateKey: string,
+): Promise<CampaignInsightsRow[]> {
+  const actId = normalizeActId(adAccountId);
+  type InsightsPage = {
+    data?: Array<{
+      campaign_id?: string;
+      campaign_name?: string;
+      spend?: string;
+      impressions?: string;
+      clicks?: string;
+      account_currency?: string;
+    }>;
+    paging?: { next?: string };
+  };
+
+  const rows: CampaignInsightsRow[] = [];
+  let nextUrl: string | null = null;
+  let first = true;
+
+  while (first || nextUrl) {
+    first = false;
+    const json: InsightsPage = nextUrl
+      ? await metaGraphGet<InsightsPage>(nextUrl, accessToken)
+      : await metaGraphGet<InsightsPage>(`${actId}/insights`, accessToken, {
+          fields:
+            "campaign_id,campaign_name,spend,impressions,clicks,account_currency",
+          time_range: JSON.stringify({ since: dateKey, until: dateKey }),
+          level: "campaign",
+          limit: "100",
+        });
+
+    for (const row of json.data ?? []) {
+      const spend = Number(row.spend ?? 0) || 0;
+      const impressions = Number(row.impressions ?? 0) || 0;
+      const clicks = Number(row.clicks ?? 0) || 0;
+      if (spend <= 0 && impressions <= 0 && clicks <= 0) continue;
+      rows.push({
+        campaignId: String(row.campaign_id ?? "").trim() || "unknown",
+        campaignName: row.campaign_name?.trim() || "Campanha",
+        spend,
+        impressions,
+        clicks,
+        currency: row.account_currency ?? "USD",
+      });
+    }
+    nextUrl = json.paging?.next ?? null;
+  }
+
+  return rows;
+}

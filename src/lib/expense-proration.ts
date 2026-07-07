@@ -26,6 +26,13 @@ function daysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
 }
 
+/** Dia de cobrança no mês (ex.: 31 → último dia em fevereiro). */
+function billingDateKey(year: number, month: number, billingDay: number): string {
+  const dim = daysInMonth(year, month);
+  const day = Math.min(billingDay, dim);
+  return dateKey(new Date(year, month, day));
+}
+
 function overlapDays(start: Date, end: Date, rangeStart: Date, rangeEnd: Date): number {
   const a = startOfDay(start > rangeStart ? start : rangeStart);
   const b = endOfDay(end < rangeEnd ? end : rangeEnd);
@@ -39,6 +46,55 @@ export type ExpenseProrationInput = {
   startDateKey: string;
   endDateKey?: string | null;
 };
+
+function monthlyChargeDates(
+  expense: ExpenseProrationInput,
+  expenseStart: Date,
+  expenseEnd: Date,
+  rangeStart: Date,
+  rangeEnd: Date,
+): string[] {
+  const [, , billingDay] = expense.startDateKey.split("-").map(Number);
+  const keys: string[] = [];
+  let cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+  const endCursor = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), 1);
+
+  while (cursor <= endCursor) {
+    const y = cursor.getFullYear();
+    const m = cursor.getMonth();
+    const key = billingDateKey(y, m, billingDay);
+    const billDate = startOfDay(parseDateKey(key));
+    if (billDate >= expenseStart && billDate <= expenseEnd) {
+      if (billDate >= rangeStart && billDate <= rangeEnd) {
+        keys.push(key);
+      }
+    }
+    cursor = new Date(y, m + 1, 1);
+  }
+  return keys;
+}
+
+function yearlyChargeDates(
+  expense: ExpenseProrationInput,
+  expenseStart: Date,
+  expenseEnd: Date,
+  rangeStart: Date,
+  rangeEnd: Date,
+): string[] {
+  const [, startMonth, billingDay] = expense.startDateKey.split("-").map(Number);
+  const monthIndex = startMonth - 1;
+  const keys: string[] = [];
+
+  for (let y = rangeStart.getFullYear(); y <= rangeEnd.getFullYear(); y++) {
+    const key = billingDateKey(y, monthIndex, billingDay);
+    const billDate = startOfDay(parseDateKey(key));
+    if (billDate < expenseStart || billDate > expenseEnd) continue;
+    if (billDate >= rangeStart && billDate <= rangeEnd) {
+      keys.push(key);
+    }
+  }
+  return keys;
+}
 
 /** Valor da despesa alocado ao intervalo [periodStart, periodEnd] (inclusive). */
 export function expenseAmountForPeriod(
@@ -63,26 +119,42 @@ export function expenseAmountForPeriod(
   }
 
   if (expense.frequency === "monthly") {
-    let total = 0;
-    let cursor = new Date(activeStart.getFullYear(), activeStart.getMonth(), 1);
-    while (cursor <= activeEnd) {
-      const y = cursor.getFullYear();
-      const m = cursor.getMonth();
-      const monthStart = startOfDay(new Date(y, m, 1));
-      const monthEnd = endOfDay(new Date(y, m, daysInMonth(y, m)));
-      const days = overlapDays(activeStart, activeEnd, monthStart, monthEnd);
-      if (days > 0) {
-        total += expense.amountBase * (days / daysInMonth(y, m));
-      }
-      cursor = new Date(y, m + 1, 1);
-    }
-    return total;
+    const charges = monthlyChargeDates(
+      expense,
+      expenseStart,
+      expenseEnd,
+      activeStart,
+      activeEnd,
+    );
+    return charges.length * expense.amountBase;
   }
 
-  // yearly — rateia pelos dias do período activo
-  const activeDays = overlapDays(activeStart, activeEnd, activeStart, activeEnd);
-  const yearDays = 365.25;
-  return expense.amountBase * (activeDays / yearDays);
+  if (expense.frequency === "yearly") {
+    const charges = yearlyChargeDates(
+      expense,
+      expenseStart,
+      expenseEnd,
+      activeStart,
+      activeEnd,
+    );
+    return charges.length * expense.amountBase;
+  }
+
+  return 0;
 }
 
-export { dateKey as expenseDateKey };
+/** Valor da despesa num único dia civil. */
+export function expenseAmountForDay(
+  expense: ExpenseProrationInput,
+  dateKey: string,
+): number {
+  const day = parseDateKey(dateKey);
+  if (!day) return 0;
+  return expenseAmountForPeriod(
+    expense,
+    startOfDay(day),
+    endOfDay(day),
+  );
+}
+
+export { dateKey as expenseDateKey, overlapDays };

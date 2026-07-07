@@ -108,7 +108,19 @@ export function formatProfitBreakdown(
     input.revenue === 0 &&
     input.cogs === 0 &&
     (input.fees ?? 0) === 0 &&
-    adSpend === 0
+    adSpend === 0 &&
+    operatingExpenses > 0
+  ) {
+    note = "sem vendas — despesas operacionais";
+  }
+  if (
+    !note &&
+    adSpendKnown &&
+    input.revenue === 0 &&
+    input.cogs === 0 &&
+    (input.fees ?? 0) === 0 &&
+    adSpend === 0 &&
+    operatingExpenses === 0
   ) {
     note = "sem vendas nem ads";
   }

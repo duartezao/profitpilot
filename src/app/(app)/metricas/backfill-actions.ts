@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import { getCurrentUser } from "@/lib/auth";
 import { assertStoreAccess } from "@/lib/store-scope";
 import { backfillDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
+import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 
 export type BackfillActionState = {
   ok?: boolean;
@@ -32,6 +33,7 @@ export async function backfillDailyMetricsAction(
 
   try {
     const res = await backfillDailyMetricsForStore(storeId, { maxDays });
+    invalidateWorkspaceMetricsCache(user.workspaceId);
     revalidatePath("/metricas");
     revalidatePath("/dashboard");
     return {

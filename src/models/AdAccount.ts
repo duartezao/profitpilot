@@ -24,6 +24,12 @@ const AdAccountSchema = new Schema(
     /** Blob encriptado (AES-256-GCM) — ver app.md `adAccounts.credentials`. */
     credentials: { type: String, required: true },
     allocation: { type: Number, default: 100, min: 0, max: 100 },
+    /** Fee fixa diária (na moeda da conta) somada ao gasto da API. */
+    apiExtraFeeFixed: { type: Number, default: 0, min: 0 },
+    /** % sobre o gasto da API (agência). */
+    apiAgencyFeePercent: { type: Number, default: 0, min: 0, max: 100 },
+    /** Email/conta usada no OAuth ao ligar (informativo). */
+    linkedLoginEmail: { type: String, trim: true, default: "" },
     status: {
       type: String,
       enum: ["active", "error", "disconnected"],

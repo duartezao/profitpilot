@@ -173,3 +173,53 @@ export async function fetchTiktokAdInsightsForDay(
     currency: row?.dimensions?.currency ?? "USD",
   };
 }
+
+export type CampaignInsightsRow = {
+  campaignId: string;
+  campaignName: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  currency: string;
+};
+
+/** Insights por campanha num dia. */
+export async function fetchTiktokCampaignInsightsForDay(
+  accessToken: string,
+  advertiserId: string,
+  dateKey: string,
+): Promise<CampaignInsightsRow[]> {
+  const id = normalizeAdvertiserId(advertiserId);
+  const data = await tiktokGet<{
+    list?: Array<{
+      metrics?: { spend?: string; impressions?: string; clicks?: string };
+      dimensions?: { campaign_id?: string; currency?: string };
+    }>;
+  }>("/report/integrated/get/", accessToken, {
+    advertiser_id: id,
+    report_type: "BASIC",
+    data_level: "AUCTION_CAMPAIGN",
+    dimensions: JSON.stringify(["campaign_id", "stat_time_day"]),
+    metrics: JSON.stringify(["spend", "impressions", "clicks"]),
+    start_date: dateKey,
+    end_date: dateKey,
+    page_size: "100",
+  });
+
+  const out: CampaignInsightsRow[] = [];
+  for (const row of data.list ?? []) {
+    const spend = Number(row?.metrics?.spend ?? 0) || 0;
+    const impressions = Number(row?.metrics?.impressions ?? 0) || 0;
+    const clicks = Number(row?.metrics?.clicks ?? 0) || 0;
+    if (spend <= 0 && impressions <= 0 && clicks <= 0) continue;
+    out.push({
+      campaignId: String(row?.dimensions?.campaign_id ?? "").trim() || "unknown",
+      campaignName: `Campanha ${row?.dimensions?.campaign_id ?? ""}`.trim(),
+      spend,
+      impressions,
+      clicks,
+      currency: row?.dimensions?.currency ?? "USD",
+    });
+  }
+  return out;
+}

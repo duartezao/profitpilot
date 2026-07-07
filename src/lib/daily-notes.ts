@@ -1,6 +1,6 @@
 import "server-only";
 import mongoose from "mongoose";
-import { DailyNote, type DailyNoteReportFields } from "@/models/DailyNote";
+import { DailyNote, type DailyNoteReportFields, type DailyNoteApiSnapshot } from "@/models/DailyNote";
 import {
   dateFieldMatch,
   endOfDay,
@@ -41,6 +41,7 @@ export type ResolvedDailyNote = {
   didScale: boolean;
   mood: "good" | "bad" | "neutral" | null;
   reportFields: DailyNoteReportFields;
+  apiSnapshot?: DailyNoteApiSnapshot | null;
   scope: "store" | "workspace";
 };
 
@@ -88,11 +89,25 @@ export async function fetchStoreDailyNoteForDay(
   const isStore =
     match.storeId != null && String(match.storeId) === String(storeId);
 
+  const snap = match.apiSnapshot;
+  const apiSnapshot: DailyNoteApiSnapshot | null = snap
+    ? {
+        cpc: snap.cpc ?? null,
+        ctr: snap.ctr ?? null,
+        cpm: snap.cpm ?? null,
+        currency: snap.currency ?? "USD",
+        bestCampaign: snap.bestCampaign ?? "",
+        campaignSuggestion: snap.campaignSuggestion ?? "",
+        syncedAt: snap.syncedAt ?? undefined,
+      }
+    : null;
+
   return {
     text: (match.text ?? "").trim(),
     didScale: Boolean(match.didScale),
     mood: match.mood ?? null,
     reportFields: normalizeReportFields(match.reportFields),
+    apiSnapshot,
     scope: isStore ? "store" : "workspace",
   };
 }

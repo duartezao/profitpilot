@@ -8,6 +8,10 @@ import {
   type AdAccountCredentials,
 } from "@/lib/ad-accounts";
 import type { AdPlatform } from "@/lib/ad-spend-platforms";
+import {
+  loadStoreAdMetricsForDay,
+  loadStoreAdMetricsFromDb,
+} from "@/lib/ad-campaign-metrics";
 import { fetchMetaAdInsightsForDay } from "@/lib/meta-ads";
 import { fetchGoogleAdInsightsForDay } from "@/lib/google-ads";
 import { fetchTiktokAdInsightsForDay } from "@/lib/tiktok-ads";
@@ -58,11 +62,28 @@ async function insightsForAccount(
   }
 }
 
-/** Agrega CPC/CTR/CPM do dia a partir das contas API ligadas à loja. */
+/** Agrega CPC/CTR/CPM do dia a partir da BD (sync) ou das contas API. */
 export async function fetchStoreAdInsightsForDay(
   storeId: string,
   dateKey: string,
 ): Promise<StoreAdInsights | null> {
+  const fromDb = await loadStoreAdMetricsForDay(storeId, dateKey);
+  if (
+    fromDb &&
+    (fromDb.total.spend > 0 ||
+      fromDb.total.impressions > 0 ||
+      fromDb.total.clicks > 0)
+  ) {
+    return {
+      spend: fromDb.total.spend,
+      impressions: fromDb.total.impressions,
+      clicks: fromDb.total.clicks,
+      cpc: fromDb.total.cpc,
+      ctr: fromDb.total.ctr,
+      cpm: fromDb.total.cpm,
+    };
+  }
+
   const storeOid = new mongoose.Types.ObjectId(storeId);
   const store = await Store.findById(storeOid).select("_id").lean();
   if (!store) return null;
@@ -111,11 +132,29 @@ export async function aggregateStoreAdInsightsForPeriod(
 ): Promise<StoreAdInsights | null> {
   if (!dayKeys.length) return null;
 
+  const capped = dayKeys.slice(0, 31);
+  const fromDb = await loadStoreAdMetricsFromDb(storeId, capped);
+  if (
+    fromDb &&
+    (fromDb.total.spend > 0 ||
+      fromDb.total.impressions > 0 ||
+      fromDb.total.clicks > 0)
+  ) {
+    return {
+      spend: fromDb.total.spend,
+      impressions: fromDb.total.impressions,
+      clicks: fromDb.total.clicks,
+      cpc: fromDb.total.cpc,
+      ctr: fromDb.total.ctr,
+      cpm: fromDb.total.cpm,
+    };
+  }
+
   let spend = 0;
   let impressions = 0;
   let clicks = 0;
 
-  for (const dateKey of dayKeys.slice(0, 31)) {
+  for (const dateKey of capped) {
     const ins = await fetchStoreAdInsightsForDay(storeId, dateKey);
     if (!ins) continue;
     spend += ins.spend;

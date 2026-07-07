@@ -48,7 +48,7 @@ import {
 } from "@/lib/catalog-fallback";
 import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { syncDisputes } from "@/lib/dispute-sync";
-import { snapshotYesterdayMetrics, backfillDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
+import { snapshotYesterdayMetrics, reconcileDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
 import { syncApiAdSpendForStore } from "@/lib/ad-spend-sync";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import { Payout } from "@/models/Payout";
@@ -525,16 +525,18 @@ async function upsertProductCostNodes(
     const prevCost = prevCosts.get(variantId);
     const costChanged = prevCost === undefined || prevCost !== op.newCost;
     if (costChanged) {
-      const effectiveFrom =
-        prevCost === undefined ? new Date(0) : op.costEffectiveFrom;
-      costEffectiveFromByVariant.set(variantId, effectiveFrom);
-      await recordShopifyCostChange(
-        store._id,
-        variantId,
-        op.newCost,
-        effectiveFrom,
-        op.productId,
-      );
+      if (op.newCost > 0) {
+        const effectiveFrom =
+          prevCost === undefined ? new Date(0) : op.costEffectiveFrom;
+        costEffectiveFromByVariant.set(variantId, effectiveFrom);
+        await recordShopifyCostChange(
+          store._id,
+          variantId,
+          op.newCost,
+          effectiveFrom,
+          op.productId,
+        );
+      }
       changedVariantIds.push(variantId);
     }
 
@@ -1622,8 +1624,8 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
 
   try {
     await snapshotYesterdayMetrics(String(store.workspaceId), storeId);
-    await backfillDailyMetricsForStore(storeId, {
-      maxDays: incremental ? 3 : 30,
+    await reconcileDailyMetricsForStore(storeId, {
+      maxDays: incremental ? 45 : 120,
     });
   } catch (e) {
     console.error("[sync] daily metrics snapshot", e);
