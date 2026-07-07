@@ -181,6 +181,8 @@ export function orderProfitBase(order: OrderMoneyFields): number {
   );
 }
 
+export { orderMerchantPayoutBase } from "@/lib/order-merchant-payout";
+
 /** Converte entrada manual de COGS para a moeda da loja (linhas de encomenda). */
 export async function convertCogsInputToStoreCurrency(
   inputAmount: number,

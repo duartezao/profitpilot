@@ -59,10 +59,15 @@ export function StoreSyncButton({
   storeId,
   className,
   onDone,
+  mode = "sync",
+  disabled = false,
 }: {
   storeId: string;
   className?: string;
   onDone?: () => void;
+  /** `orders_resync` — reimporta encomendas desde importStartDate (mantém COGS/ads). */
+  mode?: "sync" | "orders_resync";
+  disabled?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<ChunkedSyncStatus>(IDLE);
@@ -77,8 +82,11 @@ export function StoreSyncButton({
     void queryClient.invalidateQueries({ queryKey: ["treasury"] });
   }, [queryClient]);
 
+  const startAction =
+    mode === "orders_resync" ? "start_orders_resync" : "start";
+
   const callSync = useCallback(
-    async (action: "start" | "step" | "cancel") => {
+    async (action: "start" | "start_orders_resync" | "step" | "cancel") => {
       const res = await fetch(`/api/stores/${storeId}/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -96,7 +104,7 @@ export function StoreSyncButton({
     setPending(true);
 
     try {
-      let status = await callSync("start");
+      let status = await callSync(startAction);
       setState(status);
       setIncremental(Boolean(status.incremental));
 
@@ -131,7 +139,7 @@ export function StoreSyncButton({
       setPending(false);
       runningRef.current = false;
     }
-  }, [callSync, invalidateMetrics, onDone]);
+  }, [callSync, invalidateMetrics, onDone, startAction]);
 
   const handleCancel = useCallback(async () => {
     abortRef.current = true;
@@ -245,16 +253,18 @@ export function StoreSyncButton({
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          disabled={syncing}
+          disabled={syncing || disabled}
           onClick={() => void runLoop()}
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-60"
         >
           <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
           {syncing
             ? state.message || "A sincronizar…"
-            : incremental
-              ? "Atualizar dados"
-              : "Sincronizar agora"}
+            : mode === "orders_resync"
+              ? "Reimportar encomendas"
+              : incremental
+                ? "Atualizar dados"
+                : "Sincronizar agora"}
         </button>
         {syncing && (
           <button

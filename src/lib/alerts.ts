@@ -27,6 +27,7 @@ import {
   startOfDay,
 } from "@/lib/period";
 import { fetchStoreDayFinancials } from "@/lib/metrics";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import { scopeQueryFromInput } from "@/lib/scope-query";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -201,11 +202,13 @@ export async function buildWorkspaceAlerts(
   for (const store of stores) {
     const sid = String(store._id);
     const storeOid = store._id;
-    const orders30 = await Order.countDocuments({
-      workspaceId: wsId,
-      storeId: storeOid,
-      orderDate: { $gte: period30.start, $lte: period30.end },
-    });
+    const orders30 = await Order.countDocuments(
+      mergePaidOrderFilter({
+        workspaceId: wsId,
+        storeId: storeOid,
+        orderDate: { $gte: period30.start, $lte: period30.end },
+      }),
+    );
     const disputes30 = await Dispute.countDocuments({
       workspaceId: wsId,
       storeId: storeOid,
@@ -283,11 +286,11 @@ export async function buildWorkspaceAlerts(
       refunds: number;
     }>([
       {
-        $match: {
+        $match: mergePaidOrderFilter({
           workspaceId: wsId,
           storeId: store._id,
           ...dateMatch,
-        },
+        }),
       },
       {
         $group: {

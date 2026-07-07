@@ -19,6 +19,7 @@ import {
   type CostResolver,
 } from "@/lib/line-snapshots";
 import { buildOrderAmountsBase } from "@/lib/order-money";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 
 export type CogsPeriodSlice = {
   start: Date;
@@ -32,7 +33,7 @@ function orderMatchForStores(
 ): Record<string, unknown> {
   const match: Record<string, unknown> = { storeId: { $in: storeIds } };
   if (period) Object.assign(match, orderDateMatch(period));
-  return match;
+  return mergePaidOrderFilter(match);
 }
 
 const num = (v: unknown): number => {
@@ -66,7 +67,7 @@ async function listSoldVariantsMissingCostFromOrders(
     unitsSold: number;
     orderCount: number;
   }>([
-    { $match: { storeId: { $in: storeIds } } },
+    { $match: mergePaidOrderFilter({ storeId: { $in: storeIds } }) },
     { $unwind: "$lineItems" },
     {
       $match: {
@@ -216,12 +217,12 @@ export async function countMissingCogsByDay(
 ): Promise<Map<string, number>> {
   if (!storeIds.length) return new Map();
 
-  const match: Record<string, unknown> = {
+  const match = mergePaidOrderFilter({
     storeId: { $in: storeIds },
     ...(storeTimeZone
       ? orderDateMatchInTimezone(period, storeTimeZone)
       : orderDateMatch(period)),
-  };
+  });
 
   const rows = await Order.aggregate<{ _id: string; count: number }>([
     { $match: match },

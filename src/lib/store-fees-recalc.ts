@@ -13,6 +13,7 @@ import {
 } from "@/lib/fee-schedule";
 import { buildOrderAmountsBase } from "@/lib/order-money";
 import { orderNetRevenue } from "@/lib/order-revenue";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import {
   dateKeyInTimezone,
   importDateKey,
@@ -50,10 +51,12 @@ export async function recalculateStoreOrderFees(
     floorKey,
   );
 
-  const orders = await Order.find({
-    storeId: storeOid,
-    $or: [{ feesSource: { $ne: "real" } }, { feesSource: null }],
-  })
+  const orders = await Order.find(
+    mergePaidOrderFilter({
+      storeId: storeOid,
+      $or: [{ feesSource: { $ne: "real" } }, { feesSource: null }],
+    }),
+  )
     .select(
       "orderDate totalPrice subtotal refunded shipping cogs manualCogs",
     )

@@ -13,6 +13,7 @@ import {
 } from "@/lib/period";
 import { convertToBaseCurrency } from "@/lib/fx";
 import { buildOrderAmountsBase } from "@/lib/order-money";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import {
   COGS_INPUT_CURRENCIES,
   isCogsInputCurrency,
@@ -438,13 +439,13 @@ export async function countOrdersMissingManualCogs(
 ): Promise<number> {
   if (!storeIds.length) return 0;
 
-  const match: Record<string, unknown> = {
+  const match = mergePaidOrderFilter({
     storeId: { $in: storeIds },
     manualCogs: null,
     ...(storeTimeZone
       ? orderDateMatchInTimezone(slice, storeTimeZone)
       : orderDateMatch(slice)),
-  };
+  });
 
   return Order.countDocuments(match);
 }

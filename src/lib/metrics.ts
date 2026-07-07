@@ -16,6 +16,9 @@ import {
   orderModeCogsSumExpr,
 } from "@/lib/order-money";
 import {
+  mergePaidOrderFilter,
+} from "@/lib/order-financial-status";
+import {
   sumManualCogsForPeriod,
   sumManualCogsByDay,
   countOrdersMissingManualCogs,
@@ -379,11 +382,11 @@ async function aggregateStoreAggs(
     { _id: mongoose.Types.ObjectId } & StoreAgg
   >([
     {
-      $match: {
+      $match: mergePaidOrderFilter({
         workspaceId: wsId,
         storeId: { $in: storeOids },
         ...dateMatch,
-      },
+      }),
     },
     {
       $group: {
@@ -423,11 +426,11 @@ async function aggregateStoreAggs(
       cogs: number;
     }>([
       {
-        $match: {
+        $match: mergePaidOrderFilter({
           workspaceId: wsId,
           storeId: { $in: shopifyVariantOids },
           ...dateMatch,
-        },
+        }),
       },
       { $group: { _id: "$storeId", cogs: cogsSumBaseExpr } },
     ]);
@@ -442,11 +445,11 @@ async function aggregateStoreAggs(
       cogs: number;
     }>([
       {
-        $match: {
+        $match: mergePaidOrderFilter({
           workspaceId: wsId,
           storeId: { $in: orderOids },
           ...dateMatch,
-        },
+        }),
       },
       { $group: { _id: "$storeId", cogs: orderModeCogsSumExpr } },
     ]);
@@ -1014,17 +1017,17 @@ async function aggregateDailyOrders(
     Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds" | "orders">
   >
 > {
-  const match: Record<string, unknown> = {
+  const match = mergePaidOrderFilter({
     workspaceId: wsId,
+    ...(storeOids.length === 1
+      ? { storeId: storeOids[0] }
+      : storeOids.length > 1
+        ? { storeId: { $in: storeOids } }
+        : {}),
     ...(storeTimeZone
       ? orderDateMatchInTimezone(slice, storeTimeZone)
       : orderDateMatch(slice)),
-  };
-  if (storeOids.length === 1) {
-    match.storeId = storeOids[0];
-  } else if (storeOids.length > 1) {
-    match.storeId = { $in: storeOids };
-  }
+  });
 
   const cogsExpr =
     cogsMode === "order"
@@ -1164,11 +1167,11 @@ async function aggregateDailyOrdersByStore(
         refunds: number;
       }>([
         {
-          $match: {
+          $match: mergePaidOrderFilter({
             workspaceId: wsId,
             storeId: store._id,
             ...orderDateMatchInTimezone(slice, tz),
-          },
+          }),
         },
         {
           $group: {
@@ -1752,12 +1755,14 @@ async function buildTopProductsByUnits(
   limit = 5,
   storeTimeZone?: string | null,
 ): Promise<TopProduct[]> {
-  const orders = await Order.find({
-    storeId: storeOid,
-    ...(storeTimeZone
-      ? orderDateMatchInTimezone(slice, storeTimeZone)
-      : orderDateMatch(slice)),
-  })
+  const orders = await Order.find(
+    mergePaidOrderFilter({
+      storeId: storeOid,
+      ...(storeTimeZone
+        ? orderDateMatchInTimezone(slice, storeTimeZone)
+        : orderDateMatch(slice)),
+    }),
+  )
     .select(
       "lineItems netRevenue subtotal totalPrice refunded amountsBase.netRevenue amountsBase.fxRate",
     )
@@ -1810,12 +1815,14 @@ async function buildTopProductsByProfit(
   limit = 5,
   storeTimeZone?: string | null,
 ): Promise<TopProduct[]> {
-  const orders = await Order.find({
-    storeId: storeOid,
-    ...(storeTimeZone
-      ? orderDateMatchInTimezone(slice, storeTimeZone)
-      : orderDateMatch(slice)),
-  })
+  const orders = await Order.find(
+    mergePaidOrderFilter({
+      storeId: storeOid,
+      ...(storeTimeZone
+        ? orderDateMatchInTimezone(slice, storeTimeZone)
+        : orderDateMatch(slice)),
+    }),
+  )
     .select(
       "lineItems shipping fees refunded totalPrice subtotal netRevenue amountsBase",
     )
@@ -2370,11 +2377,11 @@ export async function buildWorkspaceSummary(
     slice: PeriodSlice,
     storeOid?: mongoose.Types.ObjectId,
   ): Promise<StoreAgg> {
-    const match: Record<string, unknown> = {
+    const match = mergePaidOrderFilter({
       workspaceId: wsId,
       ...orderDateMatchInTimezone(slice, storeTz),
-    };
-    if (storeOid) match.storeId = storeOid;
+      ...(storeOid ? { storeId: storeOid } : {}),
+    });
 
     const mode = storeOid ? scopedCogsMode : null;
     const cogsExpr =

@@ -48,6 +48,10 @@ import {
 } from "@/lib/catalog-fallback";
 import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { syncDisputes } from "@/lib/dispute-sync";
+import {
+  normalizeOrderFinancialStatus,
+  orderShouldBeRemoved,
+} from "@/lib/order-financial-status";
 import { snapshotYesterdayMetrics, reconcileDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
 import { syncApiAdSpendForStore } from "@/lib/ad-spend-sync";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
@@ -760,40 +764,19 @@ export type OrdersPageResult = {
   hasMore: boolean;
 };
 
-const SYNC_LOOKBACK_MS = 2 * 60 * 60 * 1000;
+import {
+  isIncrementalOrderSync,
+  orderImportFloorDate,
+  orderSyncSearchQuery,
+  orderSyncSince,
+} from "@/lib/order-sync-query";
 
-/** Sync subsequente (já houve sync completa antes). */
-export function isIncrementalSync(
-  store: Pick<StoreDoc, "lastSyncAt">,
-): boolean {
-  return Boolean(store.lastSyncAt);
-}
-
-/** Instantância desde quando importar/atualizar encomendas (com margem para refunds). */
-export function orderSyncSince(
-  store: Pick<StoreDoc, "lastSyncAt" | "importStartDate">,
-): Date {
-  if (store.lastSyncAt) {
-    return new Date(
-      new Date(store.lastSyncAt).getTime() - SYNC_LOOKBACK_MS,
-    );
-  }
-  return (
-    store.importStartDate ??
-    new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-  );
-}
-
-/** Query Shopify: incremental por `updated_at`; primeira sync por `created_at`. Exclui anuladas. */
-export function orderSyncSearchQuery(
-  store: Pick<StoreDoc, "lastSyncAt" | "importStartDate">,
-): string {
-  const since = orderSyncSince(store);
-  const base = store.lastSyncAt
-    ? `updated_at:>=${since.toISOString()}`
-    : `created_at:>=${since.toISOString()}`;
-  return `${base} -financial_status:voided`;
-}
+export {
+  isIncrementalOrderSync as isIncrementalSync,
+  orderImportFloorDate,
+  orderSyncSearchQuery,
+  orderSyncSince,
+};
 
 type OrderLineSnapshot = {
   productId?: string;
@@ -940,6 +923,7 @@ export async function syncOrdersPage(
   token: string,
   cursor: string | null,
   pageSize = 50,
+  opts?: { fullOrderResync?: boolean },
 ): Promise<OrdersPageResult> {
   const resolveCost = await loadCostResolverForStore(store._id);
   const resolvePrice = await loadPriceResolverForStore(store._id);
@@ -951,8 +935,8 @@ export async function syncOrdersPage(
 
   const tz = normalizeStoreTimezone(store.ianaTimezone);
 
-  // Desde quando importar: incremental (updated_at) ou primeira sync (created_at).
-  const searchQuery = orderSyncSearchQuery(store);
+  // Desde quando importar: incremental (updated_at), primeira sync ou resync total (created_at).
+  const searchQuery = orderSyncSearchQuery(store, opts);
 
   const query = `query($cursor: String, $q: String, $first: Int!) {
     orders(first: $first, after: $cursor, query: $q, sortKey: CREATED_AT) {
@@ -1060,8 +1044,15 @@ export async function syncOrdersPage(
     let updated = 0;
 
     for (const o of conn.nodes) {
-      const finStatus = (o.displayFinancialStatus ?? "").toLowerCase();
-      if (finStatus === "voided" || finStatus === "expired") continue;
+      const finStatus = normalizeOrderFinancialStatus(o.displayFinancialStatus);
+      if (orderShouldBeRemoved(finStatus)) {
+        ops.push({
+          deleteOne: {
+            filter: { storeId: store._id, shopifyId: o.id },
+          },
+        });
+        continue;
+      }
 
       const orderDate = new Date(o.createdAt);
       const existing = existingByShopifyId.get(o.id);
@@ -1130,7 +1121,7 @@ export async function syncOrdersPage(
         name: o.name,
         orderDate,
         currency,
-        financialStatus: o.displayFinancialStatus,
+        financialStatus: finStatus || null,
         totalPrice,
         subtotal,
         netRevenue,
@@ -1220,6 +1211,11 @@ async function syncOrders(
   if (await ordersNeedLinePriceBackfill(store._id)) {
     await backfillOrderLinePricesForStore(store._id, domain, token);
   }
+
+  await Order.deleteMany({
+    storeId: store._id,
+    financialStatus: { $regex: /^(expired|voided)$/i },
+  });
 
   return count;
 }
