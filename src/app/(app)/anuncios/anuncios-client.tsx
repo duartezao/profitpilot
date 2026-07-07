@@ -11,6 +11,8 @@ import type { AdSpendView } from "@/lib/ad-spend-view";
 import { AdSpendForm } from "./ad-spend-form";
 import { AdSpendRow } from "./ad-spend-row";
 import { AdAccountsPanel } from "@/components/anuncios/ad-accounts-panel";
+import { GoogleAdsStoreLink } from "@/components/anuncios/google-ads-store-link";
+import { CampaignsPanel } from "@/components/anuncios/campaigns-panel";
 import { CollapsibleSection } from "@/components/collapsible-section";
 
 async function fetchAdSpendView(storeId: string | null): Promise<AdSpendView> {
@@ -65,6 +67,7 @@ export function AnunciosClient() {
     });
     void queryClient.invalidateQueries({ queryKey: ["metrics-summary"] });
     void queryClient.invalidateQueries({ queryKey: ["treasury"] });
+    void queryClient.invalidateQueries({ queryKey: ["ad-campaigns"] });
     void queryClient.invalidateQueries({ queryKey: ["decision-summary"] });
   }
 
@@ -196,16 +199,20 @@ export function AnunciosClient() {
         </div>
       )}
 
-      <AdAccountsPanel
+      <GoogleAdsStoreLink
         storeId={s.storeId}
-        accounts={s.adAccounts}
         canEdit={s.canEdit}
+        workspaceGoogleLogins={s.workspaceGoogleLogins}
+        googleAdsApiReady={s.googleAdsApiReady}
+        googleAccount={s.adAccounts.find((a) => a.platform === "google")}
+        onChanged={onDataChanged}
       />
 
-        <CollapsibleSection
-          title="Registar gasto manual"
-          description={`Ontem (${s.yesterday}) ou outro dia — Meta/Google/TikTok com fees.`}
-        >
+      <CollapsibleSection
+        title="Registar gasto manual"
+        description={`Ontem (${s.yesterday}) ou outro dia — Meta/Google/TikTok. Isto é o que importa para o lucro.`}
+        defaultOpen
+      >
         <AdSpendForm
           storeId={s.storeId}
           storeName={s.storeName}
@@ -217,6 +224,18 @@ export function AnunciosClient() {
           embedded
         />
       </CollapsibleSection>
+
+      <AdAccountsPanel
+        storeId={s.storeId}
+        accounts={s.adAccounts}
+        canEdit={s.canEdit}
+        onChanged={onDataChanged}
+      />
+
+      <CampaignsPanel
+        storeId={s.storeId}
+        hasLinkedAccounts={s.adAccounts.length > 0}
+      />
 
       <CollapsibleSection
         title="Dias a preencher"

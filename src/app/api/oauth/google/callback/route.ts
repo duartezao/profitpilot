@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getCurrentUser } from "@/lib/auth";
-import { resolveGoogleOAuthRedirectUri } from "@/lib/google-oauth";
+import {
+  resolveGoogleOAuthLoginEmail,
+  resolveGoogleOAuthRedirectUri,
+} from "@/lib/google-oauth";
 import { assertStoreAccess } from "@/lib/store-scope";
 import {
   adOAuthLoginEmailCookie,
+  adOAuthReturnCookie,
   adOAuthStateCookie,
   adOAuthStoreCookie,
   adOAuthTokenCookie,
@@ -12,6 +16,7 @@ import {
   oauthCookieOptions,
   parseOAuthStoreId,
 } from "@/lib/ad-oauth";
+import { upsertWorkspaceGoogleCredential } from "@/lib/ad-platform-credentials";
 
 export async function GET(request: Request) {
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID?.trim();
@@ -19,7 +24,7 @@ export async function GET(request: Request) {
   const redirectUri = resolveGoogleOAuthRedirectUri(request);
   if (!clientId || !clientSecret || !redirectUri) {
     return NextResponse.redirect(
-      new URL("/anuncios?oauth_error=google_config", request.url),
+      new URL("/definicoes?oauth_error=google_config#google-ads", request.url),
     );
   }
 
@@ -32,27 +37,34 @@ export async function GET(request: Request) {
   const jar = await cookies();
   const expectedState = jar.get(adOAuthStateCookie("google"))?.value;
   const storeId = parseOAuthStoreId(jar.get(adOAuthStoreCookie("google"))?.value);
+  const returnTo = jar.get(adOAuthReturnCookie("google"))?.value ?? "";
+  const toDefinicoes = returnTo === "definicoes" || !storeId;
+
   jar.delete(adOAuthStateCookie("google"));
   jar.delete(adOAuthStoreCookie("google"));
+  jar.delete(adOAuthReturnCookie("google"));
 
-  const dest = new URL("/anuncios", request.url);
-  if (storeId) dest.searchParams.set("store", storeId);
-  dest.hash = "contas-ads";
-
-  if (!storeId) {
-    dest.searchParams.set("oauth_error", "store_required");
-    return NextResponse.redirect(dest);
+  const dest = toDefinicoes
+    ? new URL("/definicoes", request.url)
+  : new URL("/anuncios", request.url);
+  if (toDefinicoes) {
+    dest.hash = "google-ads";
+  } else if (storeId) {
+    dest.searchParams.set("store", storeId);
   }
 
   const user = await getCurrentUser();
   if (!user?.workspaceId) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  try {
-    assertStoreAccess(user.storeAccess, storeId);
-  } catch {
-    dest.searchParams.set("oauth_error", "store_access");
-    return NextResponse.redirect(dest);
+
+  if (storeId && !toDefinicoes) {
+    try {
+      assertStoreAccess(user.storeAccess, storeId);
+    } catch {
+      dest.searchParams.set("oauth_error", "store_access");
+      return NextResponse.redirect(dest);
+    }
   }
 
   if (error || !code) {
@@ -83,6 +95,7 @@ export async function GET(request: Request) {
   const json = (await res.json()) as {
     refresh_token?: string;
     access_token?: string;
+    id_token?: string;
     error?: string;
     error_description?: string;
   };
@@ -97,31 +110,41 @@ export async function GET(request: Request) {
     return NextResponse.redirect(dest);
   }
 
-  let loginEmail = "";
-  if (json.access_token) {
-    try {
-      const infoRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-        headers: { Authorization: `Bearer ${json.access_token}` },
-        cache: "no-store",
-      });
-      const info = (await infoRes.json()) as { email?: string };
-      loginEmail = info.email?.trim() ?? "";
-    } catch {
-      /* opcional */
-    }
-  }
-
-  const tokenCookie = adOAuthTokenCookie("google", storeId);
-  jar.set(tokenCookie, json.refresh_token, oauthCookieOptions(300));
-  jar.delete(legacyOAuthTokenCookie("google"));
-  if (loginEmail) {
-    jar.set(
-      adOAuthLoginEmailCookie("google", storeId),
-      loginEmail,
-      oauthCookieOptions(300),
+  const loginEmail = await resolveGoogleOAuthLoginEmail(json);
+  if (!loginEmail) {
+    dest.searchParams.set(
+      "oauth_error",
+      "Não foi possível obter o email do Gmail — autoriza de novo e aceita o acesso ao email.",
     );
+    return NextResponse.redirect(dest);
   }
 
-  dest.searchParams.set("oauth", "google");
+  try {
+    await upsertWorkspaceGoogleCredential(
+      user.workspaceId,
+      loginEmail,
+      json.refresh_token,
+    );
+  } catch {
+    dest.searchParams.set("oauth_error", "save_failed");
+    return NextResponse.redirect(dest);
+  }
+
+  if (storeId && !toDefinicoes) {
+    const tokenCookie = adOAuthTokenCookie("google", storeId);
+    jar.set(tokenCookie, json.refresh_token, oauthCookieOptions(300));
+    jar.delete(legacyOAuthTokenCookie("google"));
+    if (loginEmail) {
+      jar.set(
+        adOAuthLoginEmailCookie("google", storeId),
+        loginEmail,
+        oauthCookieOptions(300),
+      );
+    }
+    dest.searchParams.set("google_login", "ok");
+  } else {
+    dest.searchParams.set("google_login", "ok");
+  }
+
   return NextResponse.redirect(dest);
 }

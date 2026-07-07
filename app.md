@@ -410,11 +410,11 @@ Net Profit =
 
 > Usa a **Google Ads API** ([docs](https://developers.google.com/google-ads/api/rest/auth)). Precisa de credenciais OAuth, **developer token** e o **customer ID**.
 
-1. Criar um projeto no **Google Cloud Console** e gerar **Client ID + Client Secret** (OAuth 2.0), scope `https://www.googleapis.com/auth/adwords`.
-2. Obter um **developer token** no API Center da conta **Google Ads manager (MCC)** (`ads.google.com/aw/apicenter`).
+1. Criar um projeto no **Google Cloud Console** e gerar **Client ID + Client Secret** (OAuth 2.0), scopes `adwords` + `userinfo.email` + `openid` (a app pede os três no login).
+2. Obter um **developer token** no **Centro da API** de qualquer conta Google Ads a que tenhas acesso — **não é obrigatório MCC**; uma conta de ads normal chega (modo teste para começar). URL: `ads.google.com/aw/apicenter`.
 3. Redirect URI: `GOOGLE_ADS_OAUTH_REDIRECT_URI` → `/api/oauth/google/callback`.
-4. Em `/anuncios` → **Ligar com Google (OAuth)** → login → **Procurar contas** → escolher customer ID.
-5. O utilizador autoriza (OAuth) e a app guarda o **refresh token**; o access token é renovado automaticamente.
+4. **Definições → Google Ads** — OAuth **uma vez por Gmail** (workspace).
+5. Em cada loja (`/anuncios`) — escolher Gmail + **Customer ID** para sync opcional. **Gasto manual** funciona sempre sem API.
 6. O gasto vem em **USD** (moeda da conta) e converte para a moeda base do workspace. Query **GAQL** ao `GoogleAdsService.search` (`metrics.cost_micros` ÷ 1.000.000).
 7. **Fees na conta API** — fee fixa extra + % agência; aplicam-se em cada sync automático.
 8. **Trocar conta** — ao ligar outra conta Google na mesma loja, a anterior é desligada; o **histórico de gasto** (`manualAdSpend`) mantém-se.
@@ -1460,7 +1460,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `currency`
 * `syncedAt`
 
-> Guardado ao nível de **campanha + dia** (sync automático quando a conta API sincroniza o spend de hoje). CPC/CTR/CPM são calculados na leitura (`spend/cliques`, etc.). Os totais por plataforma e por loja agregam a partir daqui.
+> Guardado ao nível de **campanha + dia** (sync automático quando a conta API sincroniza o spend de hoje). CPC/CTR/CPM são calculados na leitura (`spend/cliques`, etc.). Os totais por plataforma e por loja agregam a partir daqui. Em `/anuncios` → secção **Campanhas**: lista campanhas activas/pausadas da conta ligada com métricas de hoje (`GET /api/anuncios/campaigns?store=`).
 
 **Pendente (roadmap):** `conversions`, `spendBaseCurrency`, toggle média vs total no UI do relatório.
 

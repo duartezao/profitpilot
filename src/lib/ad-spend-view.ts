@@ -15,9 +15,16 @@ import {
 } from "@/lib/ad-spend";
 import { parseDateInput } from "@/lib/period";
 import {
+  listWorkspaceGoogleLogins,
+  type WorkspaceGoogleLogin,
+} from "@/lib/ad-platform-credentials";
+import {
   listAdAccountsForStore,
   type AdAccountRow,
 } from "@/lib/ad-accounts";
+import { googleAdsServerConfigStatus } from "@/lib/google-ads";
+
+export type { WorkspaceGoogleLogin };
 
 export type AdSpendStoreView = {
   storeId: string;
@@ -31,6 +38,8 @@ export type AdSpendStoreView = {
   missingCount: number;
   yesterdayMissing: boolean;
   adAccounts: AdAccountRow[];
+  workspaceGoogleLogins: WorkspaceGoogleLogin[];
+  googleAdsApiReady: boolean;
 };
 
 export type AdSpendOverviewView = {
@@ -77,6 +86,10 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
       user.workspaceId,
       String(scoped._id),
     );
+    const workspaceGoogleLogins = await listWorkspaceGoogleLogins(
+      user.workspaceId,
+    );
+    const googleAdsApiReady = googleAdsServerConfigStatus().apiReady;
 
     const yesterday = range.toKey;
 
@@ -94,6 +107,8 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
         missingCount: countMissingDays(calendar),
         yesterdayMissing: missingDays.some((d) => d.isYesterday),
         adAccounts,
+        workspaceGoogleLogins,
+        googleAdsApiReady,
       },
     };
   }
