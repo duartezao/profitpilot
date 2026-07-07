@@ -37,6 +37,10 @@ export function adOAuthStoreCookie(platform: AdOAuthPlatform): string {
   return `ad_oauth_store_${platform}`;
 }
 
+export function adOAuthReturnCookie(platform: AdOAuthPlatform): string {
+  return `ad_oauth_return_${platform}`;
+}
+
 export function parseOAuthStoreId(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   if (!trimmed || !mongoose.isValidObjectId(trimmed)) return null;

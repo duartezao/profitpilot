@@ -18,7 +18,9 @@ import {
 } from "@/lib/meta-ads";
 import {
   GoogleAdsApiError,
+  googleAdsServerConfigStatus,
   listGoogleAdAccounts,
+  resolveGoogleCustomerIdLocal,
   verifyGoogleAdAccountAccess,
   type GoogleAdAccountOption,
 } from "@/lib/google-ads";
@@ -33,6 +35,11 @@ import {
   adOAuthTokenCookie,
   legacyOAuthTokenCookie,
 } from "@/lib/ad-oauth";
+import {
+  getWorkspaceGoogleRefreshToken,
+  saveWorkspaceGoogleCredentialManual,
+  upsertWorkspaceGoogleCredential,
+} from "@/lib/ad-platform-credentials";
 
 export type AdAccountActionState = { ok?: boolean; error?: string };
 
@@ -62,13 +69,18 @@ const addSchema = z
     apiExtraFeeFixed: z.coerce.number().min(0).optional(),
     apiAgencyFeePercent: z.coerce.number().min(0).max(100).optional(),
     linkedLoginEmail: z.string().trim().max(200).optional(),
+    googleCredentialId: z.string().trim().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.platform === "google") {
-      if (!data.refreshToken || data.refreshToken.length < 10) {
+      const hasCredential =
+        Boolean(data.googleCredentialId?.trim()) &&
+        mongoose.isValidObjectId(data.googleCredentialId);
+      const hasToken = Boolean(data.refreshToken && data.refreshToken.length >= 10);
+      if (!hasCredential && !hasToken) {
         ctx.addIssue({
           code: "custom",
-          message: "Indica um refresh token Google válido.",
+          message: "Escolhe um login Google do workspace ou indica refresh token.",
           path: ["refreshToken"],
         });
       }
@@ -86,11 +98,19 @@ async function verifyPlatformAccount(
   externalAccountId: string,
   accessToken?: string,
   refreshToken?: string,
-): Promise<{ name: string; currency: string }> {
+): Promise<{ name: string; currency: string; externalAccountId?: string }> {
   switch (platform) {
     case "meta":
       return verifyMetaAdAccountAccess(accessToken!, externalAccountId);
     case "google":
+      if (!googleAdsServerConfigStatus().apiReady) {
+        const local = resolveGoogleCustomerIdLocal(externalAccountId);
+        return {
+          name: local.name,
+          currency: "EUR",
+          externalAccountId: local.id,
+        };
+      }
       return verifyGoogleAdAccountAccess(refreshToken!, externalAccountId);
     case "tiktok":
       return verifyTiktokAdvertiserAccess(accessToken!, externalAccountId);
@@ -125,6 +145,7 @@ export async function addAdAccountAction(
     apiExtraFeeFixed: formData.get("apiExtraFeeFixed") || 0,
     apiAgencyFeePercent: formData.get("apiAgencyFeePercent") || 0,
     linkedLoginEmail: formData.get("linkedLoginEmail") || undefined,
+    googleCredentialId: formData.get("googleCredentialId") || undefined,
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -144,7 +165,23 @@ export async function addAdAccountAction(
     apiExtraFeeFixed,
     apiAgencyFeePercent,
     linkedLoginEmail,
+    googleCredentialId,
   } = parsed.data;
+
+  let refreshTokenResolved = refreshToken?.trim() ?? "";
+  let linkedEmailResolved = linkedLoginEmail ?? "";
+
+  if (platform === "google" && googleCredentialId) {
+    const cred = await getWorkspaceGoogleRefreshToken(
+      user.workspaceId,
+      googleCredentialId,
+    );
+    if (!cred) {
+      return { error: "Login Google do workspace não encontrado." };
+    }
+    refreshTokenResolved = cred.refreshToken;
+    if (!linkedEmailResolved) linkedEmailResolved = cred.loginEmail;
+  }
 
   const replaceOther =
     String(formData.get("replacePlatformAccount") ?? "") === "true";
@@ -154,24 +191,26 @@ export async function addAdAccountAction(
       platform,
       externalAccountId,
       accessToken,
-      refreshToken,
+      platform === "google" ? refreshTokenResolved : refreshToken,
     );
+    const externalIdResolved =
+      verified.externalAccountId ?? externalAccountId.trim();
     const credentials =
       platform === "google"
-        ? { refreshToken: refreshToken!.trim() }
+        ? { refreshToken: refreshTokenResolved }
         : { accessToken: accessToken!.trim() };
 
     await createAdAccount({
       workspaceId: new mongoose.Types.ObjectId(user.workspaceId),
       storeId: store._id,
       platform,
-      externalAccountId,
+      externalAccountId: externalIdResolved,
       accountName: accountName || verified.name,
       credentials,
       allocation,
       apiExtraFeeFixed: apiExtraFeeFixed ?? 0,
       apiAgencyFeePercent: apiAgencyFeePercent ?? 0,
-      linkedLoginEmail: linkedLoginEmail ?? "",
+      linkedLoginEmail: linkedEmailResolved,
       replaceOtherOnPlatform: replaceOther,
     });
     try {
@@ -180,6 +219,7 @@ export async function addAdAccountAction(
       /* sync opcional após ligar */
     }
     revalidatePath("/anuncios");
+    revalidatePath("/definicoes");
     return { ok: true };
   } catch (e) {
     const msg =
@@ -194,6 +234,55 @@ export async function addAdAccountAction(
       return { error: "Esta conta já está ligada a esta loja." };
     }
     return { error: msg };
+  }
+}
+
+/** Lista contas Google Ads com um login já guardado no workspace. */
+export async function discoverGoogleCredentialAction(
+  credentialId: string,
+): Promise<AdAccountsDiscoverState> {
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) return { error: "Sessão inválida." };
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão." };
+  }
+  const cred = await getWorkspaceGoogleRefreshToken(
+    user.workspaceId,
+    credentialId,
+  );
+  if (!cred) return { error: "Login Google não encontrado." };
+  return discoverAdAccountsAction("google", cred.refreshToken);
+}
+
+export async function saveWorkspaceGoogleLoginAction(
+  _prev: AdAccountActionState,
+  formData: FormData,
+): Promise<AdAccountActionState> {
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) return { error: "Sessão inválida." };
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão." };
+  }
+
+  const loginEmail = String(formData.get("loginEmail") ?? "").trim();
+  const refreshToken = String(formData.get("refreshToken") ?? "").trim();
+  if (!loginEmail || !refreshToken) {
+    return { error: "Email e refresh token são obrigatórios." };
+  }
+
+  try {
+    await saveWorkspaceGoogleCredentialManual(
+      user.workspaceId,
+      loginEmail,
+      refreshToken,
+    );
+    revalidatePath("/anuncios");
+    revalidatePath("/definicoes");
+    return { ok: true };
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Não foi possível guardar.",
+    };
   }
 }
 
@@ -225,6 +314,12 @@ export async function discoverAdAccountsAction(
       return { platform, meta: accounts };
     }
     if (platform === "google") {
+      if (!googleAdsServerConfigStatus().apiReady) {
+        return {
+          error:
+            "Pesquisa automática indisponível — falta GOOGLE_ADS_DEVELOPER_TOKEN na Vercel. Usa «Customer ID manual» com o ID da conta (ex: 962-828-5107).",
+        };
+      }
       const accounts = await listGoogleAdAccounts(trimmed);
       if (!accounts.length) {
         return {
@@ -275,6 +370,34 @@ export async function deleteAdAccountAction(
   const ok = await softDeleteAdAccount(user.workspaceId, accountId);
   if (!ok) return { error: "Conta não encontrada." };
   revalidatePath("/anuncios");
+  revalidatePath("/definicoes");
+  return { ok: true };
+}
+
+export async function deleteWorkspaceGoogleLoginAction(
+  _prev: AdAccountActionState,
+  formData: FormData,
+): Promise<AdAccountActionState> {
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) return { error: "Sessão inválida." };
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão." };
+  }
+
+  const credentialId = String(formData.get("credentialId") ?? "").trim();
+  if (!credentialId) return { error: "Login em falta." };
+
+  const { softDeleteWorkspaceCredential } = await import(
+    "@/lib/ad-platform-credentials"
+  );
+  const ok = await softDeleteWorkspaceCredential(
+    user.workspaceId,
+    credentialId,
+    "google",
+  );
+  if (!ok) return { error: "Gmail não encontrado." };
+  revalidatePath("/anuncios");
+  revalidatePath("/definicoes");
   return { ok: true };
 }
 
@@ -287,6 +410,7 @@ export async function syncAdAccountsNowAction(
   try {
     await syncAdAccountsSpendForStore(storeId);
     revalidatePath("/anuncios");
+    revalidatePath("/definicoes");
     return { ok: true };
   } catch (e) {
     return {
@@ -324,6 +448,14 @@ async function consumeOAuthPending(
   const emailCookie = adOAuthLoginEmailCookie(platform, storeId);
   const loginEmail = jar.get(emailCookie)?.value?.trim() || undefined;
   jar.delete(emailCookie);
+
+  if (platform === "google" && token && loginEmail) {
+    try {
+      await upsertWorkspaceGoogleCredential(user.workspaceId, loginEmail, token);
+    } catch {
+      /* ignorar — cookie ainda serve nesta sessão */
+    }
+  }
 
   return { token, loginEmail };
 }

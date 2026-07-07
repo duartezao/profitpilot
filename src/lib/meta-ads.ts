@@ -6,6 +6,12 @@
  * Permissão necessária: `ads_read` (token de utilizador ou System User do Business Manager).
  */
 
+import {
+  formatCampaignStatusLabel,
+  metricsFromCampaignTotals,
+  type LiveCampaignRow,
+} from "@/lib/ad-campaign-types";
+
 const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION ?? "v25.0";
 const META_GRAPH = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 
@@ -278,4 +284,145 @@ export async function fetchMetaCampaignInsightsForDay(
   }
 
   return rows;
+}
+
+/** Campanhas activas/pausadas com métricas de hoje. */
+export async function fetchMetaLiveCampaigns(
+  accessToken: string,
+  adAccountId: string,
+  dateKey: string,
+): Promise<LiveCampaignRow[]> {
+  const actId = normalizeActId(adAccountId);
+  type CampaignPage = {
+    data?: Array<{
+      id?: string;
+      name?: string;
+      status?: string;
+      effective_status?: string;
+    }>;
+    paging?: { next?: string };
+  };
+
+  const campaignsById = new Map<
+    string,
+    { name: string; status: string }
+  >();
+  let nextUrl: string | null = null;
+  let first = true;
+
+  while (first || nextUrl) {
+    first = false;
+    const json: CampaignPage = nextUrl
+      ? await metaGraphGet<CampaignPage>(nextUrl, accessToken)
+      : await metaGraphGet<CampaignPage>(`${actId}/campaigns`, accessToken, {
+          fields: "id,name,status,effective_status",
+          limit: "100",
+        });
+
+    for (const c of json.data ?? []) {
+      const id = String(c.id ?? "").trim();
+      if (!id) continue;
+      campaignsById.set(id, {
+        name: c.name?.trim() || "Campanha",
+        status: c.effective_status?.trim() || c.status?.trim() || "UNKNOWN",
+      });
+    }
+    nextUrl = json.paging?.next ?? null;
+  }
+
+  const metricsById = new Map<
+    string,
+    { spend: number; impressions: number; clicks: number; currency: string; name: string }
+  >();
+
+  type InsightsPage = {
+    data?: Array<{
+      campaign_id?: string;
+      campaign_name?: string;
+      spend?: string;
+      impressions?: string;
+      clicks?: string;
+      account_currency?: string;
+    }>;
+    paging?: { next?: string };
+  };
+
+  nextUrl = null;
+  first = true;
+  while (first || nextUrl) {
+    first = false;
+    const json: InsightsPage = nextUrl
+      ? await metaGraphGet<InsightsPage>(nextUrl, accessToken)
+      : await metaGraphGet<InsightsPage>(`${actId}/insights`, accessToken, {
+          fields:
+            "campaign_id,campaign_name,spend,impressions,clicks,account_currency",
+          time_range: JSON.stringify({ since: dateKey, until: dateKey }),
+          level: "campaign",
+          limit: "100",
+        });
+
+    for (const row of json.data ?? []) {
+      const id = String(row.campaign_id ?? "").trim();
+      if (!id) continue;
+      metricsById.set(id, {
+        spend: Number(row.spend ?? 0) || 0,
+        impressions: Number(row.impressions ?? 0) || 0,
+        clicks: Number(row.clicks ?? 0) || 0,
+        currency: row.account_currency ?? "USD",
+        name: row.campaign_name?.trim() || "Campanha",
+      });
+    }
+    nextUrl = json.paging?.next ?? null;
+  }
+
+  const out: LiveCampaignRow[] = [];
+  const seen = new Set<string>();
+
+  for (const [id, c] of campaignsById) {
+    const isRunning = c.status === "ACTIVE";
+    const m = metricsById.get(id);
+    if (!isRunning && !m) continue;
+    if (c.status !== "ACTIVE" && c.status !== "PAUSED" && !m) continue;
+
+    const spend = m?.spend ?? 0;
+    const impressions = m?.impressions ?? 0;
+    const clicks = m?.clicks ?? 0;
+    out.push({
+      campaignId: id,
+      campaignName: c.name || m?.name || "Campanha",
+      platform: "meta",
+      platformLabel: "Meta",
+      adAccountId: actId,
+      adAccountName: actId,
+      status: c.status,
+      statusLabel: formatCampaignStatusLabel(c.status),
+      spend,
+      impressions,
+      clicks,
+      currency: m?.currency ?? "USD",
+      ...metricsFromCampaignTotals(spend, impressions, clicks),
+    });
+    seen.add(id);
+  }
+
+  for (const [id, m] of metricsById) {
+    if (seen.has(id)) continue;
+    out.push({
+      campaignId: id,
+      campaignName: m.name,
+      platform: "meta",
+      platformLabel: "Meta",
+      adAccountId: actId,
+      adAccountName: actId,
+      status: "ACTIVE",
+      statusLabel: "Activa",
+      spend: m.spend,
+      impressions: m.impressions,
+      clicks: m.clicks,
+      currency: m.currency,
+      ...metricsFromCampaignTotals(m.spend, m.impressions, m.clicks),
+    });
+  }
+
+  return out.sort((a, b) => b.spend - a.spend);
 }

@@ -3,26 +3,23 @@
 import { useActionState, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Trash2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { AdAccountRow } from "@/lib/ad-accounts";
 import {
   addAdAccountAction,
   consumeMetaOAuthTokenAction,
-  consumeGoogleOAuthTokenAction,
-  deleteAdAccountAction,
   discoverAdAccountsAction,
   syncAdAccountsNowAction,
   updateAdAccountFeesAction,
   type AdAccountActionState,
   type AdAccountsDiscoverState,
 } from "@/app/(app)/anuncios/ad-account-actions";
-import {
-  AD_PLATFORM_LABELS,
-  AD_PLATFORMS,
-  type AdPlatform,
-} from "@/lib/ad-spend-platforms";
+import { DeleteAdAccountButton } from "@/components/anuncios/delete-ad-account-button";
+import { AD_PLATFORM_LABELS, type AdPlatform } from "@/lib/ad-spend-platforms";
 import { CollapsibleSection } from "@/components/collapsible-section";
-import { hrefOAuthStart, hrefWithScope } from "@/lib/scope-query";
+import { hrefOAuthStart } from "@/lib/scope-query";
+
+const API_PLATFORMS = ["meta", "tiktok"] as const satisfies readonly AdPlatform[];
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
@@ -43,13 +40,6 @@ function mapDiscovered(res: AdAccountsDiscoverState): DiscoveredAccount[] {
       inactive: a.accountStatus !== 1,
     }));
   }
-  if (res.platform === "google" && res.google) {
-    return res.google.map((a) => ({
-      id: a.id,
-      name: a.name,
-      currency: a.currency,
-    }));
-  }
   if (res.platform === "tiktok" && res.tiktok) {
     return res.tiktok.map((a) => ({
       id: a.id,
@@ -64,12 +54,15 @@ export function AdAccountsPanel({
   storeId,
   accounts,
   canEdit,
+  onChanged,
 }: {
   storeId: string;
   accounts: AdAccountRow[];
   canEdit: boolean;
+  onChanged?: () => void;
 }) {
   const searchParams = useSearchParams();
+  const apiAccounts = accounts.filter((a) => a.platform !== "google");
   const [addState, addAction, adding] = useActionState<
     AdAccountActionState,
     FormData
@@ -82,10 +75,8 @@ export function AdAccountsPanel({
   const [discovering, startDiscover] = useTransition();
   const [oauthMsg, setOauthMsg] = useState<string | null>(null);
   const [linkedLoginEmail, setLinkedLoginEmail] = useState("");
-  const [googleOAuthLinked, setGoogleOAuthLinked] = useState(false);
-  const [showManualToken, setShowManualToken] = useState(false);
 
-  const errorCount = accounts.filter((a) => a.status === "error").length;
+  const errorCount = apiAccounts.filter((a) => a.status === "error").length;
   const selected = discovered.find((a) => a.id === selectedId);
 
   const metaOAuthStart = hrefOAuthStart(
@@ -93,34 +84,15 @@ export function AdAccountsPanel({
     storeId,
     searchParams,
   );
-  const googleOAuthStart = hrefOAuthStart(
-    "/api/oauth/google/start",
-    storeId,
-    searchParams,
-  );
+
+  useEffect(() => {
+    if (addState.ok) onChanged?.();
+  }, [addState.ok, onChanged]);
 
   useEffect(() => {
     const err = searchParams.get("oauth_error");
-    if (err) {
-      if (err === "cancelled") {
-        setOauthMsg("Ligação cancelada.");
-      } else if (err === "store_required") {
-        setOauthMsg("Selecciona uma loja antes de ligar uma conta de ads.");
-      } else if (err === "store_access") {
-        setOauthMsg("Sem acesso a esta loja.");
-      } else if (
-        err === "google_config" ||
-        err === "google_config_client_id" ||
-        err === "google_config_redirect"
-      ) {
-        setOauthMsg(
-          err === "google_config_redirect"
-            ? "OAuth Google: redirect URI em falta. Abre /api/oauth/google/config (com sessão) para ver o URI exacto a colar no Google Cloud."
-            : "OAuth Google não configurado no servidor. Adiciona GOOGLE_ADS_CLIENT_ID e GOOGLE_ADS_CLIENT_SECRET ao .env / Vercel.",
-        );
-      } else {
-        setOauthMsg(`OAuth falhou: ${err}`);
-      }
+    if (err && err !== "store_required") {
+      setOauthMsg(`OAuth falhou: ${err}`);
       return;
     }
     if (searchParams.get("oauth") === "meta" && canEdit) {
@@ -136,36 +108,17 @@ export function AdAccountsPanel({
           );
         }
       });
-      return;
-    }
-    if (searchParams.get("oauth") === "google" && canEdit) {
-      void consumeGoogleOAuthTokenAction(storeId).then((pending) => {
-        if (pending) {
-          setPlatform("google");
-          setToken(pending.token);
-          setLinkedLoginEmail(pending.loginEmail ?? "");
-          setGoogleOAuthLinked(true);
-          setShowManualToken(false);
-          setOauthMsg(
-            pending.loginEmail
-              ? `Google ligado como ${pending.loginEmail} — a procurar contas…`
-              : "Conta Google ligada — a procurar contas…",
-          );
-          void runDiscover({ token: pending.token, platform: "google" });
-        }
-      });
     }
   }, [searchParams, canEdit, storeId]);
 
-  function runDiscover(opts?: { token?: string; platform?: AdPlatform }) {
-    const activePlatform = opts?.platform ?? platform;
-    const activeToken = (opts?.token ?? token).trim();
+  function runDiscover() {
+    const activeToken = token.trim();
     if (activeToken.length < 10) return;
     setDiscoverError(null);
     setDiscovered([]);
     setSelectedId("");
     startDiscover(async () => {
-      const res = await discoverAdAccountsAction(activePlatform, activeToken);
+      const res = await discoverAdAccountsAction(platform, activeToken);
       if (res.error) {
         setDiscoverError(res.error);
         setOauthMsg(null);
@@ -174,28 +127,22 @@ export function AdAccountsPanel({
       const list = mapDiscovered(res);
       setDiscovered(list);
       if (list.length === 1) setSelectedId(list[0].id);
-      if (linkedLoginEmail || googleOAuthLinked || activePlatform === "google") {
-        setOauthMsg(
-          list.length
-            ? `Escolhe a conta de ads abaixo (${list.length} encontrada${list.length === 1 ? "" : "s"}).`
-            : "Nenhuma conta Google Ads encontrada com este login.",
-        );
-      }
+      setOauthMsg(
+        list.length
+          ? `Escolhe a conta (${list.length} encontrada${list.length === 1 ? "" : "s"}).`
+          : "Nenhuma conta encontrada com este token.",
+      );
     });
   }
-
-  const tokenLabel =
-    platform === "google" ? "Refresh token (OAuth)" : "Access token";
-  const tokenField = platform === "google" ? "refreshToken" : "accessToken";
 
   return (
     <CollapsibleSection
       id="contas-ads"
-      title="Contas de ads (API)"
-      description="Meta, Google e TikTok — cada loja com o seu login OAuth e sync automático."
-      defaultOpen={accounts.length === 0 || errorCount > 0}
+      title="Meta e TikTok (API)"
+      description="Sync automático opcional. Google está no bloco acima ou usa gasto manual."
+      defaultOpen={apiAccounts.length === 0 || errorCount > 0}
       badge={
-        accounts.length > 0 ? (
+        apiAccounts.length > 0 ? (
           <span
             className={`rounded-md border px-2 py-0.5 text-xs font-medium ${
               errorCount > 0
@@ -203,7 +150,7 @@ export function AdAccountsPanel({
                 : "border-border text-muted-foreground"
             }`}
           >
-            {accounts.length} ligada{accounts.length === 1 ? "" : "s"}
+            {apiAccounts.length} ligada{apiAccounts.length === 1 ? "" : "s"}
             {errorCount > 0 ? ` · ${errorCount} erro` : ""}
           </span>
         ) : undefined
@@ -211,14 +158,8 @@ export function AdAccountsPanel({
     >
       {canEdit && (
         <div className="space-y-4 border-b border-border pb-4">
-          <div>
-            <h3 className="text-sm font-semibold">Ligar conta</h3>
-            <p className="text-xs text-muted-foreground">
-              OAuth por loja — podes usar emails diferentes em cada loja.
-            </p>
-          </div>
           <div className="flex flex-wrap gap-2">
-            {AD_PLATFORMS.map((p) => (
+            {API_PLATFORMS.map((p) => (
               <button
                 key={p}
                 type="button"
@@ -227,10 +168,7 @@ export function AdAccountsPanel({
                   setDiscovered([]);
                   setSelectedId("");
                   setDiscoverError(null);
-                  if (p !== "google") {
-                    setGoogleOAuthLinked(false);
-                    setShowManualToken(false);
-                  }
+                  setOauthMsg(null);
                 }}
                 className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
                   platform === p
@@ -252,44 +190,8 @@ export function AdAccountsPanel({
                 Ligar com Meta (OAuth)
               </Link>
               <span className="text-xs text-muted-foreground">
-                ou cola um System User token · login independente por loja
+                ou cola System User token
               </span>
-            </div>
-          )}
-
-          {platform === "google" && (
-            <div className="space-y-3">
-              {!googleOAuthLinked ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link
-                    href={googleOAuthStart}
-                    className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
-                  >
-                    Continuar com Google
-                  </Link>
-                  <span className="text-xs text-muted-foreground">
-                    Login Google — sem colar token
-                  </span>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {linkedLoginEmail
-                    ? `Ligado como ${linkedLoginEmail}`
-                    : "Conta Google autorizada"}
-                  {discovering ? " · a procurar contas…" : ""}
-                </p>
-              )}
-              {!googleOAuthLinked && (
-                <button
-                  type="button"
-                  onClick={() => setShowManualToken((v) => !v)}
-                  className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
-                >
-                  {showManualToken
-                    ? "Ocultar token manual"
-                    : "Colar refresh token manualmente"}
-                </button>
-              )}
             </div>
           )}
 
@@ -304,31 +206,26 @@ export function AdAccountsPanel({
           )}
           {addState.ok && (
             <p className="rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-sm text-positive">
-              Conta ligada e validada.
+              Conta ligada.
             </p>
           )}
 
-          {(platform !== "google" || showManualToken) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              {tokenLabel}
+              {platform === "meta" ? "Access token" : "Token TikTok"}
             </label>
             <input
               type="password"
-              name={tokenField}
               value={token}
-              onChange={(e) => {
-                setToken(e.target.value);
-                setGoogleOAuthLinked(false);
-              }}
+              onChange={(e) => setToken(e.target.value)}
               autoComplete="off"
               className={inputCls}
-              placeholder={platform === "google" ? "1//…" : "EAA… / token TikTok"}
+              placeholder={platform === "meta" ? "EAA…" : "Token TikTok"}
             />
             <button
               type="button"
               disabled={discovering || token.trim().length < 10}
-              onClick={() => runDiscover()}
+              onClick={runDiscover}
               className="mt-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
             >
               {discovering ? "A procurar…" : "Procurar contas"}
@@ -337,15 +234,6 @@ export function AdAccountsPanel({
               <p className="mt-2 text-sm text-negative">{discoverError}</p>
             )}
           </div>
-          )}
-
-          {platform === "google" && googleOAuthLinked && discoverError && (
-            <p className="text-sm text-negative">{discoverError}</p>
-          )}
-
-          {platform === "google" && googleOAuthLinked && !discoverError && !discovered.length && discovering && (
-            <p className="text-sm text-muted-foreground">A procurar contas Google Ads…</p>
-          )}
 
           {discovered.length > 0 && (
             <form action={addAction} className="space-y-3">
@@ -356,11 +244,7 @@ export function AdAccountsPanel({
                 name="linkedLoginEmail"
                 value={linkedLoginEmail}
               />
-              {platform === "google" ? (
-                <input type="hidden" name="refreshToken" value={token} />
-              ) : (
-                <input type="hidden" name="accessToken" value={token} />
-              )}
+              <input type="hidden" name="accessToken" value={token} />
 
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -382,12 +266,6 @@ export function AdAccountsPanel({
                   ))}
                 </select>
               </div>
-
-              {selected && (
-                <p className="text-xs text-muted-foreground">
-                  Moeda: {selected.currency}
-                </p>
-              )}
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
@@ -415,38 +293,6 @@ export function AdAccountsPanel({
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Fee fixa extra ({platform === "google" ? "USD" : "moeda da conta"})
-                  </label>
-                  <input
-                    name="apiExtraFeeFixed"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    defaultValue={0}
-                    className={inputCls}
-                    placeholder="0"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Fee % agência (sobre o gasto)
-                  </label>
-                  <input
-                    name="apiAgencyFeePercent"
-                    type="number"
-                    min={0}
-                    max={100}
-                    step="0.1"
-                    defaultValue={0}
-                    className={inputCls}
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-
               <label className="flex items-start gap-2 text-sm text-muted-foreground">
                 <input
                   type="checkbox"
@@ -456,8 +302,7 @@ export function AdAccountsPanel({
                   className="mt-1"
                 />
                 <span>
-                  Substituir outra conta {AD_PLATFORM_LABELS[platform]} desta loja
-                  (o histórico de gasto já registado mantém-se).
+                  Substituir outra conta {AD_PLATFORM_LABELS[platform]} desta loja.
                 </span>
               </label>
 
@@ -466,20 +311,20 @@ export function AdAccountsPanel({
                 disabled={adding || !selectedId}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
               >
-                {adding ? "A ligar…" : "Ligar conta seleccionada"}
+                {adding ? "A ligar…" : "Ligar conta"}
               </button>
             </form>
           )}
         </div>
       )}
 
-      {accounts.length === 0 ? (
+      {apiAccounts.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Nenhuma conta API — o ad spend fica só manual.
+          Nenhuma conta Meta/TikTok API — o gasto pode ficar só manual.
         </p>
       ) : (
         <ul className="divide-y divide-border rounded-lg border border-border">
-          {accounts.map((a) => (
+          {apiAccounts.map((a) => (
             <li
               key={a.id}
               className="flex flex-wrap items-start justify-between gap-3 p-4"
@@ -496,47 +341,18 @@ export function AdAccountsPanel({
                 )}
                 <p className="mt-1 text-xs text-muted-foreground">
                   {a.externalAccountId}
-                  {a.allocation < 100 && ` · ${a.allocation}% alocação`}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Estado: {a.status}
-                  {(a.apiExtraFeeFixed > 0 || a.apiAgencyFeePercent > 0) && (
-                    <>
-                      {" "}
-                      · fee API:{" "}
-                      {a.apiExtraFeeFixed > 0 ? `+${a.apiExtraFeeFixed} fixo` : ""}
-                      {a.apiExtraFeeFixed > 0 && a.apiAgencyFeePercent > 0
-                        ? " + "
-                        : ""}
-                      {a.apiAgencyFeePercent > 0
-                        ? `${a.apiAgencyFeePercent}%`
-                        : ""}
-                    </>
-                  )}
-                  {a.lastSyncAt && (
-                    <>
-                      {" "}
-                      · sync{" "}
-                      {new Date(a.lastSyncAt).toLocaleString("pt-PT", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </>
-                  )}
                   {a.lastSyncError && (
                     <span className="text-negative"> — {a.lastSyncError}</span>
                   )}
                 </p>
               </div>
               {canEdit && (
-                <div className="flex flex-col items-end gap-2">
-                  <AccountFeesForm account={a} />
-                  <div className="flex items-center gap-2">
-                    <SyncNowButton storeId={storeId} />
-                    <DeleteAccountButton accountId={a.id} />
-                  </div>
+                <div className="flex items-center gap-2">
+                  <SyncNowButton storeId={storeId} />
+                  <DeleteAdAccountButton
+                    accountId={a.id}
+                    onDeleted={onChanged}
+                  />
                 </div>
               )}
             </li>
@@ -544,56 +360,6 @@ export function AdAccountsPanel({
         </ul>
       )}
     </CollapsibleSection>
-  );
-}
-
-function AccountFeesForm({ account }: { account: AdAccountRow }) {
-  const [state, action, pending] = useActionState<AdAccountActionState, FormData>(
-    updateAdAccountFeesAction,
-    {},
-  );
-  return (
-    <form action={action} className="flex flex-wrap items-end justify-end gap-2">
-      <input type="hidden" name="accountId" value={account.id} />
-      <div>
-        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-          Fee fixa
-        </label>
-        <input
-          name="apiExtraFeeFixed"
-          type="number"
-          min={0}
-          step="0.01"
-          defaultValue={account.apiExtraFeeFixed}
-          className="w-20 rounded-md border border-border bg-background px-2 py-1 text-xs tabular-nums"
-        />
-      </div>
-      <div>
-        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-          Fee %
-        </label>
-        <input
-          name="apiAgencyFeePercent"
-          type="number"
-          min={0}
-          max={100}
-          step="0.1"
-          defaultValue={account.apiAgencyFeePercent}
-          className="w-16 rounded-md border border-border bg-background px-2 py-1 text-xs tabular-nums"
-        />
-      </div>
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
-      >
-        {pending ? "…" : "Fees"}
-      </button>
-      {state.ok && <span className="text-[10px] text-positive">OK</span>}
-      {state.error && (
-        <span className="max-w-[120px] text-[10px] text-negative">{state.error}</span>
-      )}
-    </form>
   );
 }
 
@@ -623,25 +389,5 @@ function SyncNowButton({ storeId }: { storeId: string }) {
         </span>
       )}
     </div>
-  );
-}
-
-function DeleteAccountButton({ accountId }: { accountId: string }) {
-  const [, action, pending] = useActionState<AdAccountActionState, FormData>(
-    deleteAdAccountAction,
-    {},
-  );
-  return (
-    <form action={action}>
-      <input type="hidden" name="accountId" value={accountId} />
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-negative"
-        title="Remover"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
-    </form>
   );
 }

@@ -10,6 +10,7 @@ const links = [
   { id: "workspace-activo", label: "Workspace activo" },
   { id: "equipa", label: "Equipa" },
   { id: "lojas", label: "Lojas" },
+  { id: "google-ads", label: "Google Ads" },
   { id: "capital-negocio", label: "Capital" },
   { id: "lojas-workspaces", label: "Mover lojas" },
 ] as const;

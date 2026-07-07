@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { LogOut } from "lucide-react";
 import { getCurrentUser, listManageableWorkspaces } from "@/lib/auth";
 import { connectToDatabase } from "@/lib/db";
@@ -51,6 +52,8 @@ import {
 } from "@/lib/workspace-ownership";
 import { InviteMemberForm } from "./invite-member-form";
 import { SentInvitations } from "./sent-invitations";
+import { listWorkspaceGoogleLogins } from "@/lib/ad-platform-credentials";
+import { GoogleWorkspaceLoginsPanel } from "@/components/settings/google-workspace-logins-panel";
 
 export const metadata: Metadata = { title: "Definições" };
 
@@ -179,6 +182,11 @@ export default async function DefinicoesPage() {
       : [];
 
   const ownedWorkspaces = user ? await listOwnedWorkspacesForUser(user.id) : [];
+  const googleLogins = user?.workspaceId
+    ? await listWorkspaceGoogleLogins(user.workspaceId)
+    : [];
+  const canEditAds =
+    Boolean(user) && ["owner", "admin", "editor"].includes(user!.role);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -318,6 +326,19 @@ export default async function DefinicoesPage() {
           />
         </SettingsCollapsibleSection>
       )}
+
+      <SettingsCollapsibleSection
+        id="google-ads"
+        title="Google Ads"
+        description="Autoriza cada Gmail uma vez — nas lojas só escolhes Gmail + Customer ID."
+      >
+        <Suspense fallback={<div className="h-24 animate-pulse rounded-lg bg-muted" />}>
+          <GoogleWorkspaceLoginsPanel
+            logins={googleLogins}
+            canEdit={canEditAds}
+          />
+        </Suspense>
+      </SettingsCollapsibleSection>
 
       <SettingsCollapsibleSection
         id="lojas"
