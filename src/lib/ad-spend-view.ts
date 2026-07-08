@@ -62,14 +62,15 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
 
   await connectToDatabase();
 
-    const stores = await Store.find(activeStoreQueryForUser(user))
+  const stores = await Store.find(activeStoreQueryForUser(user))
     .select("name currency importStartDate createdAt ianaTimezone")
     .sort({ name: 1 })
     .lean();
 
-  const workspace = await Workspace.findById(user.workspaceId)
-    .select("baseCurrency")
-    .lean();
+  const [workspace, lastSyncedAll] = await Promise.all([
+    Workspace.findById(user.workspaceId).select("baseCurrency").lean(),
+    resolveLastSyncedAtForStoreIds(stores.map((s) => String(s._id))),
+  ]);
   const baseCurrency = workspace?.baseCurrency ?? "EUR";
   const canEdit = ["owner", "admin", "editor"].includes(user.role);
 
@@ -81,20 +82,19 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
     const range = resolveAdSpendRange(scoped.importStartDate, scoped.createdAt);
     const rangeLabel = `${parseDateInput(range.fromKey)?.toLocaleDateString("pt-PT") ?? range.fromKey} – ${parseDateInput(range.toKey)?.toLocaleDateString("pt-PT") ?? range.toKey}`;
 
-    const calendar = await buildAdSpendCalendar(
-      scoped._id,
-      baseCurrency,
-      scoped.importStartDate,
-      scoped.createdAt,
-    );
+    const [calendar, adAccounts, workspaceGoogleLogins, lastSyncedAt] =
+      await Promise.all([
+        buildAdSpendCalendar(
+          scoped._id,
+          baseCurrency,
+          scoped.importStartDate,
+          scoped.createdAt,
+        ),
+        listAdAccountsForStore(user.workspaceId, String(scoped._id)),
+        listWorkspaceGoogleLogins(user.workspaceId),
+        resolveLastSyncedAtForStoreIds([String(scoped._id)]),
+      ]);
     const missingDays = calendar.filter((d) => d.amount === null);
-    const adAccounts = await listAdAccountsForStore(
-      user.workspaceId,
-      String(scoped._id),
-    );
-    const workspaceGoogleLogins = await listWorkspaceGoogleLogins(
-      user.workspaceId,
-    );
     const googleAdsApiReady = googleAdsServerConfigStatus().apiReady;
 
     const yesterday = range.toKey;
@@ -105,7 +105,7 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
 
     return {
       mode: "store",
-      lastSyncedAt: await resolveLastSyncedAtForStoreIds([String(scoped._id)]),
+      lastSyncedAt,
       store: {
         storeId: String(scoped._id),
         storeName: scoped.name,
@@ -125,15 +125,12 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
     };
   }
 
-  const summaries =
-    stores.length > 0
-      ? await buildStoreAdSpendSummaries(stores, baseCurrency)
-      : [];
+  const summaries = stores.length > 0
+    ? await buildStoreAdSpendSummaries(stores, baseCurrency)
+    : [];
   return {
     mode: "overview",
-    lastSyncedAt: await resolveLastSyncedAtForStoreIds(
-      stores.map((s) => String(s._id)),
-    ),
+    lastSyncedAt: lastSyncedAll,
     overview: { summaries },
   };
 }

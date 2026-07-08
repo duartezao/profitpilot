@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { syncAdSpendIfDue } from "@/lib/ad-intraday-sync";
 import { syncMissingAdMetricsForStore } from "@/lib/ad-metrics-backfill";
+import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import {
   authErrorResponse,
   requireUser,
@@ -28,6 +29,9 @@ export async function GET(request: Request) {
       maxDays: 45,
       force: true,
     });
+    if (intraday.synced || backfill.spendDays > 0 || backfill.synced > 0) {
+      invalidateWorkspaceMetricsCache(user.workspaceId);
+    }
 
     return NextResponse.json(
       {

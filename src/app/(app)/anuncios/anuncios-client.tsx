@@ -45,8 +45,11 @@ export function AnunciosClient() {
         { cache: "no-store" },
       );
       if (!res.ok) return null;
-      const body = (await res.json()) as { synced?: boolean };
-      if (body.synced) {
+      const body = (await res.json()) as {
+        synced?: boolean;
+        backfill?: { synced?: number; spendDays?: number };
+      };
+      if (body.synced || (body.backfill?.synced ?? 0) > 0 || (body.backfill?.spendDays ?? 0) > 0) {
         void queryClient.invalidateQueries({
           queryKey: ["ad-spend-view", workspaceId, storeId],
         });

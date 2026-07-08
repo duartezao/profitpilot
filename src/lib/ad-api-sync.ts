@@ -2,6 +2,7 @@ import "server-only";
 import type { Types } from "mongoose";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { Workspace } from "@/models/Workspace";
+import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import {
   getTodayDateKey,
   canApiWriteAdSpendForStore,
@@ -261,6 +262,10 @@ export async function syncAdAccountsSpendForStore(
       baseCurrency,
       apiByPlatform,
     );
+  }
+
+  if (updated) {
+    invalidateWorkspaceMetricsCache(String(store.workspaceId));
   }
 
   if (!updated && !anyError && apiByPlatform.size === 0 && canWriteSpend) {

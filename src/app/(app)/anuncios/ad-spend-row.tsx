@@ -60,6 +60,12 @@ export function AdSpendRow({
   const missing = row.amount === null;
   const isZero = row.amount === 0;
   const hasExtra = (row.extraFee ?? 0) > 0;
+  const updatedLabel = row.updatedAt
+    ? new Date(row.updatedAt).toLocaleTimeString("pt-PT", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
   const { defaults, inputCurrency } = row.lines.length
     ? platformDefaultsFromLines(row.lines)
     : {
@@ -92,6 +98,7 @@ export function AdSpendRow({
           {!missing && row.source && (
             <span className="ml-2 text-xs text-muted-foreground">
               · {row.source === "manual" ? "manual" : "API"}
+              {updatedLabel ? ` · ${updatedLabel}` : ""}
             </span>
           )}
         </td>
