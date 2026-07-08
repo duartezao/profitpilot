@@ -226,7 +226,8 @@ export function CampaignsPanel({
       await queryClient.invalidateQueries({ queryKey: ["ad-campaigns", storeId] });
       const fresh = await fetchCampaigns(storeId, periodQs, true);
       queryClient.setQueryData(["ad-campaigns", storeId, period.key], fresh);
-      await refetch();
+      // Não chamar `refetch()` aqui: faria um pedido sem `sync=1` e podia
+      // sobrescrever imediatamente os dados frescos com a resposta "cache BD".
     });
   }
 

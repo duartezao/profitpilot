@@ -91,6 +91,8 @@ export type AdSpendDayRow = {
   note?: string;
   /** ISO timestamp para detecção de conflitos (optimistic locking). */
   revisionAt: string | null;
+  /** ISO timestamp do último registo (para UI). */
+  updatedAt: string | null;
 };
 
 export type StoreAdSpendSummary = {
@@ -331,6 +333,7 @@ export async function buildAdSpendCalendar(
           revisionAt: e.updatedAt
             ? new Date(e.updatedAt).toISOString()
             : null,
+          updatedAt: e.updatedAt ? new Date(e.updatedAt).toISOString() : null,
         },
       ];
     }),
@@ -366,6 +369,7 @@ export async function buildAdSpendCalendar(
         source: entry?.source ?? null,
         note: entry?.note,
         revisionAt: entry?.revisionAt ?? null,
+        updatedAt: entry?.updatedAt ?? null,
       };
     });
 }
