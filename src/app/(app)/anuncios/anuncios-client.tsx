@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -30,11 +31,33 @@ export function AnunciosClient() {
   const { data, isError, isFetching } = useQuery({
     queryKey: ["ad-spend-view", workspaceId, storeId],
     queryFn: () => fetchAdSpendView(storeId),
+    // Se já houve visita a esta loja (ou ao overview), mostra instantâneo da cache
+    // e refaz fetch em background.
+    initialData: () =>
+      queryClient.getQueryData<AdSpendView>([
+        "ad-spend-view",
+        workspaceId,
+        storeId,
+      ]),
     staleTime: LIVE_DATA_POLL_MS - 10_000,
     refetchInterval: LIVE_DATA_POLL_MS,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
+
+  // Prefetch do detalhe por loja quando estamos no overview, para a troca ser instantânea.
+  // Limitado para não abrir demasiadas ligações.
+  useEffect(() => {
+    if (!data || data.mode !== "overview") return;
+    const ids = data.overview.summaries.map((s) => s.storeId).slice(0, 6);
+    for (const id of ids) {
+      void queryClient.prefetchQuery({
+        queryKey: ["ad-spend-view", workspaceId, id],
+        queryFn: () => fetchAdSpendView(id),
+        staleTime: LIVE_DATA_POLL_MS - 10_000,
+      });
+    }
+  }, [data, queryClient, workspaceId]);
 
   useQuery({
     queryKey: ["ad-intraday-sync", workspaceId, storeId],
