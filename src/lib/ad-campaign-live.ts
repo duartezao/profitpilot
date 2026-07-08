@@ -212,12 +212,18 @@ export async function loadStoreCampaignsLive(
   const errors: string[] = [];
   let source: StoreCampaignsView["source"] = "cache";
 
-  // Só chama a API Google/Meta quando é sync manual explícito e o período inclui hoje.
-  if (options?.syncFirst && includesToday) {
+  // Sync manual explícito:
+  // - Se o período inclui hoje, sincroniza hoje.
+  // - Caso contrário, sincroniza o último dia do período (ex.: ontem) e permite reescrever spend API
+  //   para corrigir dias incompletos (sem tocar em dias manuais).
+  if (options?.syncFirst) {
     const { syncAdAccountsSpendForStore } = await import("@/lib/ad-api-sync");
+    const targetKey = includesToday ? todayKey : dateTo;
     try {
       await syncAdAccountsSpendForStore(storeId, {
-        campaignDateKeys: [todayKey],
+        dateKey: targetKey,
+        campaignDateKeys: [targetKey],
+        forceOverwrite: !includesToday,
       });
       source = "live";
     } catch (e) {
