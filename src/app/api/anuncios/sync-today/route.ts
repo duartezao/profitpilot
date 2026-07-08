@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { syncAdSpendIfDue } from "@/lib/ad-intraday-sync";
+import { syncMissingAdMetricsForStore } from "@/lib/ad-metrics-backfill";
 import {
   authErrorResponse,
   requireUser,
@@ -18,10 +19,25 @@ export async function GET(request: Request) {
     }
     await requireWorkspaceStore(user, storeId, { activeOnly: true });
 
-    const result = await syncAdSpendIfDue(storeId, user.workspaceId);
-    return NextResponse.json(result, {
-      headers: { "Cache-Control": "no-store" },
+    // Manual refresh: força sync de hoje + backfill incremental (dias em lacuna)
+    // e permite reescrever dias passados de origem API (ex.: ontem ainda incompleto).
+    const intraday = await syncAdSpendIfDue(storeId, user.workspaceId, {
+      force: true,
     });
+    const backfill = await syncMissingAdMetricsForStore(storeId, {
+      maxDays: 45,
+      force: true,
+    });
+
+    return NextResponse.json(
+      {
+        ...intraday,
+        backfill,
+      },
+      {
+      headers: { "Cache-Control": "no-store" },
+      },
+    );
   } catch (e) {
     return authErrorResponse(e);
   }
