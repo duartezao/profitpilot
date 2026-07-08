@@ -33,10 +33,11 @@ export type AdMetricsBackfillResult = {
  */
 export async function syncMissingAdMetricsForStore(
   storeId: string,
-  options?: { maxDays?: number },
+  options?: { maxDays?: number; force?: boolean },
 ): Promise<AdMetricsBackfillResult> {
   await connectToDatabase();
   const maxDays = options?.maxDays ?? 45;
+  const force = Boolean(options?.force);
 
   const store = await Store.findById(storeId)
     .select("importStartDate createdAt ianaTimezone")
@@ -126,7 +127,8 @@ export async function syncMissingAdMetricsForStore(
         dateKey,
         campaignDateKeys: [dateKey],
         skipDailyNote: dateKey !== today,
-        skipSpendSync: hasSpend.has(dateKey) && dateKey !== today,
+        skipSpendSync: !force && hasSpend.has(dateKey) && dateKey !== today,
+        forceOverwrite: force,
       });
       synced++;
       if (result.updated) spendDays++;

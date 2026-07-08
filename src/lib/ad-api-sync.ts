@@ -172,6 +172,8 @@ export async function syncAdAccountsSpendForStore(
     skipDailyNote?: boolean;
     /** Só campanhas — não chama API de gasto (dia passado já com ManualAdSpend). */
     skipSpendSync?: boolean;
+    /** Permite reescrever dias passados (apenas se a origem actual for API). */
+    forceOverwrite?: boolean;
   },
 ): Promise<ApiAdSpendSyncResult> {
   const { Store } = await import("@/models/Store");
@@ -203,9 +205,13 @@ export async function syncAdAccountsSpendForStore(
   const existingSpend = await ManualAdSpend.findOne({ storeId: store._id, dateKey })
     .select("dateKey source")
     .lean();
+  const existingSource = (existingSpend?.source as string | undefined) ?? null;
   const canWriteSpend =
     !options?.skipSpendSync &&
-    canApiWriteAdSpendForStore(dateKey, storeTz, Boolean(existingSpend));
+    existingSource !== "manual" &&
+    canApiWriteAdSpendForStore(dateKey, storeTz, Boolean(existingSpend), new Date(), {
+      forceOverwrite: Boolean(options?.forceOverwrite) && existingSource === "api",
+    });
 
   const apiByPlatform = new Map<AdPlatform, PlatformApiSpend>();
   let anyError = false;

@@ -49,7 +49,9 @@ export function canApiWriteAdSpendForStore(
   storeTimeZone: string | null | undefined,
   hasExistingRecord: boolean,
   now = new Date(),
+  opts?: { forceOverwrite?: boolean },
 ): boolean {
   if (isAdSpendTodayOpenForStore(dateKey, storeTimeZone, now)) return true;
+  if (opts?.forceOverwrite) return true;
   return !hasExistingRecord;
 }
