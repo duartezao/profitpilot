@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Sensitive } from "@/components/privacy-mode";
 import { ScopeLink } from "@/components/scope-link";
 import { useWorkspace } from "@/components/workspace-context";
@@ -70,8 +70,20 @@ function fmtCampaignMetric(v: number | null, suffix = ""): string {
   return `${v.toFixed(2).replace(".", ",")}${suffix}`;
 }
 
+function ymd(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function lastNDaysRange(n: number): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - (n - 1));
+  return { from: ymd(from), to: ymd(to) };
+}
+
 export function DecisaoClient() {
   const { workspaceId } = useWorkspace();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
 
@@ -99,6 +111,41 @@ export function DecisaoClient() {
             `Prioridades em todas as lojas · ${data?.periodLabel ?? ""}`
           )}
         </p>
+        {storeId && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const q = new URLSearchParams(searchParams);
+                q.delete("dates");
+                q.delete("from");
+                q.delete("to");
+                q.set("period", "7d");
+                router.push(`/decisao?${q.toString()}`);
+              }}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:bg-muted"
+              title="Análise rápida — últimos 7 dias"
+            >
+              Últimos 7 dias
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const q = new URLSearchParams(searchParams);
+                const r = lastNDaysRange(5);
+                q.delete("period");
+                q.delete("dates");
+                q.set("from", r.from);
+                q.set("to", r.to);
+                router.push(`/decisao?${q.toString()}`);
+              }}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:bg-muted"
+              title="Análise rápida — últimos 5 dias"
+            >
+              Últimos 5 dias
+            </button>
+          </div>
+        )}
       </div>
 
       {isError && (
