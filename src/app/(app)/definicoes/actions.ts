@@ -11,7 +11,12 @@ import { Order } from "@/models/Order";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { Membership } from "@/models/Membership";
-import { isValidSessionCountry, normalizeSessionCountry } from "@/lib/shopify-countries";
+import { isValidSessionCountry, normalizeSessionCountry, sessionCountryKey } from "@/lib/shopify-countries";
+import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
+import {
+  invalidateSessionMetricsForCountryChange,
+  syncSessionMetricsForStore,
+} from "@/lib/session-metrics";
 import { isMyshopifyDomain, normalizeDisplayUrl } from "@/lib/store-display";
 import { assertStoreAccess, findStoreForUser } from "@/lib/store-scope";
 import {
@@ -166,8 +171,16 @@ export async function updateStoreSettingsAction(
     : null;
 
   await connectToDatabase();
-  const store = await findStoreForUser(user, d.storeId, "_id");
+  const store = await findStoreForUser(
+    user,
+    d.storeId,
+    "_id analyticsSessionCountry platform",
+  );
   if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
+  const previousCountryKey = sessionCountryKey(store.analyticsSessionCountry);
+  const nextCountryKey = sessionCountryKey(analyticsSessionCountry);
+  const countryChanged = previousCountryKey !== nextCountryKey;
 
   const res = await Store.updateOne(
     { _id: d.storeId, workspaceId: user.workspaceId, deletedAt: null },
@@ -188,6 +201,19 @@ export async function updateStoreSettingsAction(
   );
   if (res.matchedCount === 0) {
     return { error: "Loja não encontrada." };
+  }
+
+  if (countryChanged) {
+    await invalidateSessionMetricsForCountryChange(
+      d.storeId,
+      analyticsSessionCountry,
+    );
+    invalidateWorkspaceMetricsCache(user.workspaceId);
+    if (store.platform === "shopify") {
+      void syncSessionMetricsForStore(d.storeId).catch(() => {});
+    }
+  } else {
+    invalidateWorkspaceMetricsCache(user.workspaceId);
   }
 
   revalidatePath("/definicoes");

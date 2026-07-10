@@ -19,6 +19,7 @@ import { fetchDailySessionMetricsFromShopify } from "@/lib/shopify-analytics";
 import {
   sessionCountryKey,
   sessionCountryLabel,
+  sessionCountryShopifyName,
 } from "@/lib/shopify-countries";
 import {
   dateKeyFromMonthDay,
@@ -30,6 +31,9 @@ import {
 } from "@/lib/session-metrics-codec";
 import { SessionMetricsMonth } from "@/models/SessionMetricsMonth";
 import { Store } from "@/models/Store";
+
+/** Incrementar quando o filtro ShopifyQL de sessões mudar — força re-sync histórico. */
+export const SESSION_METRICS_QUERY_VERSION = 2;
 
 export type SessionFunnelMetrics = {
   sessions: number;
@@ -152,9 +156,13 @@ async function loadMonthDays(
   const out = new Map<string, DaySessionCounts>();
   if (!monthKeys.length) return out;
 
+  const keysToTry = countryKey
+    ? [countryKey, sessionCountryShopifyName(countryKey)]
+    : [countryKey];
+
   const docs = await SessionMetricsMonth.find({
     storeId,
-    countryKey,
+    countryKey: { $in: [...new Set(keysToTry)] },
     monthKey: { $in: monthKeys },
   })
     .select("monthKey blob")
@@ -258,6 +266,47 @@ function isAllZero(d: DaySessionCounts): boolean {
   );
 }
 
+async function ensureSessionMetricsQueryVersion(
+  store: {
+    _id: Types.ObjectId;
+    sessionMetricsQueryVersion?: number | null;
+  },
+): Promise<void> {
+  if ((store.sessionMetricsQueryVersion ?? 1) >= SESSION_METRICS_QUERY_VERSION) {
+    return;
+  }
+  await SessionMetricsMonth.deleteMany({ storeId: store._id });
+  await Store.updateOne(
+    { _id: store._id },
+    {
+      $set: {
+        sessionMetricsQueryVersion: SESSION_METRICS_QUERY_VERSION,
+        lastSessionMetricsAt: null,
+        lastSessionMetricsError: null,
+      },
+    },
+  );
+}
+
+/** Apaga blobs do país activo para forçar novo pedido à Shopify (ex. mudança em Definições). */
+export async function invalidateSessionMetricsForCountryChange(
+  storeId: string,
+  countryCode: string | null | undefined,
+): Promise<void> {
+  await connectToDatabase();
+  const countryKey = sessionCountryKey(countryCode);
+  const legacyName = countryKey ? sessionCountryShopifyName(countryKey) : "";
+  const keys = legacyName ? [countryKey, legacyName] : [countryKey];
+  await SessionMetricsMonth.deleteMany({
+    storeId,
+    countryKey: { $in: keys },
+  });
+  await Store.updateOne(
+    { _id: storeId },
+    { $set: { lastSessionMetricsAt: null, lastSessionMetricsError: null } },
+  );
+}
+
 /**
  * Sincroniza dias em falta (e hoje) via ShopifyQL.
  * Dias históricos já guardados não voltam a ser pedidos.
@@ -270,6 +319,8 @@ export async function syncSessionMetricsForStore(
   if (!store || store.platform !== "shopify") {
     return { synced: 0, skipped: 0 };
   }
+
+  await ensureSessionMetricsQueryVersion(store);
 
   const countryKey = sessionCountryKey(store.analyticsSessionCountry);
   const tz = normalizeStoreTimezone(store.ianaTimezone);
@@ -385,6 +436,8 @@ export async function syncSessionMetricsChunk(
   if (!store || store.platform !== "shopify") {
     return { synced: 0, done: true, nextRangeIndex: 0, totalRanges: 0 };
   }
+
+  await ensureSessionMetricsQueryVersion(store);
 
   const countryKey = sessionCountryKey(store.analyticsSessionCountry);
   const tz = normalizeStoreTimezone(store.ianaTimezone);
