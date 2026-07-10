@@ -7,10 +7,12 @@ import {
   metricsFromCampaignTotals,
   roasFromCampaign,
   shouldIncludeCampaignForDay,
+  isActiveCampaignStatus,
   type LiveCampaignRow,
 } from "@/lib/ad-campaign-types";
 import type { ApiAccountFees } from "@/lib/ad-api-fees";
 import { convertToBaseCurrency } from "@/lib/fx";
+import { formatDateInput, parseDateInput, startOfDay } from "@/lib/period";
 
 export type PlatformAdMetrics = {
   platform: AdPlatform;
@@ -39,6 +41,14 @@ export type CampaignDayMetrics = {
   cpc: number | null;
   ctr: number | null;
   cpm: number | null;
+  /** Dias desde a primeira aparição na BD (inclusivo). */
+  daysRunning?: number;
+  /** Conversões acumuladas desde o primeiro dia. */
+  lifetimeConversions?: number;
+  /** ROAS acumulado desde o primeiro dia. */
+  lifetimeRoas?: number | null;
+  /** Último estado conhecido (activa/pausada). */
+  isActiveCampaign?: boolean;
 };
 
 export type StoreAdMetricsBundle = {
@@ -559,4 +569,185 @@ export async function loadStoreCampaignsFromDb(
     syncedAt: latestSync?.toISOString() ?? null,
     daysWithData,
   };
+}
+
+export type CampaignLifecycle = {
+  firstSeenDateKey: string;
+  daysRunning: number;
+  lifetimeSpend: number;
+  lifetimeConversions: number;
+  lifetimeConversionValue: number;
+  lifetimeRoas: number | null;
+  isActive: boolean;
+  campaignName: string;
+};
+
+function campaignMetricsKey(platform: string, campaignId: string): string {
+  return `${platform}:${campaignId}`;
+}
+
+function inclusiveDaysBetween(fromKey: string, toKey: string): number {
+  const from = parseDateInput(fromKey);
+  const to = parseDateInput(toKey);
+  if (!from || !to || to < from) return 0;
+  return (
+    Math.floor(
+      (startOfDay(to).getTime() - startOfDay(from).getTime()) / 86_400_000,
+    ) + 1
+  );
+}
+
+/** Histórico por campanha (desde o primeiro dia na BD) — para regras de teste 7/14 dias. */
+export async function loadCampaignLifecycleMap(
+  storeId: string,
+  adAccountIds: string[],
+  referenceDateKey = formatDateInput(new Date()),
+): Promise<Map<string, CampaignLifecycle>> {
+  const out = new Map<string, CampaignLifecycle>();
+  if (!adAccountIds.length) return out;
+
+  const storeOid = new mongoose.Types.ObjectId(storeId);
+  const accountOids = adAccountIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const [lifetimeRows, latestRows] = await Promise.all([
+    AdCampaignDay.aggregate<{
+      _id: { platform: string; campaignId: string };
+      firstSeenDateKey: string;
+      lifetimeSpend: number;
+      lifetimeConversions: number;
+      lifetimeConversionValue: number;
+    }>([
+      { $match: { storeId: storeOid, adAccountId: { $in: accountOids } } },
+      {
+        $group: {
+          _id: { platform: "$platform", campaignId: "$campaignId" },
+          firstSeenDateKey: { $min: "$dateKey" },
+          lifetimeSpend: { $sum: { $ifNull: ["$spend", 0] } },
+          lifetimeConversions: { $sum: { $ifNull: ["$conversions", 0] } },
+          lifetimeConversionValue: {
+            $sum: { $ifNull: ["$conversionValue", 0] },
+          },
+        },
+      },
+    ]),
+    AdCampaignDay.aggregate<{
+      _id: { platform: string; campaignId: string };
+      status: string;
+      campaignName: string;
+    }>([
+      { $match: { storeId: storeOid, adAccountId: { $in: accountOids } } },
+      { $sort: { dateKey: -1 } },
+      {
+        $group: {
+          _id: { platform: "$platform", campaignId: "$campaignId" },
+          status: { $first: "$status" },
+          campaignName: { $first: "$campaignName" },
+        },
+      },
+    ]),
+  ]);
+
+  const latestByKey = new Map(
+    latestRows.map((r) => [
+      campaignMetricsKey(r._id.platform, r._id.campaignId),
+      r,
+    ]),
+  );
+
+  for (const row of lifetimeRows) {
+    const key = campaignMetricsKey(row._id.platform, row._id.campaignId);
+    const latest = latestByKey.get(key);
+    const firstSeen = row.firstSeenDateKey;
+    out.set(key, {
+      firstSeenDateKey: firstSeen,
+      daysRunning: inclusiveDaysBetween(firstSeen, referenceDateKey),
+      lifetimeSpend: row.lifetimeSpend,
+      lifetimeConversions: row.lifetimeConversions,
+      lifetimeConversionValue: row.lifetimeConversionValue,
+      lifetimeRoas: roasFromCampaign(
+        row.lifetimeSpend,
+        row.lifetimeConversionValue,
+      ),
+      isActive: isActiveCampaignStatus(latest?.status ?? ""),
+      campaignName: latest?.campaignName?.trim() || "Campanha",
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Campanhas para Decisão: métricas do período + activas recentes (mesmo sem gasto)
+ * + lifecycle desde o primeiro dia na BD.
+ */
+export async function loadStoreCampaignsForDecision(
+  storeId: string,
+  dateKeys: string[],
+  adAccountIds: string[],
+  referenceDateKey = formatDateInput(new Date()),
+): Promise<CampaignDayMetrics[]> {
+  if (!adAccountIds.length || !dateKeys.length) return [];
+
+  const storeOid = new mongoose.Types.ObjectId(storeId);
+  const accountOids = adAccountIds.map((id) => new mongoose.Types.ObjectId(id));
+  const latestDateKey = [...dateKeys].sort().at(-1)!;
+
+  const [periodBundle, lifecycle, latestDayRows] = await Promise.all([
+    loadStoreAdMetricsFromDb(storeId, dateKeys, { adAccountIds }),
+    loadCampaignLifecycleMap(storeId, adAccountIds, referenceDateKey),
+    AdCampaignDay.find({
+      storeId: storeOid,
+      dateKey: latestDateKey,
+      adAccountId: { $in: accountOids },
+    })
+      .select(
+        "campaignId campaignName platform status spend impressions clicks conversions conversionValue currency",
+      )
+      .lean(),
+  ]);
+
+  const byKey = new Map<string, CampaignDayMetrics>();
+  for (const c of periodBundle?.campaigns ?? []) {
+    byKey.set(campaignMetricsKey(c.platform, c.campaignId), c);
+  }
+
+  for (const r of latestDayRows) {
+    if (!isActiveCampaignStatus(r.status ?? "")) continue;
+    const platform = r.platform as AdPlatform;
+    const key = campaignMetricsKey(platform, r.campaignId);
+    if (byKey.has(key)) continue;
+    byKey.set(
+      key,
+      mapCampaignRow({
+        campaignId: r.campaignId,
+        campaignName: r.campaignName,
+        platform,
+        spend: 0,
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+        conversionValue: 0,
+        currency: r.currency ?? "USD",
+      }),
+    );
+  }
+
+  return [...byKey.values()]
+    .map((c) => {
+      const lc = lifecycle.get(campaignMetricsKey(c.platform, c.campaignId));
+      return {
+        ...c,
+        campaignName: c.campaignName || lc?.campaignName || "Campanha",
+        daysRunning: lc?.daysRunning,
+        lifetimeConversions: lc?.lifetimeConversions,
+        lifetimeRoas: lc?.lifetimeRoas,
+        isActiveCampaign: lc?.isActive,
+      };
+    })
+    .sort((a, b) => {
+      const aActive = a.isActiveCampaign ? 1 : 0;
+      const bActive = b.isActiveCampaign ? 1 : 0;
+      if (bActive !== aActive) return bActive - aActive;
+      return b.spend - a.spend;
+    });
 }

@@ -15,7 +15,7 @@ import {
   startOfDay,
 } from "@/lib/period";
 import type { StoreAccess } from "@/lib/store-access";
-import { loadStoreAdMetricsFromDb } from "@/lib/ad-campaign-metrics";
+import { loadStoreCampaignsForDecision } from "@/lib/ad-campaign-metrics";
 import { loadActiveAdAccountIdsForStore } from "@/lib/ad-accounts";
 import {
   buildCampaignDecisions,
@@ -145,6 +145,13 @@ function dayKeysFromPeriod(period: ReturnType<typeof resolvePeriod>): string[] {
 
 function buildCampaignActions(rows: CampaignDecisionRow[]): TodayAction[] {
   const actions: TodayAction[] = [];
+  const kill = rows.find((r) => r.status === "kill");
+  if (kill) {
+    actions.push({
+      level: "negative",
+      text: `${kill.name} (${kill.platformLabel}) — kill. ${kill.reason}`,
+    });
+  }
   const best = pickBestCampaign(rows);
   if (best?.status === "scale") {
     actions.push({
@@ -277,21 +284,24 @@ export async function buildDecisionSummary(
   if (storeId) {
     const dayKeys = dayKeysFromPeriod(period);
     const activeAccountIds = await loadActiveAdAccountIdsForStore(storeId);
-    const metrics = await loadStoreAdMetricsFromDb(storeId, dayKeys, {
-      adAccountIds: activeAccountIds,
-    });
-    if (metrics?.campaigns.length) {
+    const campaigns = await loadStoreCampaignsForDecision(
+      storeId,
+      dayKeys,
+      activeAccountIds,
+      formatDateInput(new Date()),
+    );
+    if (campaigns.length) {
       const storeLine = pnl.stores[0];
       const storeBer = storeLine ? berRoas(storeLine) : berRoas(pnl.totals);
       storeBerRoas =
         storeBer != null ? storeBer.toFixed(2).replace(".", ",") : null;
-      campaignRows = buildCampaignDecisions(metrics.campaigns, {
+      campaignRows = buildCampaignDecisions(campaigns, {
         storeBer,
         storeRevenue: storeLine?.revenue ?? pnl.totals.revenue,
         totalAdSpend: storeLine?.adSpend ?? pnl.totals.adSpend,
       });
       campaignRows.sort((a, b) => {
-        const order = { descale: 0, maintain: 1, scale: 2 };
+        const order = { kill: 0, descale: 1, maintain: 2, scale: 3 };
         return order[a.status] - order[b.status];
       });
     }

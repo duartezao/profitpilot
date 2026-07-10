@@ -1098,7 +1098,14 @@ Lucro após taxas =
   * **Kill**: gastaste ~2–3x o preço do produto sem vendas, ou ROAS < BER de forma consistente.
   * **Scale**: ROAS acima do BER + margem saudável + tendência positiva.
   * **Manter**: dentro do intervalo aceitável.
-* Usa **média móvel de 3–7 dias** (não reage a ruído de 1 dia só).
+* **Campanhas de ads** (`campaign-decision.ts` + `loadStoreCampaignsForDecision`):
+  * **Ciclo de teste 7 dias** desde o primeiro dia na BD (`firstSeenDateKey` em `ad_campaign_days`).
+  * Dias 1–6: **Manter** — «em teste», mesmo sem gasto no período (campanhas activas novas aparecem na Decisão).
+  * Dia 7+: **Kill** se zero conversões acumuladas.
+  * Dia 7–13 com conversões mas **ROAS < BER**: **Manter** — segunda janela de 7 dias.
+  * Dia 14+ com **ROAS < BER**: **Kill**.
+  * Depois do teste: scale/descale vs BER (como antes).
+* Usa **média móvel de 3–7 dias** (não reage a ruído de 1 dia só) — produtos/lojas; campanhas usam lifecycle acumulado desde `firstSeen`.
 
 ## Recomendação de budget
 
@@ -1904,7 +1911,7 @@ Pipeline operacional de dropshipping.
 
 * **"O que fazer hoje"**: 3 ações prioritárias com semáforo (verde/amarelo/vermelho), incluindo sugestões **scale/descale por campanha** (ROAS da campanha vs BER da loja; CTR/CPC não bastam para scale) quando há dados API sincronizados.
 * **Tabela Kill / Scale / Manter**: por produto (loja seleccionada) ou por loja (consolidado).
-* **Tabela Campanhas — Scale / Descale** (loja seleccionada, com `ad_campaign_days`): campanha, plataforma, CPC, CTR, CPM, gasto e motivo heurístico.
+* **Tabela Campanhas — Kill / Scale** (loja seleccionada, com `ad_campaign_days`): campanha, plataforma, dias activos, conversões (lifetime), gasto do período, ROAS vs BER e motivo (teste 7d, segunda janela 14d, scale/descale).
 * **Card Tesouraria**: Disponível, A caminho, A pagar, Saldo projetado.
 
 ## Mobile (PWA instalada)

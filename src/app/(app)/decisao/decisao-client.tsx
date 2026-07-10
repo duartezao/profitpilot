@@ -55,11 +55,18 @@ function CampaignStatusBadge({ status }: { status: CampaignDecisionRow["status"]
         className={cn(
           "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
           status === "scale" && "border border-positive/30 bg-positive/10 text-positive",
+          status === "kill" && "border border-negative/30 bg-negative/10 text-negative",
           status === "descale" && "border border-negative/30 bg-negative/10 text-negative",
           status === "maintain" && "border border-border bg-muted text-muted-foreground",
         )}
       >
-        {status === "scale" ? "Scale" : status === "descale" ? "Descale" : "Manter"}
+        {status === "scale"
+          ? "Scale"
+          : status === "kill"
+            ? "Kill"
+            : status === "descale"
+              ? "Descale"
+              : "Manter"}
       </span>
     </Sensitive>
   );
@@ -345,27 +352,25 @@ export function DecisaoClient() {
           {isStore && data.campaignRows.length > 0 && (
             <div className="rounded-lg border border-border bg-surface">
               <div className="border-b border-border p-5">
-                <h2 className="text-lg font-semibold">Campanhas — Scale / Descale</h2>
+                <h2 className="text-lg font-semibold">Campanhas — Kill / Scale</h2>
                 <p className="text-sm text-muted-foreground">
-                  ROAS de cada campanha vs BER da loja
-                  {data.storeBerRoas ? ` (${data.storeBerRoas}x)` : ""}
-                  {data.storeBerRoas
-                    ? " — scale só acima do break-even; CTR/CPC não bastam."
-                    : " — BER indisponível (COGS incompleto); sem sugestão de scale."}
+                  Ciclo de teste: {7} dias sem conversões → kill; ROAS abaixo do BER → mais {7} dias antes de matar.
+                  {data.storeBerRoas ? ` BER loja: ${data.storeBerRoas}x.` : " BER indisponível (COGS incompleto)."}
                 </p>
               </div>
               <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[720px] text-sm">
+                <table className="w-full min-w-[800px] text-sm">
                   <thead>
                     <tr className="text-left text-xs font-medium text-muted-foreground">
                       <th className="px-5 py-3">Campanha</th>
                       <th className="px-5 py-3">Plataforma</th>
                       <th className="px-5 py-3">Estado</th>
+                      <th className="px-5 py-3 text-right">Dias</th>
+                      <th className="px-5 py-3 text-right">Conv.</th>
                       <th className="px-5 py-3 text-right">Gasto</th>
                       <th className="px-5 py-3 text-right">CPC</th>
                       <th className="px-5 py-3 text-right">CTR</th>
                       <th className="px-5 py-3 text-right">ROAS</th>
-                      <th className="px-5 py-3 text-right">CPM</th>
                       <th className="px-5 py-3">Motivo</th>
                     </tr>
                   </thead>
@@ -385,6 +390,12 @@ export function DecisaoClient() {
                           <CampaignStatusBadge status={row.status} />
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
+                          <Sensitive>{row.daysRunning ?? "—"}</Sensitive>
+                        </td>
+                        <td className="px-5 py-3 text-right tabular-nums">
+                          <Sensitive>{row.conversions}</Sensitive>
+                        </td>
+                        <td className="px-5 py-3 text-right tabular-nums">
                           <Sensitive>{row.spend.toFixed(2).replace(".", ",")}</Sensitive>
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
@@ -395,9 +406,6 @@ export function DecisaoClient() {
                         </td>
                         <td className="px-5 py-3 text-right tabular-nums">
                           <Sensitive>{row.roas}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{fmtCampaignMetric(row.cpm)}</Sensitive>
                         </td>
                         <td className="max-w-xs px-5 py-3 text-muted-foreground">
                           <Sensitive>{row.reason}</Sensitive>
@@ -422,6 +430,18 @@ export function DecisaoClient() {
                     </div>
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
                       <div>
+                        <dt className="text-muted-foreground">Dias activos</dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          <Sensitive>{row.daysRunning ?? "—"}</Sensitive>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">Conversões</dt>
+                        <dd className="mt-0.5 font-semibold tabular-nums">
+                          <Sensitive>{row.conversions}</Sensitive>
+                        </dd>
+                      </div>
+                      <div>
                         <dt className="text-muted-foreground">Gasto</dt>
                         <dd className="mt-0.5 font-semibold tabular-nums">
                           <Sensitive>{row.spend.toFixed(2).replace(".", ",")}</Sensitive>
@@ -443,12 +463,6 @@ export function DecisaoClient() {
                         <dt className="text-muted-foreground">ROAS</dt>
                         <dd className="mt-0.5 font-semibold tabular-nums">
                           <Sensitive>{row.roas}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">CPM</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{fmtCampaignMetric(row.cpm)}</Sensitive>
                         </dd>
                       </div>
                     </dl>
