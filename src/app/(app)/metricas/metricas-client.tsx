@@ -17,6 +17,7 @@ import {
 } from "@/lib/period";
 import type { MetricPanelPreferences } from "@/lib/metric-panel";
 import type { DashboardSummary } from "@/lib/metrics";
+import { hrefWithScope } from "@/lib/scope-query";
 
 function summaryApiUrl(params: URLSearchParams): string {
   const q = new URLSearchParams(periodQueryFromSearchParams(params));
@@ -41,6 +42,8 @@ export function MetricasClient({
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
   const period = periodFromSearchParams(searchParams);
+  const cogsHref = hrefWithScope("/cogs", searchParams);
+  const adsHref = hrefWithScope("/anuncios", searchParams);
   const { prefs, ready, save } = useMetricPanelPreferences(
     workspaceId,
     initialPanelPrefs,
@@ -114,6 +117,8 @@ export function MetricasClient({
             missingCogsCount={data.missingCogsCount}
             missingCogsMessage={data.missingCogsMessage}
             missingAdSpendDays={data.missingAdSpendDays}
+            cogsHref={cogsHref}
+            adsHref={adsHref}
           />
         </>
       )}

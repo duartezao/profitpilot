@@ -138,6 +138,8 @@ const StoreSchema = new Schema(
     analyticsSessionCountry: { type: String, default: null },
     lastSessionMetricsAt: { type: Date },
     lastSessionMetricsError: { type: String, default: null },
+    /** Bump quando a query ShopifyQL de sessões muda — força re-sync. */
+    sessionMetricsQueryVersion: { type: Number, default: 1 },
     // Fuso IANA da loja (ex. Europe/Brussels) — dias de revenue/orders alinhados com Shopify.
     ianaTimezone: { type: String, default: null },
     // Origem do fuso: "shopify" (auto, sobrescrito no sync) ou "manual" (override do utilizador).

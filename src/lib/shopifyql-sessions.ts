@@ -1,3 +1,5 @@
+import { sessionCountryShopifyName } from "@/lib/shopify-countries";
+
 /**
  * ShopifyQL para métricas de sessões (sem dependências server-only — testável).
  * Ordem obrigatória: FROM → SHOW → WHERE → SINCE/UNTIL → TIMESERIES → ORDER BY → LIMIT.
@@ -15,9 +17,11 @@ export function buildDailySessionsQuery(
   ];
 
   if (countryCode) {
-    parts.push(
-      `WHERE session_country_code = '${countryCode.replace(/'/g, "''")}'`,
+    const countryName = sessionCountryShopifyName(countryCode).replace(
+      /'/g,
+      "''",
     );
+    parts.push(`WHERE session_country = '${countryName}'`);
   }
 
   parts.push(

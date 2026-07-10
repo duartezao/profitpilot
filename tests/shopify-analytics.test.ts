@@ -13,7 +13,7 @@ describe("buildDailySessionsQuery", () => {
     assert.ok(sinceIdx > whereIdx, "SINCE depois de WHERE");
     assert.ok(timeseriesIdx > sinceIdx, "TIMESERIES depois de SINCE");
     assert.ok(!/GROUP BY day.*SINCE/.test(q), "GROUP BY não antes de SINCE");
-    assert.match(q, /session_country_code = 'BE'/);
+    assert.match(q, /session_country = 'Belgium'/);
   });
 
   it("sem país não inclui WHERE", () => {
