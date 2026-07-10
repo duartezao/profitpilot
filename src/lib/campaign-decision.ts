@@ -1,6 +1,9 @@
 import type { CampaignDayMetrics } from "@/lib/ad-campaign-metrics";
 
-export type CampaignDecisionStatus = "scale" | "maintain" | "descale";
+export const CAMPAIGN_TEST_PHASE_DAYS = 7;
+export const CAMPAIGN_EXTENDED_TEST_DAYS = 14;
+
+export type CampaignDecisionStatus = "scale" | "maintain" | "descale" | "kill";
 
 export type CampaignDecisionRow = {
   campaignId: string;
@@ -9,6 +12,8 @@ export type CampaignDecisionRow = {
   status: CampaignDecisionStatus;
   statusLabel: string;
   spend: number;
+  daysRunning: number | null;
+  conversions: number;
   cpc: number | null;
   ctr: number | null;
   cpm: number | null;
@@ -33,6 +38,7 @@ const MIN_CLICKS_FOR_SCALE = 3;
 function statusLabel(status: CampaignDecisionStatus): string {
   if (status === "scale") return "Scale";
   if (status === "descale") return "Descale";
+  if (status === "kill") return "Kill";
   return "Manter";
 }
 
@@ -55,9 +61,15 @@ function fmtRoas(v: number | null): string {
 }
 
 function campaignRoas(c: CampaignDayMetrics): number | null {
+  if (c.lifetimeRoas != null && c.lifetimeRoas > 0) return c.lifetimeRoas;
   if (c.roas != null && c.roas > 0) return c.roas;
   if (c.spend > 0 && c.conversionValue > 0) return c.conversionValue / c.spend;
   return null;
+}
+
+function lifetimeConversions(c: CampaignDayMetrics): number {
+  if (c.lifetimeConversions != null) return c.lifetimeConversions;
+  return c.conversions;
 }
 
 type RoasVsBer = "above" | "at" | "below" | "unknown";
@@ -70,9 +82,59 @@ function roasVsBer(roas: number | null, ber: number | null): RoasVsBer {
   return "at";
 }
 
+type LifecycleVerdict =
+  | { status: CampaignDecisionStatus; reason: string }
+  | null;
+
 /**
- * Scale/descale com base no ROAS da campanha vs BER da loja.
- * CTR/CPC não bastam para scale — só sinal secundário no texto.
+ * Regras de teste: 7 dias sem conversões → kill;
+ * ROAS abaixo do BER → segunda janela até 14 dias, depois kill.
+ */
+function lifecycleVerdict(
+  c: CampaignDayMetrics,
+  ber: number | null,
+): LifecycleVerdict {
+  const days = c.daysRunning ?? 0;
+  if (days <= 0) return null;
+
+  const conv = lifetimeConversions(c);
+  const roas = campaignRoas(c);
+  const roasFmt = fmtRoas(roas);
+  const berFmt = fmtRoas(ber);
+
+  if (days < CAMPAIGN_TEST_PHASE_DAYS) {
+    return {
+      status: "maintain",
+      reason: `Em teste — dia ${days} de ${CAMPAIGN_TEST_PHASE_DAYS}. Aguarda antes de matar.`,
+    };
+  }
+
+  if (conv <= 0) {
+    return {
+      status: "kill",
+      reason: `${days} dias activos sem conversões — pausa a campanha.`,
+    };
+  }
+
+  const vs = roasVsBer(roas, ber);
+  if (vs === "below") {
+    if (days < CAMPAIGN_EXTENDED_TEST_DAYS) {
+      return {
+        status: "maintain",
+        reason: `ROAS ${roasFmt} abaixo do BER (${berFmt}) — segunda janela de ${CAMPAIGN_TEST_PHASE_DAYS} dias (dia ${days} de ${CAMPAIGN_EXTENDED_TEST_DAYS}).`,
+      };
+    }
+    return {
+      status: "kill",
+      reason: `${CAMPAIGN_EXTENDED_TEST_DAYS}+ dias com ROAS ${roasFmt} abaixo do BER (${berFmt}) — pausa.`,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Scale/descale/kill com base no ciclo de teste (7/14 dias) e ROAS vs BER.
  */
 export function buildCampaignDecisions(
   campaigns: CampaignDayMetrics[],
@@ -80,12 +142,20 @@ export function buildCampaignDecisions(
 ): CampaignDecisionRow[] {
   if (!campaigns.length) return [];
 
-  const active = campaigns.filter((c) => c.spend > 0 || c.clicks > 0);
-  if (!active.length) return [];
+  const eligible = campaigns.filter(
+    (c) =>
+      c.isActiveCampaign ||
+      c.spend > 0 ||
+      c.impressions > 0 ||
+      c.clicks > 0 ||
+      c.conversions > 0 ||
+      (c.daysRunning ?? 0) > 0,
+  );
+  if (!eligible.length) return [];
 
-  const totalSpend = active.reduce((s, c) => s + c.spend, 0);
-  const totalClicks = active.reduce((s, c) => s + c.clicks, 0);
-  const totalImpressions = active.reduce((s, c) => s + c.impressions, 0);
+  const totalSpend = eligible.reduce((s, c) => s + c.spend, 0);
+  const totalClicks = eligible.reduce((s, c) => s + c.clicks, 0);
+  const totalImpressions = eligible.reduce((s, c) => s + c.impressions, 0);
 
   const accountCtr =
     totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : null;
@@ -94,11 +164,33 @@ export function buildCampaignDecisions(
   const ber = opts?.storeBer ?? null;
   const berFmt = fmtRoas(ber);
 
-  return active.map((c) => {
+  return eligible.map((c) => {
     const spendShare = totalSpend > 0 ? c.spend / totalSpend : 0;
     const roas = campaignRoas(c);
     const vs = roasVsBer(roas, ber);
     const roasFmt = fmtRoas(roas);
+    const conv = lifetimeConversions(c);
+    const days = c.daysRunning ?? null;
+
+    const lifecycle = lifecycleVerdict(c, ber);
+    if (lifecycle) {
+      return {
+        campaignId: c.campaignId,
+        name: c.campaignName,
+        platformLabel: c.platformLabel,
+        status: lifecycle.status,
+        statusLabel: statusLabel(lifecycle.status),
+        spend: c.spend,
+        daysRunning: days,
+        conversions: conv,
+        cpc: c.cpc,
+        ctr: c.ctr,
+        cpm: c.cpm,
+        roas: roasFmt,
+        roasValue: roas,
+        reason: lifecycle.reason,
+      };
+    }
 
     let status: CampaignDecisionStatus = "maintain";
     let reason = "Desempenho dentro do intervalo aceitável.";
@@ -109,9 +201,7 @@ export function buildCampaignDecisions(
     const cpcGood =
       accountCpc != null && c.cpc != null && c.cpc <= accountCpc * 0.92;
     const trafficHint =
-      ctrGood || cpcGood
-        ? " CTR/CPC acima da média."
-        : "";
+      ctrGood || cpcGood ? " CTR/CPC acima da média." : "";
 
     if (noClicks && spendShare >= 0.05) {
       status = "descale";
@@ -148,6 +238,8 @@ export function buildCampaignDecisions(
       status,
       statusLabel: statusLabel(status),
       spend: c.spend,
+      daysRunning: days,
+      conversions: conv,
       cpc: c.cpc,
       ctr: c.ctr,
       cpm: c.cpm,
@@ -169,7 +261,9 @@ export function pickBestCampaign(
     );
   }
 
-  const withRoas = rows.filter((r) => r.roasValue != null && r.roasValue > 0);
+  const withRoas = rows.filter(
+    (r) => r.status !== "kill" && r.roasValue != null && r.roasValue > 0,
+  );
   if (withRoas.length) {
     return (
       [...withRoas].sort(
@@ -178,7 +272,11 @@ export function pickBestCampaign(
     );
   }
 
-  return [...rows].sort((a, b) => b.spend - a.spend)[0] ?? null;
+  return (
+    [...rows]
+      .filter((r) => r.status !== "kill")
+      .sort((a, b) => b.spend - a.spend)[0] ?? null
+  );
 }
 
 export function buildCampaignSuggestionText(
@@ -186,8 +284,9 @@ export function buildCampaignSuggestionText(
   storeBer?: string | null,
 ): string | null {
   const best = pickBestCampaign(rows);
+  const kill = rows.filter((r) => r.status === "kill");
   const descale = rows.filter((r) => r.status === "descale");
-  if (!best && !descale.length) return null;
+  if (!best && !descale.length && !kill.length) return null;
 
   const berPart = storeBer ? ` (BER loja ${storeBer}x)` : "";
   const parts: string[] = [];
@@ -196,7 +295,12 @@ export function buildCampaignSuggestionText(
       `Melhor campanha: ${best.name} (${best.platformLabel}) — scale (+10–15%). ROAS ${best.roas}${berPart}, CTR ${fmtPct(best.ctr)}, CPC ${best.cpc != null ? fmtMoney(best.cpc, "EUR") : "—"}.`,
     );
   } else if (best) {
-    parts.push(`Maior ROAS: ${best.name} (${best.platformLabel}) — ROAS ${best.roas}${berPart}.`);
+    parts.push(
+      `Maior ROAS: ${best.name} (${best.platformLabel}) — ROAS ${best.roas}${berPart}.`,
+    );
+  }
+  if (kill[0]) {
+    parts.push(`Kill: ${kill[0].name} — ${kill[0].reason}`);
   }
   if (descale[0]) {
     parts.push(`Descale: ${descale[0].name} — ${descale[0].reason}`);
