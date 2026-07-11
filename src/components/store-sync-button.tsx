@@ -109,14 +109,22 @@ export function StoreSyncButton({
       setIncremental(Boolean(status.incremental));
 
       while (status.continue && !abortRef.current) {
-        try {
-          status = await callSync("step");
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : "";
-          if (msg.includes("limite Vercel") && !abortRef.current) {
-            await new Promise((r) => setTimeout(r, 800));
+        let retries = 0;
+        while (true) {
+          try {
             status = await callSync("step");
-          } else {
+            break;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "";
+            if (
+              msg.includes("limite Vercel") &&
+              !abortRef.current &&
+              retries < 5
+            ) {
+              retries++;
+              await new Promise((r) => setTimeout(r, 800));
+              continue;
+            }
             throw e;
           }
         }
@@ -177,14 +185,22 @@ export function StoreSyncButton({
 
           let status = data;
           while (status.continue && !abortRef.current && !cancelled) {
-            try {
-              status = await callSync("step");
-            } catch (e) {
-              const msg = e instanceof Error ? e.message : "";
-              if (msg.includes("limite Vercel") && !abortRef.current) {
-                await new Promise((r) => setTimeout(r, 800));
+            let retries = 0;
+            while (true) {
+              try {
                 status = await callSync("step");
-              } else {
+                break;
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : "";
+                if (
+                  msg.includes("limite Vercel") &&
+                  !abortRef.current &&
+                  retries < 5
+                ) {
+                  retries++;
+                  await new Promise((r) => setTimeout(r, 800));
+                  continue;
+                }
                 throw e;
               }
             }

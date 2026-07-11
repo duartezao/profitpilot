@@ -34,6 +34,10 @@ const SyncStateSchema = new Schema(
     productCursor: { type: String, default: null },
     /** Índice na lista ordenada de variantes vendidas (sync COGS em lotes). */
     productRefreshOffset: { type: Number, default: 0 },
+    /** Variantes das encomendas novas desta sync (deduplicadas) — só sync incremental UI. */
+    pendingCostVariantIds: { type: [String], default: [] },
+    /** Offset no lote de pendingCostVariantIds (sync incremental UI). */
+    pendingCostVariantOffset: { type: Number, default: 0 },
     sessionRangeIndex: { type: Number, default: 0 },
     orderPagesDone: { type: Number, default: 0 },
     ordersImported: { type: Number, default: 0 },

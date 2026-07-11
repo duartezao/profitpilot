@@ -1,20 +1,30 @@
-import Link from "next/link";
+"use client";
 
-export function DataWarnings({
+import Link from "next/link";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { useWorkspace } from "@/components/workspace-context";
+import { hrefWithScopeAndStore } from "@/lib/scope-query";
+
+function DataWarningsInner({
   cogsIncomplete,
   missingCogsCount,
   missingCogsMessage,
   missingAdSpendDays,
-  cogsHref = "/cogs",
-  adsHref = "/anuncios",
+  adsHref: adsHrefProp,
 }: {
   cogsIncomplete: boolean;
   missingCogsCount: number;
   missingCogsMessage?: string;
   missingAdSpendDays: number;
-  cogsHref?: string;
   adsHref?: string;
 }) {
+  const searchParams = useSearchParams();
+  const { workspaceId } = useWorkspace();
+  const cogsHref = hrefWithScopeAndStore("/cogs", searchParams, workspaceId);
+  const adsHref =
+    adsHrefProp ?? hrefWithScopeAndStore("/anuncios", searchParams, workspaceId);
+
   if (!cogsIncomplete && missingAdSpendDays <= 0) return null;
 
   const cogsText =
@@ -51,5 +61,21 @@ export function DataWarnings({
         </p>
       )}
     </div>
+  );
+}
+
+export function DataWarnings(
+  props: Parameters<typeof DataWarningsInner>[0] & { cogsHref?: string },
+) {
+  return (
+    <Suspense fallback={null}>
+      <DataWarningsInner
+        cogsIncomplete={props.cogsIncomplete}
+        missingCogsCount={props.missingCogsCount}
+        missingCogsMessage={props.missingCogsMessage}
+        missingAdSpendDays={props.missingAdSpendDays}
+        adsHref={props.adsHref}
+      />
+    </Suspense>
   );
 }

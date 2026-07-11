@@ -29,7 +29,7 @@ import {
   AD_API_SYNC_INTERVAL_MS,
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
-import { hrefWithScope } from "@/lib/scope-query";
+import { hrefWithScopeAndStore } from "@/lib/scope-query";
 import { LastSyncBadge } from "@/components/last-sync-badge";
 
 function summaryApiUrl(params: URLSearchParams): string {
@@ -69,8 +69,7 @@ export function DashboardClient() {
   const portfolioParam = searchParams.get("portfolio");
   const isPortfolio = parsePortfolioParam(portfolioParam) !== null;
   const period = periodFromSearchParams(searchParams);
-  const cogsHref = hrefWithScope("/cogs", searchParams);
-  const adsHref = hrefWithScope("/anuncios", searchParams);
+  const adsHref = hrefWithScopeAndStore("/anuncios", searchParams, workspaceId);
 
   const { data, isError, isFetching } = useQuery<
     DashboardSummary | PortfolioSummary
@@ -171,7 +170,6 @@ export function DashboardClient() {
               missingCogsCount={portfolioData.missingCogsCount}
               missingCogsMessage={portfolioData.missingCogsMessage}
               missingAdSpendDays={portfolioData.missingAdSpendDays}
-              cogsHref={cogsHref}
               adsHref={adsHref}
             />
           </>
@@ -243,7 +241,6 @@ export function DashboardClient() {
                 missingCogsCount={workspaceData.missingCogsCount}
                 missingCogsMessage={workspaceData.missingCogsMessage}
                 missingAdSpendDays={workspaceData.missingAdSpendDays}
-                cogsHref={cogsHref}
                 adsHref={adsHref}
               />
               {workspaceData.monthlyGoals && (
@@ -294,7 +291,6 @@ export function DashboardClient() {
                 missingCogsCount={workspaceData.missingCogsCount}
                 missingCogsMessage={workspaceData.missingCogsMessage}
                 missingAdSpendDays={workspaceData.missingAdSpendDays}
-                cogsHref={cogsHref}
                 adsHref={adsHref}
               />
             </>

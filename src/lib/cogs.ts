@@ -589,27 +589,24 @@ export const SOLD_VARIANT_BATCH = 50;
 
 /**
  * Variantes vendidas sem custo resolvido no catálogo (novas ou com unitCost 0).
+ * Usa $lookup + $limit na BD — não carrega todas as variantes em memória.
  */
-export async function listVariantIdsNeedingCostSync(
+/**
+ * Filtra candidatos (ex. variantes de encomendas novas) aos que ainda precisam de custo Shopify.
+ * Evita varrer todo o histórico de vendas no sync incremental.
+ */
+export async function filterVariantIdsNeedingCostSync(
   storeId: Types.ObjectId,
+  candidateIds: string[],
   limit = SOLD_VARIANT_BATCH,
-): Promise<string[]> {
-  const sold = await Order.aggregate<{ _id: string }>([
-    { $match: { storeId } },
-    { $unwind: "$lineItems" },
-    {
-      $match: {
-        "lineItems.variantId": { $exists: true, $nin: ["", null] },
-      },
-    },
-    { $group: { _id: "$lineItems.variantId" } },
-  ]);
-  const variantIds = sold.map((r) => String(r._id)).filter(Boolean);
-  if (!variantIds.length) return [];
+  offset = 0,
+): Promise<{ ids: string[]; total: number }> {
+  const unique = [...new Set(candidateIds.filter(Boolean))];
+  if (!unique.length) return { ids: [], total: 0 };
 
   const catalog = await ProductCost.find({
     storeId,
-    variantId: { $in: variantIds },
+    variantId: { $in: unique },
   })
     .select("variantId unitCost manualCost")
     .lean();
@@ -620,7 +617,78 @@ export async function listVariantIdsNeedingCostSync(
       .map((c) => String(c.variantId)),
   );
 
-  return variantIds.filter((id) => !resolved.has(id)).slice(0, limit);
+  const needing = unique.filter((id) => !resolved.has(id));
+  return {
+    ids: needing.slice(offset, offset + limit),
+    total: needing.length,
+  };
+}
+
+export async function listVariantIdsNeedingCostSync(
+  storeId: Types.ObjectId,
+  limit = SOLD_VARIANT_BATCH,
+): Promise<string[]> {
+  const costCollection = ProductCost.collection.name;
+  const rows = await Order.aggregate<{ _id: string }>([
+    { $match: { storeId } },
+    { $unwind: "$lineItems" },
+    {
+      $match: {
+        "lineItems.variantId": { $exists: true, $nin: ["", null] },
+      },
+    },
+    { $group: { _id: "$lineItems.variantId" } },
+    {
+      $lookup: {
+        from: costCollection,
+        let: { vid: "$_id" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$storeId", storeId] },
+                  { $eq: ["$variantId", "$$vid"] },
+                ],
+              },
+            },
+          },
+          {
+            $project: {
+              resolved: {
+                $or: [
+                  { $ne: ["$manualCost", null] },
+                  { $gt: [{ $ifNull: ["$unitCost", 0] }, 0] },
+                ],
+              },
+            },
+          },
+        ],
+        as: "costDoc",
+      },
+    },
+    {
+      $match: {
+        $expr: {
+          $eq: [
+            {
+              $size: {
+                $filter: {
+                  input: "$costDoc",
+                  as: "c",
+                  cond: "$$c.resolved",
+                },
+              },
+            },
+            0,
+          ],
+        },
+      },
+    },
+    { $sort: { _id: 1 } },
+    { $limit: limit },
+  ]);
+  return rows.map((r) => String(r._id)).filter(Boolean);
 }
 
 /** Total de variantes distintas nas encomendas da loja. */
