@@ -32,6 +32,7 @@ import {
   earliestShopifyEffectiveFrom,
   countDistinctSoldVariants,
   listSoldVariantIdsByOffset,
+  filterVariantIdsNeedingCostSync,
   listVariantIdsNeedingCostSync,
   SOLD_VARIANT_BATCH,
   loadCostResolverForStore,
@@ -448,6 +449,7 @@ const SHOPIFY_VARIANT_CATALOG_FIELDS = `
 async function upsertProductCostNodes(
   store: StoreDoc,
   nodes: ShopifyVariantCostNode[],
+  options?: { deferAssimilate?: boolean },
 ): Promise<{
   count: number;
   changedVariantIds: string[];
@@ -457,7 +459,11 @@ async function upsertProductCostNodes(
     return { count: 0, changedVariantIds: [], changedPriceVariantIds: [] };
   }
 
-  const existing = await ProductCost.find({ storeId: store._id })
+  const batchIds = nodes.map((n) => n.id);
+  const existing = await ProductCost.find({
+    storeId: store._id,
+    variantId: { $in: batchIds },
+  })
     .select("variantId productId unitCost price")
     .lean();
   const prevCosts = new Map(
@@ -561,22 +567,24 @@ async function upsertProductCostNodes(
     }
   }
 
-  if (changedVariantIds.length) {
-    const fromDates = [...costEffectiveFromByVariant.values()];
-    const from =
-      fromDates.length > 0
-        ? new Date(Math.min(...fromDates.map((d) => d.getTime())))
-        : await earliestShopifyEffectiveFrom(store._id, changedVariantIds, "cost");
-    await assimilatePendingCogsForStore(store._id, {
-      variantIds: changedVariantIds,
-      from,
-      reviseHistory: true,
-    });
-  }
-  if (changedPriceVariantIds.length) {
-    await assimilatePendingPricesForStore(store._id, {
-      variantIds: changedPriceVariantIds,
-    });
+  if (!options?.deferAssimilate) {
+    if (changedVariantIds.length) {
+      const fromDates = [...costEffectiveFromByVariant.values()];
+      const from =
+        fromDates.length > 0
+          ? new Date(Math.min(...fromDates.map((d) => d.getTime())))
+          : await earliestShopifyEffectiveFrom(store._id, changedVariantIds, "cost");
+      await assimilatePendingCogsForStore(store._id, {
+        variantIds: changedVariantIds,
+        from,
+        reviseHistory: true,
+      });
+    }
+    if (changedPriceVariantIds.length) {
+      await assimilatePendingPricesForStore(store._id, {
+        variantIds: changedPriceVariantIds,
+      });
+    }
   }
 
   return {
@@ -589,6 +597,13 @@ async function upsertProductCostNodes(
 export type SoldCostSyncOptions = {
   refreshOffset?: number;
   incremental?: boolean;
+  /** Sync em passos (UI) — assimila COGS/preços só no fim da fase products. */
+  deferAssimilate?: boolean;
+  /** Lote menor no sync chunked (evita timeout Vercel). */
+  batchSize?: number;
+  /** Sync incremental UI — só variantes destas encomendas novas (deduplicadas). */
+  restrictVariantIds?: string[];
+  restrictOffset?: number;
 };
 
 /**
@@ -606,11 +621,70 @@ export async function syncSoldProductCostsPage(
   changedVariantIds: string[];
   nextRefreshOffset: number;
   mode: "new" | "refresh" | "none";
+  pendingTotal?: number;
+  pendingDone?: number;
 }> {
   const refreshOffset = options.refreshOffset ?? 0;
   const incremental = options.incremental ?? false;
+  const batchSize = options.batchSize ?? SOLD_VARIANT_BATCH;
+  const restrictIds = options.restrictVariantIds;
 
-  const newIds = await listVariantIdsNeedingCostSync(store._id);
+  if (restrictIds?.length) {
+    const offset = options.restrictOffset ?? 0;
+    const filtered = await filterVariantIdsNeedingCostSync(
+      store._id,
+      restrictIds,
+      batchSize,
+      offset,
+    );
+    if (!filtered.ids.length) {
+      return {
+        count: 0,
+        hasMore: false,
+        changedVariantIds: [],
+        nextRefreshOffset: offset,
+        mode: "none",
+        pendingTotal: filtered.total,
+        pendingDone: offset,
+      };
+    }
+
+    const query = `query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        ${SHOPIFY_VARIANT_CATALOG_FIELDS}
+      }
+    }
+  }`;
+
+    type Resp = {
+      nodes: Array<ShopifyVariantCostNode | null>;
+    };
+
+    const data = await shopifyGraphQL<Resp>(domain, token, query, {
+      ids: filtered.ids,
+    });
+    const nodes = data.nodes.filter(
+      (n): n is ShopifyVariantCostNode => n != null && Boolean(n.id),
+    );
+    const { count, changedVariantIds } = await upsertProductCostNodes(
+      store,
+      nodes,
+      { deferAssimilate: options.deferAssimilate },
+    );
+    const nextOffset = offset + filtered.ids.length;
+    return {
+      count,
+      hasMore: nextOffset < filtered.total,
+      changedVariantIds,
+      nextRefreshOffset: nextOffset,
+      mode: "new",
+      pendingTotal: filtered.total,
+      pendingDone: nextOffset,
+    };
+  }
+
+  const newIds = await listVariantIdsNeedingCostSync(store._id, batchSize);
   let variantIds: string[];
   let mode: "new" | "refresh" = "new";
   let nextRefreshOffset = refreshOffset;
@@ -619,7 +693,7 @@ export async function syncSoldProductCostsPage(
     variantIds = newIds;
   } else if (incremental) {
     const skip = store.catalogRefreshOffset ?? 0;
-    variantIds = await listSoldVariantIdsByOffset(store._id, skip, SOLD_VARIANT_BATCH);
+    variantIds = await listSoldVariantIdsByOffset(store._id, skip, batchSize);
     mode = "refresh";
     if (!variantIds.length) {
       return {
@@ -634,7 +708,7 @@ export async function syncSoldProductCostsPage(
     variantIds = await listSoldVariantIdsByOffset(
       store._id,
       refreshOffset,
-      SOLD_VARIANT_BATCH,
+      batchSize,
     );
     mode = "refresh";
     if (!variantIds.length) {
@@ -670,6 +744,7 @@ export async function syncSoldProductCostsPage(
   const { count, changedVariantIds } = await upsertProductCostNodes(
     store,
     nodes,
+    { deferAssimilate: options.deferAssimilate },
   );
 
   if (mode === "new") {
@@ -760,6 +835,8 @@ export type OrdersPageResult = {
   inserted: number;
   /** Já existiam — só actualizadas */
   updated: number;
+  /** Variantes distintas só das encomendas novas desta página */
+  newOrderVariantIds: string[];
   nextCursor: string | null;
   hasMore: boolean;
 };
@@ -1042,6 +1119,7 @@ export async function syncOrdersPage(
     const ops: AnyBulkWriteOperation[] = [];
     let inserted = 0;
     let updated = 0;
+    const newOrderVariantIds = new Set<string>();
 
     for (const o of conn.nodes) {
       const finStatus = normalizeOrderFinancialStatus(o.displayFinancialStatus);
@@ -1173,8 +1251,12 @@ export async function syncOrdersPage(
           upsert: true,
         },
       });
-      if (isNew) inserted += 1;
-      else updated += 1;
+      if (isNew) {
+        inserted += 1;
+        for (const li of lineItems) {
+          if (li.variantId) newOrderVariantIds.add(li.variantId);
+        }
+      } else updated += 1;
     }
 
   const imported = inserted + updated;
@@ -1186,6 +1268,7 @@ export async function syncOrdersPage(
     imported,
     inserted,
     updated,
+    newOrderVariantIds: [...newOrderVariantIds],
     nextCursor: conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null,
     hasMore: conn.pageInfo.hasNextPage,
   };

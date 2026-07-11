@@ -84,7 +84,6 @@ export const storeRequiredPaths = new Set([
   "/pedidos",
   "/reembolsos",
   "/chargebacks",
-  "/cogs",
   "/alertas",
 ]);
 

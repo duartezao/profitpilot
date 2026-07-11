@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { Megaphone, Boxes } from "lucide-react";
 import { ExportFormatLinks } from "@/components/export-format-links";
+import { ScopeLink } from "@/components/scope-link";
 import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
 import { buildWorkspacePnl } from "@/lib/metrics";
@@ -100,7 +101,6 @@ export default async function FinancasPage({
   }
 
   const scopeQs = scopeQueryFromInput({ period, from, to, dates, store: storeId });
-  const cogsHref = scopeQs ? `/cogs?${scopeQs}` : "/cogs";
   const adsHref = scopeQs ? `/anuncios?${scopeQs}` : "/anuncios";
   const pnlExportHref = scopeQs
     ? `/api/export/pnl?${scopeQs}`
@@ -300,13 +300,13 @@ export default async function FinancasPage({
             </Suspense>
           )}
           <ExportFormatLinks href={pnlExportHref} />
-          <Link
-            href={cogsHref}
+          <ScopeLink
+            href="/cogs"
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
           >
             <Boxes className="h-4 w-4" />
             COGS
-          </Link>
+          </ScopeLink>
           <Link
             href={adsHref}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
@@ -322,7 +322,6 @@ export default async function FinancasPage({
         missingCogsCount={pnl.missingCogsCount}
         missingCogsMessage={pnl.missingCogsMessage}
         missingAdSpendDays={pnl.missingAdSpendDays}
-        cogsHref={cogsHref}
         adsHref={adsHref}
       />
 

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { hrefWithScope } from "@/lib/scope-query";
+import { useWorkspace } from "@/components/workspace-context";
+import { hrefWithScopeAndStore } from "@/lib/scope-query";
 
 function ScopeLinkInner({
   href,
@@ -15,8 +16,12 @@ function ScopeLinkInner({
   children: React.ReactNode;
 }) {
   const searchParams = useSearchParams();
+  const { workspaceId } = useWorkspace();
   return (
-    <Link href={hrefWithScope(href, searchParams)} className={className}>
+    <Link
+      href={hrefWithScopeAndStore(href, searchParams, workspaceId)}
+      className={className}
+    >
       {children}
     </Link>
   );

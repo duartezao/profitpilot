@@ -19,6 +19,28 @@ export function hrefWithScope(path: string, params: URLSearchParams): string {
   return `${path}${sep}${qs}`;
 }
 
+/**
+ * Como hrefWithScope, mas inclui a loja persistida (sessionStorage) quando o URL
+ * não traz ?store= — útil para links «Gerir custos» a partir da vista consolidada.
+ */
+export function hrefWithScopeAndStore(
+  path: string,
+  params: URLSearchParams,
+  workspaceId?: string | null,
+): string {
+  if (params.get("store")) return hrefWithScope(path, params);
+  if (workspaceId) {
+    const persisted = getPersistedStore(workspaceId);
+    if (persisted) {
+      const q = new URLSearchParams(scopeQueryFromSearchParams(params));
+      q.set("store", persisted);
+      const qs = q.toString();
+      return qs ? `${path}?${qs}` : path;
+    }
+  }
+  return hrefWithScope(path, params);
+}
+
 /** OAuth start — garante `store` no query string sem URLs inválidas. */
 export function hrefOAuthStart(
   apiPath: "/api/oauth/google/start" | "/api/oauth/meta/start",
