@@ -29,6 +29,8 @@ const AdCampaignDaySchema = new Schema(
     campaignId: { type: String, required: true, trim: true },
     campaignName: { type: String, trim: true, default: "" },
     spend: { type: Number, min: 0, default: 0 },
+    /** Budget diário da campanha (sync API — quando disponível). */
+    dailyBudget: { type: Number, min: 0, default: null },
     currency: { type: String, default: "USD" },
     impressions: { type: Number, min: 0, default: 0 },
     clicks: { type: Number, min: 0, default: 0 },

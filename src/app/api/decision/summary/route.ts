@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCachedDecisionSummary } from "@/lib/decision-summary-cache";
+import { parseAnalysisWindow } from "@/lib/decision-types";
 import {
   authErrorResponse,
   requireUser,
@@ -25,6 +26,7 @@ export async function GET(req: Request) {
         dates: params.get("dates"),
       },
       user.storeAccess,
+      parseAnalysisWindow(params.get("window")),
     );
     return NextResponse.json(data, {
       headers: { "Cache-Control": "no-store" },

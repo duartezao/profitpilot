@@ -24,6 +24,7 @@ export async function getCachedDecisionSummary(
   storeId: string | undefined,
   periodInput: PeriodInput | undefined,
   storeAccess: StoreAccess,
+  analysisWindowDays: 5 | 7 = 7,
 ): Promise<DecisionSummary> {
   const periodKey = periodCacheKey(periodInput);
   const accessKey = serializeStoreAccess(storeAccess);
@@ -31,8 +32,21 @@ export async function getCachedDecisionSummary(
 
   return unstable_cache(
     async () =>
-      buildDecisionSummary(workspaceId, storeId, periodInput, storeAccess),
-    ["decision-summary", workspaceId, scopedStore, periodKey, accessKey],
+      buildDecisionSummary(
+        workspaceId,
+        storeId,
+        periodInput,
+        storeAccess,
+        analysisWindowDays,
+      ),
+    [
+      "decision-summary",
+      workspaceId,
+      scopedStore,
+      periodKey,
+      accessKey,
+      `window:${analysisWindowDays}`,
+    ],
     {
       revalidate: DECISION_TTL_SEC,
       tags: [workspaceMetricsCacheTag(workspaceId)],
