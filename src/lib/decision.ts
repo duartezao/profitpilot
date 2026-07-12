@@ -8,59 +8,32 @@ import {
 } from "@/lib/metrics";
 import { buildWorkspaceTreasury, type WorkspaceTreasury } from "@/lib/treasury";
 import type { PeriodInput } from "@/lib/period";
-import {
-  resolvePeriod,
-  formatDateInput,
-  addDays,
-  startOfDay,
-} from "@/lib/period";
 import type { StoreAccess } from "@/lib/store-access";
-import { loadStoreCampaignsForDecision } from "@/lib/ad-campaign-metrics";
-import { loadActiveAdAccountIdsForStore } from "@/lib/ad-accounts";
+import { loadActiveAdAccounts } from "@/lib/ad-accounts";
+import { Types } from "mongoose";
 import {
-  buildCampaignDecisions,
-  pickBestCampaign,
-  type CampaignDecisionRow,
-} from "@/lib/campaign-decision";
+  buildCampaignDecisionAnalysis,
+  type CampaignAnalysisWindow,
+} from "@/lib/campaign-analysis";
+import { listRecentScaleEvents } from "@/lib/campaign-scale";
+import type { AdPlatform } from "@/lib/ad-spend-platforms";
+import type {
+  CampaignDecisionAnalysis,
+  CampaignDecisionRow,
+  DecisionRow,
+  DecisionStatus,
+  DecisionSummary,
+  TodayAction,
+} from "@/lib/decision-types";
 
-export type { CampaignDecisionRow };
-
-export type DecisionStatus = "scale" | "maintain" | "kill";
-
-export type DecisionRow = {
-  name: string;
-  kind: "product" | "store";
-  status: DecisionStatus;
-  statusLabel: string;
-  roas: string;
-  ber: string;
-  margin: string;
-  spend: string;
-};
-
-export type TodayAction = {
-  level: "positive" | "warning" | "negative";
-  text: string;
-};
-
-export type DecisionSummary = {
-  scopeName: string | null;
-  periodLabel: string;
-  actions: TodayAction[];
-  rows: DecisionRow[];
-  campaignRows: CampaignDecisionRow[];
-  /** BER da loja no período (para campanhas scale/descale). */
-  storeBerRoas: string | null;
-  treasury: {
-    available: string;
-    incoming: string;
-    payable: string;
-    projected: string;
-    projectedTitle: string;
-    currency: string;
-  } | null;
-  generatedAt: string;
-};
+export type {
+  CampaignDecisionRow,
+  DecisionRow,
+  DecisionStatus,
+  DecisionSummary,
+  TodayAction,
+} from "@/lib/decision-types";
+export { parseAnalysisWindow } from "@/lib/decision-types";
 
 function statusLabel(status: DecisionStatus): string {
   if (status === "scale") return "Scale";
@@ -129,41 +102,27 @@ function buildStoreRows(
   });
 }
 
-function dayKeysFromPeriod(period: ReturnType<typeof resolvePeriod>): string[] {
-  if (period.specificDates?.length) {
-    return [...period.specificDates].sort().slice(0, 31);
-  }
-  const keys: string[] = [];
-  let cur = startOfDay(period.start);
-  const end = startOfDay(period.end);
-  while (cur <= end && keys.length < 31) {
-    keys.push(formatDateInput(cur));
-    cur = addDays(cur, 1);
-  }
-  return keys;
-}
-
 function buildCampaignActions(rows: CampaignDecisionRow[]): TodayAction[] {
   const actions: TodayAction[] = [];
-  const kill = rows.find((r) => r.status === "kill");
+  const kill = rows.find((r) => r.status === "kill" || r.status === "pause");
   if (kill) {
     actions.push({
       level: "negative",
-      text: `${kill.name} (${kill.platformLabel}) — kill. ${kill.reason}`,
+      text: `${kill.name} (${kill.adAccountName}) — ${kill.statusLabel}. ${kill.reason}`,
     });
   }
-  const best = pickBestCampaign(rows);
-  if (best?.status === "scale") {
+  const scale = rows.find((r) => r.status === "scale" && r.hasFullWindow);
+  if (scale) {
     actions.push({
       level: "positive",
-      text: `${best.name} (${best.platformLabel}) — scale (+10–15% budget). ${best.reason}`,
+      text: `${scale.name} (${scale.adAccountName}) — scale. ${scale.reason}`,
     });
   }
-  const descale = rows.find((r) => r.status === "descale");
-  if (descale) {
+  const testing = rows.filter((r) => r.status === "testing");
+  if (testing.length > 0 && !kill) {
     actions.push({
-      level: "negative",
-      text: `${descale.name} (${descale.platformLabel}) — descale. ${descale.reason}`,
+      level: "warning",
+      text: `${testing.length} campanha(s) ainda sem ${testing[0]?.spendDaysRequired ?? 7} dias com gasto — aguarda janela completa.`,
     });
   }
   return actions;
@@ -269,8 +228,8 @@ export async function buildDecisionSummary(
   storeId?: string,
   periodInput?: PeriodInput,
   storeAccess: StoreAccess = "all",
+  analysisWindowDays: CampaignAnalysisWindow = 7,
 ): Promise<DecisionSummary> {
-  const period = resolvePeriod(periodInput);
   const [pnl, treasury, productRanking] = await Promise.all([
     buildWorkspacePnl(workspaceId, periodInput, storeId, storeAccess),
     buildWorkspaceTreasury(workspaceId, storeId, storeAccess).catch(() => null),
@@ -279,32 +238,37 @@ export async function buildDecisionSummary(
       : Promise.resolve(null),
   ]);
 
+  let campaignAnalysis: CampaignDecisionAnalysis | null = null;
   let campaignRows: CampaignDecisionRow[] = [];
   let storeBerRoas: string | null = null;
+  let recentScales: Awaited<ReturnType<typeof listRecentScaleEvents>> = [];
+
   if (storeId) {
-    const dayKeys = dayKeysFromPeriod(period);
-    const activeAccountIds = await loadActiveAdAccountIdsForStore(storeId);
-    const campaigns = await loadStoreCampaignsForDecision(
-      storeId,
-      dayKeys,
-      activeAccountIds,
-      formatDateInput(new Date()),
-    );
-    if (campaigns.length) {
-      const storeLine = pnl.stores[0];
-      const storeBer = storeLine ? berRoas(storeLine) : berRoas(pnl.totals);
-      storeBerRoas =
-        storeBer != null ? storeBer.toFixed(2).replace(".", ",") : null;
-      campaignRows = buildCampaignDecisions(campaigns, {
+    const storeLine = pnl.stores[0];
+    const storeBer = storeLine ? berRoas(storeLine) : berRoas(pnl.totals);
+    const storeName =
+      productRanking?.storeName ?? storeLine?.name ?? "Loja";
+    const accounts = await loadActiveAdAccounts(new Types.ObjectId(storeId));
+    const adAccounts = accounts.map((a) => ({
+      id: String(a._id),
+      name: a.accountName?.trim() || a.externalAccountId || a.platform,
+      platform: a.platform as AdPlatform,
+    }));
+
+    if (adAccounts.length) {
+      campaignAnalysis = await buildCampaignDecisionAnalysis({
+        storeId,
+        storeName,
+        windowDays: analysisWindowDays,
+        adAccounts,
         storeBer,
-        storeRevenue: storeLine?.revenue ?? pnl.totals.revenue,
-        totalAdSpend: storeLine?.adSpend ?? pnl.totals.adSpend,
+        currency: pnl.currency,
       });
-      campaignRows.sort((a, b) => {
-        const order = { kill: 0, descale: 1, maintain: 2, scale: 3 };
-        return order[a.status] - order[b.status];
-      });
+      campaignRows = campaignAnalysis.sections.flatMap((s) => s.rows);
+      storeBerRoas = campaignAnalysis.storeBerRoas;
     }
+
+    recentScales = await listRecentScaleEvents(storeId, 15);
   }
 
   let rows: DecisionRow[];
@@ -333,11 +297,15 @@ export async function buildDecisionSummary(
     scopeName: storeId
       ? (productRanking?.storeName ?? pnl.stores[0]?.name ?? null)
       : null,
-    periodLabel: productRanking?.periodLabel ?? pnl.periodLabel,
+    periodLabel: `${analysisWindowDays} dias com gasto`,
     actions,
     rows,
     campaignRows,
+    campaignAnalysis,
+    analysisWindowDays,
+    recentScales,
     storeBerRoas,
+    agentExport: campaignAnalysis?.agentExport ?? null,
     treasury: treasury ? treasuryCard(treasury, storeId) : null,
     generatedAt: new Date().toISOString(),
   };

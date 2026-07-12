@@ -325,6 +325,8 @@ export type CampaignInsightsRow = {
   currency: string;
   status?: string;
   statusLabel?: string;
+  /** Budget diário em moeda da conta (Meta). */
+  dailyBudget?: number | null;
 };
 
 const META_PURCHASE_ACTIONS = new Set([
@@ -397,7 +399,7 @@ function metaPurchaseFromInsights(
 const META_CAMPAIGN_INSIGHT_FIELDS =
   "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,purchase_roas,account_currency";
 
-type MetaCampaignCatalogEntry = { name: string; status: string };
+type MetaCampaignCatalogEntry = { name: string; status: string; dailyBudget: number | null };
 
 type MetaCampaignDayMetrics = {
   spend: number;
@@ -447,16 +449,20 @@ async function loadMetaCampaignCatalog(
     const json: MetaCampaignPage = nextUrl
       ? await metaGraphGet<MetaCampaignPage>(nextUrl, accessToken)
       : await metaGraphGet<MetaCampaignPage>(`${actId}/campaigns`, accessToken, {
-          fields: "id,name,status,effective_status",
+          fields: "id,name,status,effective_status,daily_budget",
           limit: "100",
         });
 
     for (const c of json.data ?? []) {
       const id = String(c.id ?? "").trim();
       if (!id) continue;
+      const rawBudget = (c as { daily_budget?: string }).daily_budget;
+      const dailyBudget =
+        rawBudget != null && Number(rawBudget) > 0 ? Number(rawBudget) : null;
       campaignsById.set(id, {
         name: c.name?.trim() || "Campanha",
         status: c.effective_status?.trim() || c.status?.trim() || "UNKNOWN",
+        dailyBudget,
       });
     }
     nextUrl = json.paging?.next ?? null;
@@ -539,6 +545,7 @@ function buildMetaCampaignInsightRows(
       currency: m?.currency ?? "USD",
       status: c.status,
       statusLabel: formatCampaignStatusLabel(c.status),
+      dailyBudget: c.dailyBudget,
     });
     seen.add(id);
   }

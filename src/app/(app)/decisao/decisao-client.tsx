@@ -1,21 +1,25 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Copy, Check } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
-import { ScopeLink } from "@/components/scope-link";
 import { useWorkspace } from "@/components/workspace-context";
-import {
-  periodFromSearchParams,
-  periodQueryFromSearchParams,
-} from "@/lib/period";
-import type { DecisionRow, DecisionSummary, TodayAction, CampaignDecisionRow } from "@/lib/decision";
+import type {
+  CampaignDecisionRow,
+  CampaignDecisionSection,
+  DecisionSummary,
+  TodayAction,
+} from "@/lib/decision-types";
 import { cn } from "@/lib/utils";
 
 function decisionApiUrl(params: URLSearchParams): string {
-  const q = new URLSearchParams(periodQueryFromSearchParams(params));
+  const q = new URLSearchParams();
   const store = params.get("store");
   if (store) q.set("store", store);
+  const window = params.get("window");
+  if (window === "5" || window === "7") q.set("window", window);
   return `/api/decision/summary?${q.toString()}`;
 }
 
@@ -31,61 +35,191 @@ function actionDot(level: TodayAction["level"]) {
   return "bg-warning";
 }
 
-function StatusBadge({ status }: { status: DecisionRow["status"] }) {
+function CampaignStatusBadge({
+  status,
+  label,
+}: {
+  status: CampaignDecisionRow["status"];
+  label: string;
+}) {
   return (
     <Sensitive>
       <span
         className={cn(
           "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
-          status === "scale" && "border border-positive/30 bg-positive/10 text-positive",
-          status === "kill" && "border border-negative/30 bg-negative/10 text-negative",
-          status === "maintain" && "border border-border bg-muted text-muted-foreground",
+          (status === "scale") &&
+            "border border-positive/30 bg-positive/10 text-positive",
+          (status === "kill" || status === "pause") &&
+            "border border-negative/30 bg-negative/10 text-negative",
+          status === "testing" &&
+            "border border-warning/30 bg-warning/10 text-warning",
+          status === "maintain" &&
+            "border border-border bg-muted text-muted-foreground",
         )}
       >
-        {status === "scale" ? "Scale" : status === "kill" ? "Kill" : "Manter"}
+        {label}
       </span>
     </Sensitive>
   );
 }
 
-function CampaignStatusBadge({ status }: { status: CampaignDecisionRow["status"] }) {
-  return (
-    <Sensitive>
-      <span
-        className={cn(
-          "inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium",
-          status === "scale" && "border border-positive/30 bg-positive/10 text-positive",
-          status === "kill" && "border border-negative/30 bg-negative/10 text-negative",
-          status === "descale" && "border border-negative/30 bg-negative/10 text-negative",
-          status === "maintain" && "border border-border bg-muted text-muted-foreground",
-        )}
-      >
-        {status === "scale"
-          ? "Scale"
-          : status === "kill"
-            ? "Kill"
-            : status === "descale"
-              ? "Descale"
-              : "Manter"}
-      </span>
-    </Sensitive>
-  );
-}
-
-function fmtCampaignMetric(v: number | null, suffix = ""): string {
+function fmtMetric(v: number | null, suffix = ""): string {
   if (v == null) return "—";
   return `${v.toFixed(2).replace(".", ",")}${suffix}`;
 }
 
-function ymd(d: Date): string {
-  return d.toISOString().slice(0, 10);
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+      title={label}
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-positive" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+      {copied ? "Copiado" : "Copiar"}
+    </button>
+  );
 }
 
-function lastNDaysRange(n: number): { from: string; to: string } {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - (n - 1));
-  return { from: ymd(from), to: ymd(to) };
+function CampaignCard({ row }: { row: CampaignDecisionRow }) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <Sensitive className="font-medium leading-snug">{row.name}</Sensitive>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {row.adAccountName} · {row.platformLabel}
+          </p>
+        </div>
+        <CampaignStatusBadge status={row.status} label={row.statusLabel} />
+      </div>
+
+      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+        <div>
+          <dt className="text-muted-foreground">Dias c/ gasto</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>
+              {row.spendDays}/{row.spendDaysRequired}
+            </Sensitive>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Gasto</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{row.spend.toFixed(2).replace(".", ",")}</Sensitive>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Conv.</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{row.conversions}</Sensitive>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">ROAS</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{row.roas}</Sensitive>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">CPC</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{fmtMetric(row.cpc)}</Sensitive>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">CTR</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{fmtMetric(row.ctr, "%")}</Sensitive>
+          </dd>
+        </div>
+      </dl>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        <Sensitive>{row.reason}</Sensitive>
+      </p>
+
+      {row.lastScale && (
+        <div className="mt-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
+          <p className="font-medium">
+            Scale em {row.lastScale.dateKey}:{" "}
+            <Sensitive>
+              {row.lastScale.fromBudget.toFixed(0)} → {row.lastScale.toBudget.toFixed(0)}{" "}
+              {row.lastScale.currency}
+            </Sensitive>
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            <Sensitive>
+              Antes do scale: {row.lastScale.preSpendDays} dias · gasto{" "}
+              {row.lastScale.preSpend.toFixed(2)} · {row.lastScale.preConversions} conv. · ROAS{" "}
+              {row.lastScale.preRoas != null
+                ? `${row.lastScale.preRoas.toFixed(2)}x`
+                : "—"}
+            </Sensitive>
+          </p>
+          {row.postScale && (
+            <p className="mt-1 text-muted-foreground">
+              <Sensitive>
+                Depois ({row.postScale.spendDays} dias): gasto {row.postScale.spend.toFixed(2)} ·{" "}
+                {row.postScale.conversions} conv. · ROAS{" "}
+                {row.postScale.roas != null ? `${row.postScale.roas.toFixed(2)}x` : "—"}
+                {row.postScale.verdict === "better" && " · melhorou"}
+                {row.postScale.verdict === "worse" && " · piorou"}
+                {row.postScale.verdict === "same" && " · estável"}
+                {row.postScale.verdict === "early" && " · ainda cedo para avaliar"}
+              </Sensitive>
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-end">
+        <CopyButton text={row.agentBrief} label="Copiar briefing para o agente" />
+      </div>
+    </div>
+  );
+}
+
+function CampaignSection({ section }: { section: CampaignDecisionSection }) {
+  if (!section.rows.length) {
+    return (
+      <section className="rounded-lg border border-dashed border-border bg-surface p-5">
+        <h2 className="text-lg font-semibold">{section.title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{section.description}</p>
+        <p className="mt-4 text-sm text-muted-foreground">Nenhuma campanha nesta categoria.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-border bg-surface">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-5">
+        <div>
+          <h2 className="text-lg font-semibold">{section.title}</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">{section.description}</p>
+        </div>
+        <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          {section.rows.length}
+        </span>
+      </div>
+      <div className="space-y-3 p-4">
+        {section.rows.map((row) => (
+          <CampaignCard key={`${row.adAccountId}-${row.campaignId}`} row={row} />
+        ))}
+      </div>
+    </section>
+  );
 }
 
 export function DecisaoClient() {
@@ -93,87 +227,102 @@ export function DecisaoClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
+  const windowDays = searchParams.get("window") === "5" ? 5 : 7;
 
   const { data, isError, isLoading } = useQuery({
-    queryKey: ["decision-summary", workspaceId, storeId, periodFromSearchParams(searchParams).key],
+    queryKey: ["decision-summary", workspaceId, storeId, windowDays],
     queryFn: () => fetchDecision(searchParams),
     refetchInterval: 120 * 1000,
   });
 
-  const isStore = Boolean(data?.scopeName);
+  function setWindow(days: 5 | 7) {
+    const q = new URLSearchParams(searchParams);
+    q.set("window", String(days));
+    router.push(`/decisao?${q.toString()}`);
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Decisão</h1>
-        <p className="text-sm text-muted-foreground">
-          {isStore ? (
-            <>
-              O que fazer hoje em{" "}
-              <Sensitive as="span">{data?.scopeName}</Sensitive>
-              {" · "}
-              {data?.periodLabel ?? ""}
-            </>
-          ) : (
-            `Prioridades em todas as lojas · ${data?.periodLabel ?? ""}`
-          )}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Decisão — Campanhas</h1>
+          <p className="text-sm text-muted-foreground">
+            {data?.scopeName ? (
+              <>
+                <Sensitive as="span">{data.scopeName}</Sensitive>
+                {" · "}
+                {data.analysisWindowDays} dias com gasto (dados completos)
+              </>
+            ) : (
+              "Seleciona uma loja para analisar campanhas."
+            )}
+          </p>
+        </div>
+
         {storeId && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                const q = new URLSearchParams(searchParams);
-                q.delete("dates");
-                q.delete("from");
-                q.delete("to");
-                q.set("period", "7d");
-                router.push(`/decisao?${q.toString()}`);
-              }}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:bg-muted"
-              title="Análise rápida — últimos 7 dias"
-            >
-              Últimos 7 dias
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const q = new URLSearchParams(searchParams);
-                const r = lastNDaysRange(5);
-                q.delete("period");
-                q.delete("dates");
-                q.set("from", r.from);
-                q.set("to", r.to);
-                router.push(`/decisao?${q.toString()}`);
-              }}
-              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:bg-muted"
-              title="Análise rápida — últimos 5 dias"
-            >
-              Últimos 5 dias
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg border border-border p-0.5">
+              <button
+                type="button"
+                onClick={() => setWindow(7)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium",
+                  windowDays === 7 ? "bg-muted text-foreground" : "text-muted-foreground",
+                )}
+              >
+                7 dias
+              </button>
+              <button
+                type="button"
+                onClick={() => setWindow(5)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium",
+                  windowDays === 5 ? "bg-muted text-foreground" : "text-muted-foreground",
+                )}
+              >
+                5 dias
+              </button>
+            </div>
+            {data?.agentExport && (
+              <CopyButton text={data.agentExport} label="Copiar análise completa" />
+            )}
           </div>
         )}
       </div>
 
-      {isError && (
-        <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
-          Não foi possível carregar o apoio à decisão.
+      {!storeId && (
+        <p className="rounded-lg border border-border bg-muted/50 px-4 py-6 text-center text-sm text-muted-foreground">
+          Escolhe uma loja no topo para ver a análise de campanhas por ad account.
         </p>
       )}
 
-      {isLoading && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="h-40 animate-pulse rounded-lg border border-border bg-muted" />
-          <div className="h-40 animate-pulse rounded-lg border border-border bg-muted" />
+      {isError && (
+        <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
+          Não foi possível carregar a análise.
+        </p>
+      )}
+
+      {isLoading && storeId && (
+        <div className="space-y-4">
+          <div className="h-24 animate-pulse rounded-lg border border-border bg-muted" />
+          <div className="h-48 animate-pulse rounded-lg border border-border bg-muted" />
         </div>
       )}
 
-      {data && (
+      {data && storeId && (
         <>
-          <div className="grid gap-4 lg:grid-cols-2">
+          {data.storeBerRoas && (
+            <p className="text-sm text-muted-foreground">
+              BER loja: <span className="font-medium tabular-nums">{data.storeBerRoas}x</span>
+              {" · "}
+              {data.campaignAnalysis?.campaignCount ?? 0} campanha(s) com gasto registado
+            </p>
+          )}
+
+          {data.actions.length > 0 && (
             <div className="rounded-lg border border-border bg-surface p-5">
-              <h2 className="text-lg font-semibold">O que fazer hoje</h2>
-              <ul className="mt-4 space-y-3">
+              <h2 className="text-lg font-semibold">Resumo rápido</h2>
+              <ul className="mt-3 space-y-2">
                 {data.actions.map((action) => (
                   <li key={action.text} className="flex items-start gap-3 text-sm">
                     <span
@@ -187,291 +336,40 @@ export function DecisaoClient() {
                 ))}
               </ul>
             </div>
+          )}
 
-            {data.treasury ? (
-              <div className="rounded-lg border border-border bg-surface p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-lg font-semibold">Tesouraria</h2>
-                  <ScopeLink
-                    href="/tesouraria"
-                    className="text-xs font-medium text-accent hover:underline"
-                  >
-                    Ver detalhe
-                  </ScopeLink>
-                </div>
-                <dl className="mt-4 grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <dt className="text-muted-foreground">Disponível</dt>
-                    <dd className="mt-0.5 font-semibold tabular-nums" data-sensitive>
-                      {data.treasury.available}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">A caminho</dt>
-                    <dd className="mt-0.5 font-semibold tabular-nums" data-sensitive>
-                      {data.treasury.incoming}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Recebido</dt>
-                    <dd className="mt-0.5 font-semibold tabular-nums" data-sensitive>
-                      {data.treasury.payable}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Saldo projetado</dt>
-                    <dd
-                      className="mt-0.5 font-semibold tabular-nums"
-                      title={data.treasury.projectedTitle}
-                      data-sensitive
-                    >
-                      {data.treasury.projected}
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-border bg-surface p-5 text-sm text-muted-foreground">
-                Tesouraria indisponível — sincroniza payouts da Shopify.
-              </div>
-            )}
-          </div>
+          {data.campaignAnalysis ? (
+            <div className="space-y-5">
+              {data.campaignAnalysis.sections.map((section) => (
+                <CampaignSection key={section.id} section={section} />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+              Sem campanhas com gasto. Liga uma ad account e sincroniza em Anúncios.
+            </p>
+          )}
 
-          <div className="rounded-lg border border-border bg-surface">
-            <div className="border-b border-border p-5">
-              <h2 className="text-lg font-semibold">Kill / Scale / Manter</h2>
-              <p className="text-sm text-muted-foreground">
-                {isStore
-                  ? data.campaignRows.length
-                    ? "Por produto e por campanha no período."
-                    : "Por produto no período (liga contas de ads para ver campanhas)."
-                  : "Por loja no período selecionado."}
+          {data.recentScales.length > 0 && (
+            <div className="rounded-lg border border-border bg-surface p-5">
+              <h2 className="text-lg font-semibold">Histórico de scales</h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Budgets que subiram (detetado no sync da API).
               </p>
-            </div>
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr className="text-left text-xs font-medium text-muted-foreground">
-                    <th className="px-5 py-3">
-                      {isStore ? "Produto" : "Loja"}
-                    </th>
-                    <th className="px-5 py-3">Estado</th>
-                    <th className="px-5 py-3 text-right">ROAS</th>
-                    <th className="px-5 py-3 text-right">BER</th>
-                    <th className="px-5 py-3 text-right">Margem</th>
-                    <th className="px-5 py-3 text-right">Gasto</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.rows.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="px-5 py-8 text-center text-muted-foreground"
-                      >
-                        Sem dados no período.
-                      </td>
-                    </tr>
-                  ) : (
-                    data.rows.map((row) => (
-                      <tr key={row.name} className="border-t border-border hover:bg-muted">
-                        <td className="px-5 py-3 font-medium">
-                          <Sensitive>{row.name}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3">
-                          <StatusBadge status={row.status} />
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.roas}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.ber}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.margin}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.spend}</Sensitive>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="space-y-3 p-4 lg:hidden">
-              {data.rows.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Sem dados no período.
-                </p>
-              ) : (
-                data.rows.map((row) => (
-                  <div
-                    key={row.name}
-                    className="rounded-lg border border-border bg-background p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <Sensitive className="font-medium leading-snug">
-                        {row.name}
+              <ul className="mt-4 divide-y divide-border">
+                {data.recentScales.map((s) => (
+                  <li key={`${s.dateKey}-${s.campaignName}`} className="py-3 text-sm">
+                    <Sensitive className="font-medium">{s.campaignName}</Sensitive>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      <Sensitive>
+                        {s.adAccountName} · {s.dateKey} · {s.previousBudget.toFixed(0)} →{" "}
+                        {s.newBudget.toFixed(0)} {s.currency}
+                        {s.preRoas != null && ` · ROAS pré-scale ${s.preRoas.toFixed(2)}x`}
                       </Sensitive>
-                      <StatusBadge status={row.status} />
-                    </div>
-                    <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <dt className="text-muted-foreground">ROAS</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.roas}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">BER</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.ber}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Margem</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.margin}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Gasto</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.spend}</Sensitive>
-                        </dd>
-                      </div>
-                    </dl>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {isStore && data.campaignRows.length > 0 && (
-            <div className="rounded-lg border border-border bg-surface">
-              <div className="border-b border-border p-5">
-                <h2 className="text-lg font-semibold">Campanhas — Kill / Scale</h2>
-                <p className="text-sm text-muted-foreground">
-                  Ciclo de teste: {7} dias sem conversões → kill; ROAS abaixo do BER → mais {7} dias antes de matar.
-                  {data.storeBerRoas ? ` BER loja: ${data.storeBerRoas}x.` : " BER indisponível (COGS incompleto)."}
-                </p>
-              </div>
-              <div className="hidden overflow-x-auto lg:block">
-                <table className="w-full min-w-[800px] text-sm">
-                  <thead>
-                    <tr className="text-left text-xs font-medium text-muted-foreground">
-                      <th className="px-5 py-3">Campanha</th>
-                      <th className="px-5 py-3">Plataforma</th>
-                      <th className="px-5 py-3">Estado</th>
-                      <th className="px-5 py-3 text-right">Dias</th>
-                      <th className="px-5 py-3 text-right">Conv.</th>
-                      <th className="px-5 py-3 text-right">Gasto</th>
-                      <th className="px-5 py-3 text-right">CPC</th>
-                      <th className="px-5 py-3 text-right">CTR</th>
-                      <th className="px-5 py-3 text-right">ROAS</th>
-                      <th className="px-5 py-3">Motivo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.campaignRows.map((row) => (
-                      <tr
-                        key={`${row.platformLabel}-${row.campaignId}`}
-                        className="border-t border-border hover:bg-muted"
-                      >
-                        <td className="px-5 py-3 font-medium">
-                          <Sensitive>{row.name}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-muted-foreground">
-                          {row.platformLabel}
-                        </td>
-                        <td className="px-5 py-3">
-                          <CampaignStatusBadge status={row.status} />
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.daysRunning ?? "—"}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.conversions}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.spend.toFixed(2).replace(".", ",")}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{fmtCampaignMetric(row.cpc)}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{fmtCampaignMetric(row.ctr, "%")}</Sensitive>
-                        </td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          <Sensitive>{row.roas}</Sensitive>
-                        </td>
-                        <td className="max-w-xs px-5 py-3 text-muted-foreground">
-                          <Sensitive>{row.reason}</Sensitive>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="space-y-3 p-4 lg:hidden">
-                {data.campaignRows.map((row) => (
-                  <div
-                    key={`${row.platformLabel}-${row.campaignId}`}
-                    className="rounded-lg border border-border bg-background p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <Sensitive className="font-medium leading-snug">{row.name}</Sensitive>
-                        <p className="mt-1 text-xs text-muted-foreground">{row.platformLabel}</p>
-                      </div>
-                      <CampaignStatusBadge status={row.status} />
-                    </div>
-                    <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <dt className="text-muted-foreground">Dias activos</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.daysRunning ?? "—"}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Conversões</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.conversions}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Gasto</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.spend.toFixed(2).replace(".", ",")}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">CPC</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{fmtCampaignMetric(row.cpc)}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">CTR</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{fmtCampaignMetric(row.ctr, "%")}</Sensitive>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">ROAS</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums">
-                          <Sensitive>{row.roas}</Sensitive>
-                        </dd>
-                      </div>
-                    </dl>
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      <Sensitive>{row.reason}</Sensitive>
                     </p>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           )}
         </>

@@ -26,6 +26,7 @@ import {
   fetchTiktokCampaignInsightsForDay,
   type CampaignInsightsRow as TiktokCampaignRow,
 } from "@/lib/tiktok-ads";
+import { recordCampaignBudgetScaleIfNeeded } from "@/lib/campaign-scale";
 
 type CampaignRow = MetaCampaignRow | GoogleCampaignRow | TiktokCampaignRow;
 
@@ -61,6 +62,7 @@ async function upsertOneCampaignRow(
   workspaceId: Types.ObjectId,
   storeId: Types.ObjectId,
   adAccountId: Types.ObjectId,
+  adAccountName: string,
   platform: AdPlatform,
   dateKey: string,
   row: CampaignRow,
@@ -68,7 +70,10 @@ async function upsertOneCampaignRow(
 ): Promise<void> {
   const alloc = allocationPct / 100;
   const campaignId = row.campaignId;
-  // Totais do dia vindos da API — substituição ($set), nunca soma incremental.
+  const dailyBudget =
+    row.dailyBudget != null && row.dailyBudget > 0
+      ? row.dailyBudget * alloc
+      : null;
   const setFields = {
     workspaceId,
     adAccountId,
@@ -81,6 +86,7 @@ async function upsertOneCampaignRow(
     conversionValue: row.conversionValue * alloc,
     status: row.status ?? "",
     statusLabel: row.statusLabel ?? "",
+    dailyBudget,
     syncedAt: new Date(),
   };
 
@@ -107,12 +113,28 @@ async function upsertOneCampaignRow(
       { $set: setFields },
     );
   }
+
+  if (dailyBudget != null && dailyBudget > 0) {
+    await recordCampaignBudgetScaleIfNeeded({
+      workspaceId,
+      storeId,
+      adAccountId,
+      adAccountName,
+      platform,
+      campaignId,
+      campaignName: row.campaignName,
+      dateKey,
+      newBudget: dailyBudget,
+      currency: row.currency,
+    });
+  }
 }
 
 async function upsertCampaignRows(
   workspaceId: Types.ObjectId,
   storeId: Types.ObjectId,
   adAccountId: Types.ObjectId,
+  adAccountName: string,
   platform: AdPlatform,
   dateKey: string,
   rows: CampaignRow[],
@@ -126,6 +148,7 @@ async function upsertCampaignRows(
       workspaceId,
       storeId,
       adAccountId,
+      adAccountName,
       platform,
       dateKey,
       row,
@@ -190,6 +213,7 @@ export async function syncAdCampaignMetricsForStoreDay(
         store.workspaceId,
         store._id,
         acc._id,
+        acc.accountName?.trim() || acc.externalAccountId || platform,
         platform,
         dateKey,
         rows,
