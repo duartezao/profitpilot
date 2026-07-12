@@ -11,6 +11,7 @@ import {
   roasChangeVerdict,
   classifyDecisionViewSection,
   pauseCauseForRow,
+  hasCampaignAttributedSales,
   buildMediaBuyerPauseCopyMessage,
   buildContiguousSpendWindow,
   isRoasClearlyBelowBer,
@@ -76,11 +77,14 @@ function statusLabel(status: CampaignDecisionStatus): string {
 
 function classifyBucket(
   conversions: number,
+  conversionValue: number,
   roas: number | null,
   ber: number | null,
   hasFullWindow: boolean,
 ): CampaignPerformanceBucket {
-  if (conversions <= 0) return "no_conversions";
+  if (!hasCampaignAttributedSales(conversions, conversionValue)) {
+    return "no_conversions";
+  }
   if (ber == null || ber <= 0 || roas == null || roas <= 0) {
     return hasFullWindow ? "marginal" : "marginal";
   }
@@ -387,6 +391,7 @@ export async function buildCampaignDecisionAnalysis(input: {
     const ber = input.storeBer;
     const bucket = classifyBucket(
       m.conversions,
+      m.conversionValue,
       m.roas,
       ber,
       hasFullWindow,
@@ -436,6 +441,7 @@ export async function buildCampaignDecisionAnalysis(input: {
     const viewSection = classifyDecisionViewSection({
       hasFullWindow,
       conversions: m.conversions,
+      conversionValue: m.conversionValue,
       roasValue: m.roas,
       berRoas: ber,
       bucket,
@@ -443,6 +449,7 @@ export async function buildCampaignDecisionAnalysis(input: {
     const pauseCause = pauseCauseForRow({
       hasFullWindow,
       conversions: m.conversions,
+      conversionValue: m.conversionValue,
       roasValue: m.roas,
       berRoas: ber,
     });

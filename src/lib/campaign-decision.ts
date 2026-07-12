@@ -67,9 +67,23 @@ function campaignRoas(c: CampaignDayMetrics): number | null {
   return null;
 }
 
+function hasLifetimeAttributedSales(c: CampaignDayMetrics): boolean {
+  const conversions =
+    c.lifetimeConversions != null ? c.lifetimeConversions : c.conversions;
+  const conversionValue =
+    c.lifetimeConversionValue != null
+      ? c.lifetimeConversionValue
+      : c.conversionValue;
+  return conversions > 0 || conversionValue > 0;
+}
+
 function lifetimeConversions(c: CampaignDayMetrics): number {
-  if (c.lifetimeConversions != null) return c.lifetimeConversions;
-  return c.conversions;
+  if (c.lifetimeConversions != null && c.lifetimeConversions > 0) {
+    return c.lifetimeConversions;
+  }
+  if (c.conversions > 0) return c.conversions;
+  if (hasLifetimeAttributedSales(c)) return 1;
+  return 0;
 }
 
 type RoasVsBer = "above" | "at" | "below" | "unknown";

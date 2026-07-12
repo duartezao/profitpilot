@@ -20,7 +20,6 @@ import {
   clearManualOrderCogs,
   isCogsInputCurrency,
 } from "@/lib/manual-cogs";
-import { saveEuCategoryFeeDay, EU_CATEGORY_FEE_EFFECTIVE_FROM } from "@/lib/eu-category-fees";
 import { convertCogsInputToStoreCurrency } from "@/lib/order-money";
 import { formatDateInput, parseDateInput } from "@/lib/period";
 import { resolveAdSpendRange } from "@/lib/ad-spend";
@@ -331,76 +330,6 @@ export async function saveManualCogsDayAction(
   revalidatePath("/financas");
   revalidatePath("/metricas");
   revalidatePath("/decisao");
-  return { ok: true };
-}
-
-export async function saveEuCategoryFeeDayAction(
-  _prev: ManualCogsState,
-  formData: FormData,
-): Promise<ManualCogsState> {
-  const user = await getCurrentUser();
-  if (!user) redirect("/login");
-  if (!ROLES_EDIT.includes(user.role)) {
-    return { error: "Sem permissão para editar taxas." };
-  }
-
-  const rawCurrency = String(formData.get("inputCurrency") ?? "EUR").toUpperCase();
-  const inputCurrency = isCogsInputCurrency(rawCurrency) ? rawCurrency : "EUR";
-
-  const parsed = dayCogsSchema.safeParse({
-    storeId: formData.get("storeId"),
-    date: formData.get("date"),
-    amount: parseLocaleNumber(formData.get("amount")),
-    inputCurrency,
-    note: String(formData.get("note") ?? "").trim() || undefined,
-  });
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
-  }
-
-  const { storeId, date, amount, note } = parsed.data;
-  const day = parseDateInput(date);
-  if (!day) return { error: "Data inválida." };
-
-  await connectToDatabase();
-  const store = await findStoreForUser(
-    user,
-    storeId,
-    "currency cogsInputCurrency ianaTimezone importStartDate createdAt",
-  );
-  if (!store) return { error: "Loja não encontrada ou sem acesso." };
-
-  const { fromKey } = resolveAdSpendRange(store.importStartDate, store.createdAt);
-  const minKey =
-    fromKey > EU_CATEGORY_FEE_EFFECTIVE_FROM
-      ? fromKey
-      : EU_CATEGORY_FEE_EFFECTIVE_FROM;
-  if (date < minKey) {
-    return {
-      error: `Só podes registar taxas a partir de ${minKey} (vigência da taxa EU: ${EU_CATEGORY_FEE_EFFECTIVE_FROM}).`,
-    };
-  }
-
-  try {
-    await saveEuCategoryFeeDay(
-      new mongoose.Types.ObjectId(user.workspaceId),
-      store._id,
-      date,
-      amount,
-      inputCurrency,
-      new mongoose.Types.ObjectId(user.id),
-      note,
-    );
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Falha ao guardar taxa." };
-  }
-
-  revalidatePath("/cogs");
-  revalidatePath("/dashboard");
-  revalidatePath("/financas");
-  revalidatePath("/metricas");
-  revalidatePath("/decisao");
-  revalidatePath("/notas");
   return { ok: true };
 }
 

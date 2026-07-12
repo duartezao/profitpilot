@@ -75,6 +75,24 @@ export function dayAfterDateKey(dateKey: string): string | null {
   return formatDateInput(addDays(d, 1));
 }
 
+import { CAMPAIGN_TEST_PHASE_DAYS } from "@/lib/campaign-decision";
+
+/**
+ * Google atribui conversões com atraso — re-sincronizar campanhas dos últimos N dias
+ * (só conversões/ROAS; o gasto fechado não volta à API).
+ * Alinhado com a 1.ª janela de kill (7 dias): refresca antes da decisão de matar.
+ */
+export const GOOGLE_CONVERSION_REFRESH_DAYS = CAMPAIGN_TEST_PHASE_DAYS;
+
+export function googleConversionRefreshDateKeys(
+  allKeys: string[],
+  today: string,
+  days = GOOGLE_CONVERSION_REFRESH_DAYS,
+): string[] {
+  const eligible = allKeys.filter((k) => k <= today).sort();
+  return eligible.slice(-Math.max(1, days));
+}
+
 /** Gasto API só precisa de sync se for hoje ou dia passado ainda sem registo. */
 export function needsAdSpendSyncForDay(
   dateKey: string,

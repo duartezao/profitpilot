@@ -63,6 +63,11 @@ import {
   assimilatesCogsOnSync,
   syncsShopifyProductCosts,
 } from "@/lib/cogs-modes";
+import { normalizeShippingCountryCode } from "@/lib/eu-customs-countries";
+import { purgeLegacyManualEuFeesForStore } from "@/lib/eu-category-fees";
+import { EU_CUSTOMS_FEE_EFFECTIVE_FROM } from "@/lib/eu-category-fees-types";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
+import { parseDateInput, startOfDay } from "@/lib/period";
 import { applyOrderFeesFromShopify } from "@/lib/order-fees-from-shopify";
 
 /** Campos da loja atualizados durante o sync — persistidos com updateOne (sem __v). */
@@ -889,6 +894,7 @@ type OrderSetPayload = {
   cogs: number;
   lineItems: OrderLineSnapshot[];
   amountsBase: OrderAmountsBaseSnapshot;
+  shippingCountryCode: string | null;
 };
 
 const moneyEq = (a: number, b: number) => Math.abs(num(a) - num(b)) < 0.005;
@@ -965,6 +971,7 @@ function orderSetMatchesExisting(
       unitCost?: number;
     }>;
     amountsBase?: OrderAmountsBaseSnapshot | null;
+    shippingCountryCode?: string | null;
   },
   payload: OrderSetPayload,
 ): boolean {
@@ -990,6 +997,12 @@ function orderSetMatchesExisting(
   if (!moneyEq(existing.refunded ?? 0, payload.refunded)) return false;
   if (!moneyEq(existing.cogs ?? 0, payload.cogs)) return false;
   if (!lineItemsEqual(payload.lineItems, existing.lineItems ?? [])) return false;
+  if (
+    (existing.shippingCountryCode ?? null) !==
+    (payload.shippingCountryCode ?? null)
+  ) {
+    return false;
+  }
   return amountsBaseEqual(payload.amountsBase, existing.amountsBase);
 }
 
@@ -1029,6 +1042,7 @@ export async function syncOrdersPage(
         totalRefundedSet { shopMoney { amount } }
         totalShippingPriceSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
+        shippingAddress { countryCodeV2 }
         lineItems(first: 100) {
           nodes {
             quantity
@@ -1054,6 +1068,7 @@ export async function syncOrdersPage(
     totalRefundedSet: Money;
     totalShippingPriceSet: Money;
     totalTaxSet: Money;
+    shippingAddress?: { countryCodeV2?: string | null } | null;
     lineItems: {
       nodes: Array<{
         quantity: number;
@@ -1085,9 +1100,32 @@ export async function syncOrdersPage(
       shopifyId: { $in: ids },
     })
       .select(
-        "shopifyId name orderDate currency financialStatus totalPrice subtotal netRevenue discounts shipping tax refunded cogs fees lineItems amountsBase manualCogs",
+        "shopifyId name orderDate currency financialStatus totalPrice subtotal netRevenue discounts shipping tax refunded cogs fees lineItems amountsBase manualCogs shippingCountryCode",
       )
-      .lean();
+      .lean<Array<{
+        shopifyId: string;
+        name?: string | null;
+        orderDate?: Date;
+        currency?: string | null;
+        financialStatus?: string | null;
+        totalPrice?: number;
+        subtotal?: number;
+        netRevenue?: number;
+        discounts?: number;
+        shipping?: number;
+        tax?: number;
+        refunded?: number;
+        cogs?: number;
+        fees?: number | null;
+        lineItems?: Array<{
+          variantId?: string | null;
+          unitCost?: number;
+          unitPrice?: number;
+        }>;
+        amountsBase?: OrderAmountsBaseSnapshot | null;
+        manualCogs?: number | null;
+        shippingCountryCode?: string | null;
+      }>>();
     const existingByShopifyId = new Map<
       string,
       (typeof existingOrders)[number]
@@ -1193,6 +1231,10 @@ export async function syncOrdersPage(
         manualCogs,
       );
 
+      const shippingCountryCode = normalizeShippingCountryCode(
+        o.shippingAddress?.countryCodeV2,
+      );
+
       const currency =
         o.currentTotalPriceSet?.shopMoney.currencyCode ?? store.currency;
       const payload: OrderSetPayload = {
@@ -1210,6 +1252,7 @@ export async function syncOrdersPage(
         cogs,
         lineItems,
         amountsBase,
+        shippingCountryCode,
       };
 
       if (
@@ -1245,6 +1288,7 @@ export async function syncOrdersPage(
               cogs: payload.cogs,
               lineItems: payload.lineItems,
               amountsBase: payload.amountsBase,
+              shippingCountryCode: payload.shippingCountryCode,
             },
             $setOnInsert: { fees: 0, feesSource: null },
           },
@@ -1274,6 +1318,104 @@ export async function syncOrdersPage(
   };
 }
 
+const SHIPPING_COUNTRY_BACKFILL_BATCH = 250;
+
+/** Preenche país de envio em encomendas antigas (taxa UE automática). */
+export async function backfillOrderShippingCountriesForStore(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+  opts?: { limit?: number },
+): Promise<{ updated: number; remaining: number }> {
+  const limit = Math.min(Math.max(opts?.limit ?? SHIPPING_COUNTRY_BACKFILL_BATCH, 1), 250);
+  const effectiveFrom = parseDateInput(EU_CUSTOMS_FEE_EFFECTIVE_FROM);
+  const minDate = effectiveFrom ? startOfDay(effectiveFrom) : new Date(0);
+
+  const missingFilter = mergePaidOrderFilter({
+    storeId: store._id,
+    orderDate: { $gte: minDate },
+    $or: [
+      { shippingCountryCode: { $exists: false } },
+      { shippingCountryCode: null },
+      { shippingCountryCode: "" },
+    ],
+  });
+
+  const missing = await Order.find(missingFilter)
+    .select("shopifyId")
+    .limit(limit)
+    .lean();
+
+  if (!missing.length) {
+    return { updated: 0, remaining: 0 };
+  }
+
+  const ids = missing.map((o) => o.shopifyId).filter(Boolean);
+  const query = `query OrderShippingCountries($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Order {
+        id
+        shippingAddress { countryCodeV2 }
+      }
+    }
+  }`;
+
+  type Resp = {
+    nodes: Array<{
+      id?: string;
+      shippingAddress?: { countryCodeV2?: string | null } | null;
+    } | null>;
+  };
+
+  const data = await shopifyGraphQL<Resp>(domain, token, query, { ids });
+  const byId = new Map<string, string | null>();
+  for (const node of data.nodes ?? []) {
+    if (!node?.id) continue;
+    byId.set(
+      node.id,
+      normalizeShippingCountryCode(node.shippingAddress?.countryCodeV2),
+    );
+  }
+
+  let updated = 0;
+  for (const row of missing) {
+    if (!byId.has(row.shopifyId)) continue;
+    const code = byId.get(row.shopifyId) ?? null;
+    await Order.updateOne(
+      { storeId: store._id, shopifyId: row.shopifyId },
+      { $set: { shippingCountryCode: code } },
+    );
+    updated += 1;
+  }
+
+  const remaining = await Order.countDocuments(missingFilter);
+  return { updated, remaining };
+}
+
+/** Corre todos os lotes até preencher países em falta (só actualiza shippingCountryCode). */
+export async function backfillAllOrderShippingCountriesForStore(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+  opts?: { maxBatches?: number },
+): Promise<{ updated: number; remaining: number; batches: number }> {
+  const maxBatches = Math.min(Math.max(opts?.maxBatches ?? 40, 1), 80);
+  let totalUpdated = 0;
+  let remaining = 0;
+  let batches = 0;
+
+  for (let i = 0; i < maxBatches; i++) {
+    const r = await backfillOrderShippingCountriesForStore(store, domain, token);
+    totalUpdated += r.updated;
+    remaining = r.remaining;
+    batches += 1;
+    if (remaining <= 0) break;
+    if (r.updated <= 0) break;
+  }
+
+  return { updated: totalUpdated, remaining, batches };
+}
+
 /** Importa orders (COGS por linha; taxas na fase applyOrderFeesFromShopify). */
 async function syncOrders(
   store: StoreDoc,
@@ -1299,6 +1441,11 @@ async function syncOrders(
     storeId: store._id,
     financialStatus: { $regex: /^(expired|voided)$/i },
   });
+
+  if (syncsShopifyProductCosts(store.cogsMode)) {
+    await purgeLegacyManualEuFeesForStore(store._id);
+    await backfillOrderShippingCountriesForStore(store, domain, token);
+  }
 
   return count;
 }

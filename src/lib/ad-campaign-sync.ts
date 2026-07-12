@@ -207,6 +207,7 @@ export type CampaignSyncResult = {
 export async function syncAdCampaignMetricsForStoreDay(
   storeId: string,
   dateKey: string,
+  options?: { platforms?: AdPlatform[] },
 ): Promise<CampaignSyncResult> {
   await ensureAdCampaignDayIndexes();
 
@@ -227,6 +228,7 @@ export async function syncAdCampaignMetricsForStoreDay(
 
   for (const acc of accounts) {
     const platform = acc.platform as AdPlatform;
+    if (options?.platforms && !options.platforms.includes(platform)) continue;
     try {
       const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
       const rows = await fetchCampaignRows(
@@ -260,11 +262,12 @@ export async function syncAdCampaignMetricsForStoreDay(
 export async function syncAdCampaignMetricsForStoreDays(
   storeId: string,
   dateKeys: string[],
+  options?: { platforms?: AdPlatform[] },
 ): Promise<CampaignSyncResult> {
   let campaignsSynced = 0;
   const sorted = [...new Set(dateKeys)].sort();
   for (const dateKey of sorted) {
-    const r = await syncAdCampaignMetricsForStoreDay(storeId, dateKey);
+    const r = await syncAdCampaignMetricsForStoreDay(storeId, dateKey, options);
     campaignsSynced += r.campaignsSynced;
   }
   const last = sorted[sorted.length - 1] ?? "";

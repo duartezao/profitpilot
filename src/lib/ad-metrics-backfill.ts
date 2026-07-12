@@ -12,6 +12,7 @@ import {
 } from "@/lib/store-timezone";
 import {
   buildAdMetricsCursor,
+  googleConversionRefreshDateKeys,
   resolveIncrementalAdDateKeys,
 } from "@/lib/ad-metrics-cursor";
 
@@ -110,24 +111,38 @@ export async function syncMissingAdMetricsForStore(
     cursor.lastCampaignDateKey = lastCampaignDoc.dateKey;
   }
 
-  const toSync = resolveIncrementalAdDateKeys({
+  const toSyncIncremental = resolveIncrementalAdDateKeys({
     allKeys,
     today,
     maxDays,
     spendDays: hasSpend,
     campaignDays: hasCampaign,
   });
+  const hasGoogle = accounts.some((a) => a.platform === "google");
+  const googleRefreshOnly = hasGoogle
+    ? googleConversionRefreshDateKeys(allKeys, today).filter(
+        (dateKey) =>
+          dateKey !== today && !toSyncIncremental.includes(dateKey),
+      )
+    : [];
+  const toSync = [...new Set([...toSyncIncremental, ...googleRefreshOnly])]
+    .sort()
+    .slice(-Math.max(1, maxDays));
 
   let synced = 0;
   let spendDays = 0;
 
   for (const dateKey of toSync) {
+    const googleOnlyRefresh = googleRefreshOnly.includes(dateKey);
     try {
       const result = await syncAdAccountsSpendForStore(storeId, {
         dateKey,
         campaignDateKeys: [dateKey],
         skipDailyNote: dateKey !== today,
-        skipSpendSync: !force && hasSpend.has(dateKey) && dateKey !== today,
+        skipSpendSync:
+          googleOnlyRefresh ||
+          (!force && hasSpend.has(dateKey) && dateKey !== today),
+        campaignPlatforms: googleOnlyRefresh ? ["google"] : undefined,
         forceOverwrite: force,
       });
       synced++;

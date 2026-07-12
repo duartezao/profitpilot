@@ -1,57 +1,41 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { EuCategoryFeeEntry } from "@/lib/eu-category-fees-types";
-import { ShopifyExtraFeesPanel } from "@/components/dashboard/shopify-extra-fees-panel";
+import { useQuery } from "@tanstack/react-query";
+import type { EuCustomsFeeAutoSummary } from "@/lib/eu-category-fees-types";
+import { EuCustomsFeeAutoPanel } from "@/components/dashboard/eu-customs-fee-auto-panel";
 
-type FeesPayload = {
-  applies: boolean;
-  storeId?: string;
-  storeName?: string;
-  baseCurrency?: string;
-  inputCurrency?: string;
-  entries?: EuCategoryFeeEntry[];
-  canEdit?: boolean;
-};
+type EuCustomsFeeApiResponse =
+  | EuCustomsFeeAutoSummary
+  | { automatic: false };
 
-async function fetchFees(storeId: string): Promise<FeesPayload> {
+async function fetchEuCustomsSummary(
+  storeId: string,
+): Promise<EuCustomsFeeApiResponse> {
   const res = await fetch(`/api/eu-category-fees?store=${storeId}`, {
     cache: "no-store",
   });
-  if (!res.ok) throw new Error("Falha ao carregar taxas.");
-  return res.json();
+  if (!res.ok) throw new Error("Falha ao carregar taxa EU.");
+  return res.json() as Promise<EuCustomsFeeApiResponse>;
 }
 
 export function ShopifyExtraFeesLoader({ storeId }: { storeId: string }) {
-  const queryClient = useQueryClient();
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["eu-category-fees", storeId],
-    queryFn: () => fetchFees(storeId),
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["eu-customs-fees", storeId],
+    queryFn: () => fetchEuCustomsSummary(storeId),
+    staleTime: 30_000,
   });
 
   if (isLoading) {
     return (
-      <div className="h-14 animate-pulse rounded-lg border border-border bg-muted" />
+      <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted-foreground">
+        A carregar taxa EU…
+      </div>
     );
   }
 
-  if (isError || !data?.applies || !data.storeName || !data.baseCurrency) {
+  if (error || !data || ("automatic" in data && data.automatic === false)) {
     return null;
   }
 
-  return (
-    <ShopifyExtraFeesPanel
-      storeId={storeId}
-      storeName={data.storeName}
-      baseCurrency={data.baseCurrency}
-      inputCurrency={data.inputCurrency ?? "EUR"}
-      entries={data.entries ?? []}
-      canEdit={data.canEdit ?? false}
-      onSaved={() =>
-        void queryClient.invalidateQueries({
-          queryKey: ["eu-category-fees", storeId],
-        })
-      }
-    />
-  );
+  return <EuCustomsFeeAutoPanel storeId={storeId} summary={data} />;
 }

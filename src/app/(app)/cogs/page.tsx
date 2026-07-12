@@ -12,7 +12,7 @@ import {
   getBaseCurrency,
   listOrdersForCogsPanel,
 } from "@/lib/manual-cogs";
-import { appliesEuCategoryFees } from "@/lib/eu-category-fees";
+import { appliesAutoEuCustomsFees } from "@/lib/eu-category-fees";
 import { COGS_MODE_LABELS, type CogsMode } from "@/lib/cogs-modes";
 import { CostRow, type CostRowData } from "./cost-row";
 import { CogsCsvImport } from "./cogs-csv-import";
@@ -74,8 +74,8 @@ export default async function CogsPage({
     dayRows = await buildCogsDayRows(scoped, baseCurrency);
   }
 
-  const showEuCategoryFees =
-    scoped && activeMode && appliesEuCategoryFees(activeMode);
+  const showEuCustomsFeeInfo =
+    scoped && activeMode && appliesAutoEuCustomsFees(activeMode);
 
   const showVariantTable =
     !activeMode || activeMode === "shopify" || activeMode === "variant";
@@ -147,16 +147,17 @@ export default async function CogsPage({
                 ? "Produtos vendidos nesta loja sem custo definido."
                 : "Produtos vendidos sem custo definido."}
         </p>
-        {showEuCategoryFees && scoped && (
+        {showEuCustomsFeeInfo && scoped && (
           <p className="mt-2 text-sm text-muted-foreground">
-            A taxa Shopify da fatura (3 € por categoria) regista-se no{" "}
+            A taxa alfandegária UE (3 € por encomenda para destinos UE) é calculada
+            automaticamente e soma ao COGS — vê o detalhe no{" "}
             <a
               href={`/metricas?store=${String(scoped._id)}`}
               className="text-accent hover:underline"
             >
               overview de Métricas
             </a>{" "}
-            ou na dashboard da loja — dia + valor, só quando recebes a fatura.
+            ou na dashboard da loja.
           </p>
         )}
       </div>

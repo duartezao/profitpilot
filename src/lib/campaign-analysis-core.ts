@@ -109,6 +109,14 @@ export function buildContiguousSpendWindow(
   };
 }
 
+/** Vendas atribuídas — Google por vezes reporta valor/receita sem contagem de conversões. */
+export function hasCampaignAttributedSales(
+  conversions: number,
+  conversionValue: number,
+): boolean {
+  return conversions > 0 || conversionValue > 0;
+}
+
 export function metricsFromSpendDays(days: SpendDayRow[]) {
   let spend = 0;
   let impressions = 0;
@@ -170,8 +178,11 @@ export function classifyPerformanceBucket(
   roas: number | null,
   ber: number | null,
   hasFullWindow: boolean,
+  conversionValue = 0,
 ): CampaignPerformanceBucket {
-  if (conversions <= 0) return "no_conversions";
+  if (!hasCampaignAttributedSales(conversions, conversionValue)) {
+    return "no_conversions";
+  }
   if (ber == null || ber <= 0 || roas == null || roas <= 0) {
     return hasFullWindow ? "marginal" : "marginal";
   }
@@ -238,12 +249,20 @@ function formatEnglishCampaignList(names: string[]): string {
 export function classifyDecisionViewSection(input: {
   hasFullWindow: boolean;
   conversions: number;
+  conversionValue?: number;
   roasValue: number | null;
   berRoas: number | null;
   bucket: CampaignPerformanceBucket;
 }): CampaignDecisionViewSection {
   if (!input.hasFullWindow) return "testing";
-  if (input.conversions <= 0) return "pause";
+  if (
+    !hasCampaignAttributedSales(
+      input.conversions,
+      input.conversionValue ?? 0,
+    )
+  ) {
+    return "pause";
+  }
   if (isRoasClearlyBelowBer(input.roasValue, input.berRoas)) {
     return "pause";
   }
@@ -254,11 +273,19 @@ export function classifyDecisionViewSection(input: {
 export function pauseCauseForRow(input: {
   hasFullWindow: boolean;
   conversions: number;
+  conversionValue?: number;
   roasValue: number | null;
   berRoas: number | null;
 }): CampaignPauseCause | undefined {
   if (!input.hasFullWindow) return undefined;
-  if (input.conversions <= 0) return "no_sales";
+  if (
+    !hasCampaignAttributedSales(
+      input.conversions,
+      input.conversionValue ?? 0,
+    )
+  ) {
+    return "no_sales";
+  }
   if (isRoasClearlyBelowBer(input.roasValue, input.berRoas)) {
     return "below_ber";
   }
@@ -270,6 +297,7 @@ export type MediaBuyerPauseRow = {
   adAccountName: string;
   hasFullWindow: boolean;
   conversions: number;
+  conversionValue?: number;
   roasValue: number | null;
   berRoas: number | null;
   pauseCause?: CampaignPauseCause;
@@ -278,7 +306,14 @@ export type MediaBuyerPauseRow = {
 function resolvePauseCause(row: MediaBuyerPauseRow): CampaignPauseCause | undefined {
   if (row.pauseCause) return row.pauseCause;
   if (!row.hasFullWindow) return undefined;
-  if (row.conversions <= 0) return "no_sales";
+  if (
+    !hasCampaignAttributedSales(
+      row.conversions,
+      row.conversionValue ?? 0,
+    )
+  ) {
+    return "no_sales";
+  }
   if (isRoasClearlyBelowBer(row.roasValue, row.berRoas)) {
     return "below_ber";
   }
@@ -336,6 +371,7 @@ export function buildNoConversionsPauseCopyMessage(
     adAccountName: string;
     hasFullWindow: boolean;
     conversions: number;
+    conversionValue?: number;
     spendDaysRequired: number;
     pauseCause?: CampaignPauseCause;
   }>,
@@ -347,11 +383,15 @@ export function buildNoConversionsPauseCopyMessage(
       adAccountName: r.adAccountName,
       hasFullWindow: r.hasFullWindow,
       conversions: r.conversions,
+      conversionValue: r.conversionValue,
       roasValue: null,
       berRoas: null,
       pauseCause:
         r.pauseCause ??
-        (r.hasFullWindow && r.conversions <= 0 ? "no_sales" : undefined),
+        (r.hasFullWindow &&
+        !hasCampaignAttributedSales(r.conversions, r.conversionValue ?? 0)
+          ? "no_sales"
+          : undefined),
     })),
     windowDays,
   );

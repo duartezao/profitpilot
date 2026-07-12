@@ -28,6 +28,11 @@ import { FeeSchedulePanel } from "./fee-schedule-panel";
 import { OwnedWorkspacesPanel } from "./owned-workspaces-panel";
 import { StoreSettingsBlock } from "./store-settings-block";
 import { StoreDataPanel } from "./store-data-panel";
+import { ShippingCountriesBackfillPanel } from "@/components/settings/shipping-countries-backfill-panel";
+import {
+  appliesAutoEuCustomsFees,
+  countMissingEuCustomsOrdersWithoutCountry,
+} from "@/lib/eu-category-fees";
 import { DefinicoesTabs } from "@/components/settings/definicoes-tabs";
 import {
   buildFeeScheduleViews,
@@ -186,6 +191,16 @@ export default async function DefinicoesPage() {
     : [];
   const canEditAds =
     Boolean(user) && ["owner", "admin", "editor"].includes(user!.role);
+
+  const missingShippingByStore = new Map<string, number>();
+  await Promise.all(
+    stores.map(async (s) => {
+      const mode = (s.cogsMode ?? "shopify") as CogsMode;
+      if (!appliesAutoEuCustomsFees(mode)) return;
+      const count = await countMissingEuCustomsOrdersWithoutCountry(s._id);
+      missingShippingByStore.set(String(s._id), count);
+    }),
+  );
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -361,6 +376,9 @@ export default async function DefinicoesPage() {
                   const importStartDateStr = s.importStartDate
                     ? new Date(s.importStartDate).toISOString().slice(0, 10)
                     : floorKey;
+                  const cogsMode = (s.cogsMode ?? "shopify") as CogsMode;
+                  const missingShippingCountries =
+                    missingShippingByStore.get(String(s._id)) ?? 0;
 
                   return (
                     <StoreSettingsBlock
@@ -387,7 +405,7 @@ export default async function DefinicoesPage() {
                             : "",
                           analyticsSessionCountry:
                             normalizeSessionCountry(s.analyticsSessionCountry) ?? "",
-                          cogsMode: (s.cogsMode ?? "shopify") as CogsMode,
+                          cogsMode,
                           cogsInputCurrency: s.cogsInputCurrency ?? "EUR",
                           externalGatewayPayoutBusinessDays:
                             s.externalGatewayPayoutBusinessDays ?? null,
@@ -412,6 +430,12 @@ export default async function DefinicoesPage() {
                         defaultProcessingFixed={latest.processingFixed}
                         defaultTransactionFeePercent={latest.transactionFeePercent}
                       />
+                      {canEditStores && (
+                        <ShippingCountriesBackfillPanel
+                          storeId={String(s._id)}
+                          missingCountryOrders={missingShippingCountries}
+                        />
+                      )}
                       <StoreDataPanel
                         storeId={String(s._id)}
                         storeName={s.name}
