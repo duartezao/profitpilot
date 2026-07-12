@@ -286,7 +286,8 @@ export function StoreDataPanel({
                 (pendentes expiradas, pagamentos Multibanco, etc.). Mantém
                 custos COGS por variante, ad spend, sessões, notas e
                 configurações da loja. COGS manuais por encomenda são
-                repostos após a reimportação.
+                repostos após a reimportação. A taxa UE usa o país das sessões
+                da loja — não precisas de reimportar por causa disso.
               </p>
             </div>
           </div>

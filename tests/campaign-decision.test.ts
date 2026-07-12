@@ -54,6 +54,26 @@ describe("buildCampaignDecisions — ciclo 7/14 dias", () => {
     assert.equal(rows[0]?.status, "kill");
   });
 
+  it(`${CAMPAIGN_TEST_PHASE_DAYS}+ dias com valor de conversão mas contagem 0 → não kill`, () => {
+    const rows = buildCampaignDecisions(
+      [
+        baseCampaign({
+          platform: "google",
+          platformLabel: "Google",
+          daysRunning: CAMPAIGN_TEST_PHASE_DAYS,
+          lifetimeConversions: 0,
+          lifetimeConversionValue: 120,
+          conversions: 0,
+          conversionValue: 0,
+          lifetimeRoas: 1.2,
+          spend: 100,
+        }),
+      ],
+      { storeBer: 2 },
+    );
+    assert.notEqual(rows[0]?.status, "kill");
+  });
+
   it("ROAS mau entre dia 7 e 13 → manter (segunda janela)", () => {
     const rows = buildCampaignDecisions(
       [

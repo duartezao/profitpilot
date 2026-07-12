@@ -3,14 +3,13 @@ import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { canAccessStore } from "@/lib/store-access";
 import {
-  appliesEuCategoryFees,
-  listRecentEuCategoryFees,
+  appliesAutoEuCustomsFees,
+  buildEuCustomsFeeAutoSummary,
+  purgeLegacyManualEuFeesForStore,
 } from "@/lib/eu-category-fees";
 import { getBaseCurrency } from "@/lib/manual-cogs";
 import type { CogsMode } from "@/lib/cogs-modes";
-import { ShopifyExtraFeesPanel } from "@/components/dashboard/shopify-extra-fees-panel";
-
-const ROLES_EDIT = ["owner", "admin", "editor"] as const;
+import { EuCustomsFeeAutoPanel } from "@/components/dashboard/eu-customs-fee-auto-panel";
 
 export async function ShopifyExtraFeesSection({
   storeId,
@@ -22,25 +21,19 @@ export async function ShopifyExtraFeesSection({
 
   await connectToDatabase();
   const store = await Store.findById(storeId)
-    .select("name cogsMode cogsInputCurrency workspaceId")
+    .select("name cogsMode workspaceId ianaTimezone importStartDate createdAt analyticsSessionCountry")
     .lean();
   if (!store) return null;
 
   const mode = (store.cogsMode ?? "shopify") as CogsMode;
-  if (!appliesEuCategoryFees(mode)) return null;
+  if (!appliesAutoEuCustomsFees(mode)) return null;
+
+  await purgeLegacyManualEuFeesForStore(store._id);
 
   const baseCurrency = await getBaseCurrency(store.workspaceId);
-  const entries = await listRecentEuCategoryFees(store._id, baseCurrency);
-  const canEdit = ROLES_EDIT.includes(user.role as (typeof ROLES_EDIT)[number]);
+  const summary = await buildEuCustomsFeeAutoSummary(store, baseCurrency);
 
   return (
-    <ShopifyExtraFeesPanel
-      storeId={storeId}
-      storeName={store.name}
-      baseCurrency={baseCurrency}
-      inputCurrency={store.cogsInputCurrency ?? "EUR"}
-      entries={entries}
-      canEdit={canEdit}
-    />
+    <EuCustomsFeeAutoPanel storeId={storeId} summary={summary} />
   );
 }

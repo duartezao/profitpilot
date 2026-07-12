@@ -70,7 +70,8 @@ const OrderSchema = new Schema(
       baseCurrency: { type: String, default: null },
     },
 
-    lineItems: { type: [LineItemSchema], default: [] },
+    /** País de envio ISO2 (Shopify shippingAddress.countryCodeV2). */
+    shippingCountryCode: { type: String, trim: true, default: null, index: true },
   },
   { timestamps: true },
 );

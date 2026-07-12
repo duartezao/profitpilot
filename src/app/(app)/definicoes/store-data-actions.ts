@@ -25,6 +25,13 @@ import {
   deleteOrdersBeforeImportDate,
   recalculateStoreOrderFees,
 } from "@/lib/store-fees-recalc";
+import { syncsShopifyProductCosts } from "@/lib/cogs-modes";
+import {
+  backfillAllOrderShippingCountriesForStore,
+  prepareShopifySyncContext,
+} from "@/lib/shopify-sync";
+import { countMissingEuCustomsOrdersWithoutCountry } from "@/lib/eu-category-fees";
+import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 
 export type StoreDataState = { ok?: boolean; error?: string; message?: string };
 
@@ -74,6 +81,79 @@ function revalidateStorePaths() {
   revalidatePath("/notas");
   revalidatePath("/decisao");
   revalidatePath("/", "layout");
+}
+
+export async function backfillOrderShippingCountriesAction(
+  _prev: StoreDataState,
+  formData: FormData,
+): Promise<StoreDataState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão para actualizar encomendas." };
+  }
+
+  const storeId = String(formData.get("storeId") ?? "").trim();
+  if (!storeId) return { error: "Loja em falta." };
+
+  await connectToDatabase();
+  const store = await findStoreForUser(user, storeId, "cogsMode syncState");
+  if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
+  if (!syncsShopifyProductCosts(store.cogsMode)) {
+    return {
+      error:
+        "Esta acção só está disponível em lojas com COGS automático (Shopify).",
+    };
+  }
+
+  if (store.syncState?.status === "running") {
+    return {
+      error: "Há um sync em curso nesta loja — espera que termine e tenta de novo.",
+    };
+  }
+
+  const missingBefore = await countMissingEuCustomsOrdersWithoutCountry(store._id);
+  if (missingBefore <= 0) {
+    return { ok: true, message: "Todas as encomendas já têm país de envio." };
+  }
+
+  try {
+    const { store: storeDoc, domain, accessToken } =
+      await prepareShopifySyncContext(storeId);
+    const result = await backfillAllOrderShippingCountriesForStore(
+      storeDoc,
+      domain,
+      accessToken,
+    );
+
+    invalidateWorkspaceMetricsCache(String(user.workspaceId));
+
+    const missingAfter = await countMissingEuCustomsOrdersWithoutCountry(
+      store._id,
+    );
+
+    revalidateStorePaths();
+
+    if (missingAfter <= 0) {
+      return {
+        ok: true,
+        message: `Países de envio actualizados em ${result.updated} encomenda${result.updated === 1 ? "" : "s"}. COGS e custos guardados mantêm-se.`,
+      };
+    }
+
+    return {
+      ok: true,
+      message: `Actualizadas ${result.updated} encomenda${result.updated === 1 ? "" : "s"}; ainda faltam ${missingAfter}. Tenta de novo ou verifica a ligação Shopify.`,
+    };
+  } catch (e) {
+    return {
+      error:
+        e instanceof Error
+          ? e.message
+          : "Não foi possível buscar países de envio na Shopify.",
+    };
+  }
 }
 
 export async function reconfigureStoreImportAction(

@@ -4,13 +4,12 @@ import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { canAccessStore } from "@/lib/store-access";
 import {
-  appliesEuCategoryFees,
-  listRecentEuCategoryFees,
+  appliesAutoEuCustomsFees,
+  buildEuCustomsFeeAutoSummary,
+  purgeLegacyManualEuFeesForStore,
 } from "@/lib/eu-category-fees";
 import { getBaseCurrency } from "@/lib/manual-cogs";
 import type { CogsMode } from "@/lib/cogs-modes";
-
-const ROLES_EDIT = ["owner", "admin", "editor"] as const;
 
 export async function GET(req: Request) {
   const user = await getCurrentUser();
@@ -18,7 +17,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
 
-  const storeId = new URL(req.url).searchParams.get("store");
+  const url = new URL(req.url);
+  const storeId = url.searchParams.get("store")?.trim();
   if (!storeId) {
     return NextResponse.json({ error: "Loja em falta." }, { status: 400 });
   }
@@ -28,27 +28,21 @@ export async function GET(req: Request) {
 
   await connectToDatabase();
   const store = await Store.findById(storeId)
-    .select("name cogsMode cogsInputCurrency workspaceId")
+    .select("name cogsMode workspaceId ianaTimezone importStartDate createdAt analyticsSessionCountry")
     .lean();
   if (!store) {
     return NextResponse.json({ error: "Loja não encontrada." }, { status: 404 });
   }
 
   const mode = (store.cogsMode ?? "shopify") as CogsMode;
-  if (!appliesEuCategoryFees(mode)) {
-    return NextResponse.json({ applies: false });
+  if (!appliesAutoEuCustomsFees(mode)) {
+    return NextResponse.json({ automatic: false });
   }
 
-  const baseCurrency = await getBaseCurrency(store.workspaceId);
-  const entries = await listRecentEuCategoryFees(store._id, baseCurrency);
+  await purgeLegacyManualEuFeesForStore(store._id);
 
-  return NextResponse.json({
-    applies: true,
-    storeId,
-    storeName: store.name,
-    baseCurrency,
-    inputCurrency: store.cogsInputCurrency ?? "EUR",
-    entries,
-    canEdit: ROLES_EDIT.includes(user.role as (typeof ROLES_EDIT)[number]),
-  });
+  const baseCurrency = await getBaseCurrency(store.workspaceId);
+  const summary = await buildEuCustomsFeeAutoSummary(store, baseCurrency);
+
+  return NextResponse.json(summary);
 }

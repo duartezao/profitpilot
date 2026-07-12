@@ -27,6 +27,7 @@ import {
   syncOrdersPage,
   syncPayouts,
   syncSoldProductCostsPage,
+  backfillOrderShippingCountriesForStore,
 } from "@/lib/shopify-sync";
 
 export type ChunkedSyncPhase =
@@ -651,6 +652,16 @@ export async function runChunkedSyncStep(
           domain,
           accessToken,
         );
+      }
+      if (syncsShopifyProductCosts(freshStore.cogsMode)) {
+        for (let batch = 0; batch < 8; batch++) {
+          const r = await backfillOrderShippingCountriesForStore(
+            freshStore,
+            domain,
+            accessToken,
+          );
+          if (r.remaining <= 0) break;
+        }
       }
       if (
         assimilatesCogsOnSync(freshStore.cogsMode) &&

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   metricsFromSpendDays,
   classifyPerformanceBucket,
+  hasCampaignAttributedSales,
   roasChangeVerdict,
   buildNoConversionsPauseCopyMessage,
   buildMediaBuyerPauseCopyMessage,
@@ -39,8 +40,16 @@ function classifyForTest(
   const spendWindow = buildContiguousSpendWindow(rows, windowDays, ref);
   const m = metricsFromSpendDays(spendWindow.windowDays);
   const hasFull = spendWindow.hasFullWindow;
-  if (m.conversions <= 0 && hasFull) return "no_conversions";
-  return classifyPerformanceBucket(m.conversions, m.roas, ber, hasFull);
+  if (!hasCampaignAttributedSales(m.conversions, m.conversionValue) && hasFull) {
+    return "no_conversions";
+  }
+  return classifyPerformanceBucket(
+    m.conversions,
+    m.roas,
+    ber,
+    hasFull,
+    m.conversionValue,
+  );
 }
 
 describe("campaign-analysis — janela de dias com gasto", () => {
@@ -51,6 +60,15 @@ describe("campaign-analysis — janela de dias com gasto", () => {
       conversionValue: 0,
     }));
     assert.equal(classifyForTest(days, 7, 2), "no_conversions");
+  });
+
+  it("Google: valor de conversão sem contagem → não é sem vendas", () => {
+    const days = Array.from({ length: 7 }, () => ({
+      spend: 10,
+      conversions: 0,
+      conversionValue: 15,
+    }));
+    assert.notEqual(classifyForTest(days, 7, 2), "no_conversions");
   });
 
   it("menos de 7 dias com gasto — bucket sem vendas mas em teste", () => {

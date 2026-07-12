@@ -173,6 +173,8 @@ export async function syncAdAccountsSpendForStore(
     skipDailyNote?: boolean;
     /** Só campanhas — não chama API de gasto (dia passado já com ManualAdSpend). */
     skipSpendSync?: boolean;
+    /** Só sincroniza campanhas destas plataformas (ex. refresh de conversões Google). */
+    campaignPlatforms?: AdPlatform[];
     /** Permite reescrever dias passados (apenas se a origem actual for API). */
     forceOverwrite?: boolean;
   },
@@ -275,10 +277,17 @@ export async function syncAdAccountsSpendForStore(
   const campaignKeys = options?.campaignDateKeys?.length
     ? options.campaignDateKeys
     : [dateKey];
+  const campaignOptions = options?.campaignPlatforms?.length
+    ? { platforms: options.campaignPlatforms }
+    : undefined;
   let campaignsSynced = 0;
   try {
     if (campaignKeys.length === 1) {
-      const r = await syncAdCampaignMetricsForStoreDay(storeId, campaignKeys[0]);
+      const r = await syncAdCampaignMetricsForStoreDay(
+        storeId,
+        campaignKeys[0],
+        campaignOptions,
+      );
       campaignsSynced = r.campaignsSynced;
       if (!canWriteSpend && r.campaignsSynced > 0) {
         for (const acc of accounts) {
@@ -286,7 +295,11 @@ export async function syncAdAccountsSpendForStore(
         }
       }
     } else {
-      const r = await syncAdCampaignMetricsForStoreDays(storeId, campaignKeys);
+      const r = await syncAdCampaignMetricsForStoreDays(
+        storeId,
+        campaignKeys,
+        campaignOptions,
+      );
       campaignsSynced = r.campaignsSynced;
     }
   } catch {

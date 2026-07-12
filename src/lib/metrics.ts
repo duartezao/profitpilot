@@ -31,6 +31,7 @@ import {
   sumEuCategoryFeesByDay,
   appliesEuCategoryFees,
 } from "@/lib/eu-category-fees";
+import { appliesAutoEuCustomsFees } from "@/lib/cogs-modes";
 import {
   aggregateStoreAdInsightsForPeriod,
   type StoreAdInsights,
@@ -2871,6 +2872,7 @@ export async function buildWorkspaceSummary(
       funnelCur,
       funnelPrev,
       dailyRows,
+      euCustomsFee,
     ] = await Promise.all([
       topProductsMode === "units"
         ? buildTopProductsByUnits(
@@ -2920,6 +2922,13 @@ export async function buildWorkspaceSummary(
         scopedCogsMode,
         expenseRows,
       ),
+      appliesAutoEuCustomsFees(scopedCogsMode)
+        ? sumEuCategoryFeesForPeriod(
+            [scoped._id],
+            effectiveCurrentSlice,
+            storeTz,
+          )
+        : Promise.resolve(0),
     ]);
 
     topProducts = topProductsResult;
@@ -2932,6 +2941,38 @@ export async function buildWorkspaceSummary(
       adSpendForWaterfall,
       curOperatingExpenses,
     );
+    /** Waterfall: taxa UE Win-Win em «EU TAX»; repartição de custos mantém-a no COGS. */
+    const waterfallCogs = cur.cogs - euCustomsFee;
+
+    const waterfallCostSteps: WaterfallStep[] = [
+      {
+        key: "cogs",
+        label: "COGS",
+        value: -waterfallCogs,
+        display: fmtMoney(-waterfallCogs),
+        type: "negative",
+      },
+    ];
+
+    if (euCustomsFee > 0) {
+      waterfallCostSteps.push({
+        key: "eu_tax",
+        label: "EU TAX",
+        value: -euCustomsFee,
+        display: fmtMoney(-euCustomsFee),
+        type: "negative",
+      });
+    }
+
+    if (cur.shipping > 0) {
+      waterfallCostSteps.push({
+        key: "shipping",
+        label: "Envio",
+        value: -cur.shipping,
+        display: fmtMoney(-cur.shipping),
+        type: "negative",
+      });
+    }
 
     const waterfall: WaterfallStep[] = [
       {
@@ -2941,20 +2982,7 @@ export async function buildWorkspaceSummary(
         display: fmtMoney(grossRevenue),
         type: "start",
       },
-      {
-        key: "cogs",
-        label: "COGS",
-        value: -cur.cogs,
-        display: fmtMoney(-cur.cogs),
-        type: "negative",
-      },
-      {
-        key: "shipping",
-        label: "Envio",
-        value: -cur.shipping,
-        display: fmtMoney(-cur.shipping),
-        type: "negative",
-      },
+      ...waterfallCostSteps,
       {
         key: "fees",
         label: "Taxas",

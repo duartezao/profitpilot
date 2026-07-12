@@ -34,6 +34,13 @@ export function syncsShopifyProductCosts(
   return (mode ?? defaultCogsMode()) === "shopify";
 }
 
+/** Taxa alfandegária UE automática (Win-Win) — só com COGS automático Shopify. */
+export function appliesAutoEuCustomsFees(
+  mode: CogsMode | null | undefined,
+): boolean {
+  return syncsShopifyProductCosts(mode);
+}
+
 /** Assimilação automática de COGS nas encomendas após sync. */
 export function assimilatesCogsOnSync(
   mode: CogsMode | null | undefined,
