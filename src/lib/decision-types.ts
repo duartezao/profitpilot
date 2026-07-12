@@ -3,9 +3,13 @@ import type { CampaignAnalysisWindow } from "@/lib/campaign-analysis-core-types"
 export type {
   CampaignAnalysisWindow,
   CampaignPerformanceBucket,
+  CampaignDecisionViewSection,
+  CampaignPauseCause,
   CampaignDecisionStatus,
   CampaignScaleSnapshot,
   CampaignPostScaleSnapshot,
+  CampaignPauseSnapshot,
+  CampaignPostPauseAccountSnapshot,
   CampaignDecisionRow,
   CampaignDecisionSection,
   CampaignDecisionAnalysis,
@@ -41,6 +45,22 @@ export type RecentScaleEvent = {
   preConversions: number;
 };
 
+export type RecentPauseEvent = {
+  campaignName: string;
+  adAccountName: string;
+  platform: string;
+  dateKey: string;
+  preRoas: number | null;
+  preConversions: number;
+  preAccountRoas: number | null;
+  postPause?: {
+    accountSpendDays: number;
+    accountRoas: number | null;
+    verdict: "better" | "worse" | "same" | "early";
+    campaignSpend: number;
+  };
+};
+
 export type DecisionSummary = {
   scopeName: string | null;
   periodLabel: string;
@@ -50,6 +70,7 @@ export type DecisionSummary = {
   campaignAnalysis: CampaignDecisionAnalysis | null;
   analysisWindowDays: CampaignAnalysisWindow;
   recentScales: RecentScaleEvent[];
+  recentPauses: RecentPauseEvent[];
   storeBerRoas: string | null;
   agentExport: string | null;
   treasury: {

@@ -5,6 +5,15 @@ export type CampaignPerformanceBucket =
   | "marginal"
   | "performing";
 
+/** Secções da página Decisão (vista para o media buyer). */
+export type CampaignDecisionViewSection =
+  | "pause"
+  | "testing"
+  | "performing"
+  | "watch";
+
+export type CampaignPauseCause = "no_sales" | "below_ber";
+
 export type CampaignDecisionStatus =
   | "kill"
   | "pause"
@@ -31,6 +40,24 @@ export type CampaignPostScaleSnapshot = {
   verdict: "better" | "worse" | "same" | "early";
 };
 
+export type CampaignPauseSnapshot = {
+  dateKey: string;
+  preSpendDays: number;
+  preSpend: number;
+  preConversions: number;
+  preRoas: number | null;
+  preAccountRoas: number | null;
+};
+
+export type CampaignPostPauseAccountSnapshot = {
+  accountSpendDays: number;
+  accountSpend: number;
+  accountConversions: number;
+  accountRoas: number | null;
+  campaignSpend: number;
+  verdict: "better" | "worse" | "same" | "early";
+};
+
 export type CampaignDecisionRow = {
   campaignId: string;
   adAccountId: string;
@@ -44,6 +71,8 @@ export type CampaignDecisionRow = {
   spendDays: number;
   spendDaysRequired: number;
   hasFullWindow: boolean;
+  /** Gasto parou há mais de 1 dia — ciclo de análise reinicia. */
+  staleSpend?: boolean;
   spend: number;
   conversions: number;
   conversionValue: number;
@@ -54,12 +83,16 @@ export type CampaignDecisionRow = {
   ctr: number | null;
   reason: string;
   agentBrief: string;
+  viewSection: CampaignDecisionViewSection;
+  pauseCause?: CampaignPauseCause;
   lastScale?: CampaignScaleSnapshot;
   postScale?: CampaignPostScaleSnapshot;
+  lastPause?: CampaignPauseSnapshot;
+  postPauseAccount?: CampaignPostPauseAccountSnapshot;
 };
 
 export type CampaignDecisionSection = {
-  id: CampaignPerformanceBucket;
+  id: CampaignDecisionViewSection;
   title: string;
   description: string;
   rows: CampaignDecisionRow[];
@@ -68,6 +101,7 @@ export type CampaignDecisionSection = {
 export type CampaignDecisionAnalysis = {
   windowDays: CampaignAnalysisWindow;
   sections: CampaignDecisionSection[];
+  mediaBuyerPauseMessage: string | null;
   agentExport: string;
   storeBerRoas: string | null;
   campaignCount: number;
