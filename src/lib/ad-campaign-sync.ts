@@ -27,6 +27,7 @@ import {
   type CampaignInsightsRow as TiktokCampaignRow,
 } from "@/lib/tiktok-ads";
 import { recordCampaignBudgetScaleIfNeeded } from "@/lib/campaign-scale";
+import { recordCampaignPauseIfNeeded } from "@/lib/campaign-pause";
 
 type CampaignRow = MetaCampaignRow | GoogleCampaignRow | TiktokCampaignRow;
 
@@ -92,26 +93,38 @@ async function upsertOneCampaignRow(
 
   const byAccount = { storeId, adAccountId, platform, dateKey, campaignId };
 
+  const existing =
+    (await AdCampaignDay.findOne(byAccount).select("status").lean()) ??
+    (await AdCampaignDay.findOne({
+      storeId,
+      platform,
+      dateKey,
+      campaignId,
+    })
+      .select("status")
+      .lean());
+  const previousStatus = existing?.status ?? null;
+
   const onAccount = await AdCampaignDay.findOneAndUpdate(
     byAccount,
     { $set: setFields },
   );
-  if (onAccount) return;
-
-  const onLegacy = await AdCampaignDay.findOneAndUpdate(
-    { storeId, platform, dateKey, campaignId },
-    { $set: setFields },
-  );
-  if (onLegacy) return;
-
-  try {
-    await AdCampaignDay.create({ ...byAccount, ...setFields });
-  } catch (e) {
-    if (!isMongoDuplicateKeyError(e)) throw e;
-    await AdCampaignDay.updateOne(
+  if (!onAccount) {
+    const onLegacy = await AdCampaignDay.findOneAndUpdate(
       { storeId, platform, dateKey, campaignId },
       { $set: setFields },
     );
+    if (!onLegacy) {
+      try {
+        await AdCampaignDay.create({ ...byAccount, ...setFields });
+      } catch (e) {
+        if (!isMongoDuplicateKeyError(e)) throw e;
+        await AdCampaignDay.updateOne(
+          { storeId, platform, dateKey, campaignId },
+          { $set: setFields },
+        );
+      }
+    }
   }
 
   if (dailyBudget != null && dailyBudget > 0) {
@@ -128,6 +141,19 @@ async function upsertOneCampaignRow(
       currency: row.currency,
     });
   }
+
+  await recordCampaignPauseIfNeeded({
+    workspaceId,
+    storeId,
+    adAccountId,
+    adAccountName,
+    platform,
+    campaignId,
+    campaignName: row.campaignName,
+    dateKey,
+    newStatus: row.status ?? "",
+    previousStatus,
+  });
 }
 
 async function upsertCampaignRows(

@@ -16,6 +16,7 @@ import {
   type CampaignAnalysisWindow,
 } from "@/lib/campaign-analysis";
 import { listRecentScaleEvents } from "@/lib/campaign-scale";
+import { listRecentPauseEvents } from "@/lib/campaign-pause";
 import type { AdPlatform } from "@/lib/ad-spend-platforms";
 import type {
   CampaignDecisionAnalysis,
@@ -242,6 +243,7 @@ export async function buildDecisionSummary(
   let campaignRows: CampaignDecisionRow[] = [];
   let storeBerRoas: string | null = null;
   let recentScales: Awaited<ReturnType<typeof listRecentScaleEvents>> = [];
+  let recentPauses: Awaited<ReturnType<typeof listRecentPauseEvents>> = [];
 
   if (storeId) {
     const storeLine = pnl.stores[0];
@@ -269,6 +271,7 @@ export async function buildDecisionSummary(
     }
 
     recentScales = await listRecentScaleEvents(storeId, 15);
+    recentPauses = await listRecentPauseEvents(storeId, 15);
   }
 
   let rows: DecisionRow[];
@@ -304,6 +307,7 @@ export async function buildDecisionSummary(
     campaignAnalysis,
     analysisWindowDays,
     recentScales,
+    recentPauses,
     storeBerRoas,
     agentExport: campaignAnalysis?.agentExport ?? null,
     treasury: treasury ? treasuryCard(treasury, storeId) : null,

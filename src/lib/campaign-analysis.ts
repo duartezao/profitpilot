@@ -4,10 +4,17 @@ import { AdCampaignDay } from "@/models/AdCampaignDay";
 import { CampaignScaleEvent } from "@/models/CampaignScaleEvent";
 import type { AdPlatform } from "@/lib/ad-spend-platforms";
 import { AD_PLATFORM_LABELS } from "@/lib/ad-spend-platforms";
-import { roasFromCampaign } from "@/lib/ad-campaign-types";
+import { roasFromCampaign, isPausedCampaignStatus } from "@/lib/ad-campaign-types";
 import { formatDateInput } from "@/lib/period";
 import {
   metricsFromSpendDays,
+  roasChangeVerdict,
+  classifyDecisionViewSection,
+  pauseCauseForRow,
+  buildMediaBuyerPauseCopyMessage,
+  buildContiguousSpendWindow,
+  isRoasClearlyBelowBer,
+  PERFORMING_ROAS_BUFFER,
   type CampaignAnalysisWindow,
   type CampaignDecisionStatus,
   type CampaignPerformanceBucket,
@@ -17,9 +24,13 @@ import type {
   CampaignDecisionAnalysis,
   CampaignDecisionRow,
   CampaignDecisionSection,
+  CampaignDecisionViewSection,
+  CampaignPostPauseAccountSnapshot,
   CampaignPostScaleSnapshot,
+  CampaignPauseSnapshot,
   CampaignScaleSnapshot,
 } from "@/lib/campaign-analysis-core-types";
+import { loadLatestPauseMap } from "@/lib/campaign-pause";
 
 export type {
   CampaignAnalysisWindow,
@@ -40,8 +51,7 @@ type CampaignSpendSeries = {
   spendDays: SpendDayRowLocal[];
 };
 
-const SCALE_BUFFER = 1.1;
-const MARGINAL_UPPER = 1.05;
+const SCALE_BUFFER = PERFORMING_ROAS_BUFFER;
 
 function fmtRoas(v: number | null): string {
   if (v == null || v <= 0) return "—";
@@ -75,7 +85,6 @@ function classifyBucket(
     return hasFullWindow ? "marginal" : "marginal";
   }
   if (roas >= ber * SCALE_BUFFER) return "performing";
-  if (roas < ber * MARGINAL_UPPER) return "marginal";
   return "marginal";
 }
 
@@ -86,11 +95,22 @@ function decideStatus(
   required: number,
   roas: number | null,
   ber: number | null,
+  options?: { staleSpend?: boolean; lastSpendDateKey?: string | null },
 ): { status: CampaignDecisionStatus; reason: string } {
+  if (options?.staleSpend) {
+    const last = options.lastSpendDateKey;
+    return {
+      status: "testing",
+      reason: last
+        ? `Sem gasto desde ${last} — ciclo interrompido, aguarda retoma antes de decidir.`
+        : "Ciclo de gasto interrompido — aguarda retoma antes de decidir.",
+    };
+  }
+
   if (!hasFullWindow) {
     return {
       status: "testing",
-      reason: `${spendDays}/${required} dias com gasto — aguarda janela completa antes de decidir.`,
+      reason: `${spendDays}/${required} dias consecutivos com gasto — aguarda janela completa antes de decidir.`,
     };
   }
 
@@ -102,15 +122,15 @@ function decideStatus(
   }
 
   if (bucket === "marginal") {
-    if (ber != null && roas != null && roas < ber) {
+    if (isRoasClearlyBelowBer(roas, ber)) {
       return {
         status: "pause",
-        reason: `ROAS ${fmtRoas(roas)} abaixo do BER (${fmtRoas(ber)}) — prejuízo ou break-even negativo.`,
+        reason: `ROAS ${fmtRoas(roas)} claramente abaixo do BER (${fmtRoas(ber)}) — prejuízo consistente.`,
       };
     }
     return {
       status: "maintain",
-      reason: `ROAS ${fmtRoas(roas)} perto do BER (${fmtRoas(ber)}) — optimiza antes de escalar.`,
+      reason: `ROAS ${fmtRoas(roas)} perto do BER (${fmtRoas(ber)}) — ainda aceitável, pode melhorar.`,
     };
   }
 
@@ -146,7 +166,7 @@ function buildAgentBrief(input: {
     `Loja: ${input.storeName}`,
     `Ad account: ${input.adAccountName} (${input.platformLabel})`,
     `Campanha: ${row.name}`,
-    `Janela: últimos ${row.spendDays}/${row.spendDaysRequired} dias com gasto`,
+    `Janela: últimos ${row.spendDays}/${row.spendDaysRequired} dias consecutivos com gasto`,
     `Gasto: ${fmtMoney(row.spend, input.currency)} · ${conv} · ROAS ${row.roas}`,
     action,
     row.reason,
@@ -204,7 +224,50 @@ async function loadCampaignSpendSeries(
     });
   }
 
+  for (const series of byKey.values()) {
+    series.spendDays.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }
+
   return [...byKey.values()];
+}
+
+/** Estado mais recente por campanha (último dia na BD). */
+async function loadLatestCampaignStatusMap(
+  storeId: string,
+  adAccountIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!adAccountIds.length) return out;
+
+  const storeOid = new mongoose.Types.ObjectId(storeId);
+  const accountOids = adAccountIds.map((id) => new mongoose.Types.ObjectId(id));
+
+  const rows = await AdCampaignDay.aggregate([
+    {
+      $match: {
+        storeId: storeOid,
+        adAccountId: { $in: accountOids },
+      },
+    },
+    { $sort: { dateKey: -1 } },
+    {
+      $group: {
+        _id: {
+          platform: "$platform",
+          adAccountId: "$adAccountId",
+          campaignId: "$campaignId",
+        },
+        status: { $first: "$status" },
+      },
+    },
+  ]);
+
+  for (const r of rows) {
+    const key = `${r._id.platform}:${String(r._id.adAccountId)}:${r._id.campaignId}`;
+    out.set(key, (r.status as string) ?? "");
+  }
+
+  return out;
 }
 
 async function loadLatestScaleEvents(
@@ -249,13 +312,7 @@ function postScaleMetrics(
   const after = allSpendDays.filter((d) => d.dateKey > scale.dateKey);
   if (!after.length) return undefined;
   const m = metricsFromSpendDays(after);
-  const preRoas = scale.preRoas;
-  let verdict: CampaignPostScaleSnapshot["verdict"] = "early";
-  if (after.length >= 3 && preRoas != null && m.roas != null) {
-    if (m.roas > preRoas * 1.05) verdict = "better";
-    else if (m.roas < preRoas * 0.95) verdict = "worse";
-    else verdict = "same";
-  }
+  const verdict = roasChangeVerdict(scale.preRoas, m.roas, after.length);
   return {
     spendDays: after.length,
     spend: m.spend,
@@ -265,23 +322,28 @@ function postScaleMetrics(
   };
 }
 
-const SECTION_META: Record<
-  CampaignPerformanceBucket,
+const VIEW_SECTION_META: Record<
+  CampaignDecisionViewSection,
   { title: string; description: string }
 > = {
-  no_conversions: {
-    title: "Sem vendas",
+  pause: {
+    title: "Pausar — enviar ao media buyer",
     description:
-      "Campanhas com dias de gasto completos e zero conversões — prioridade para pausar.",
+      "Sem vendas ou ROAS abaixo do break-even (BER) com janela completa. Copia a mensagem em inglês.",
   },
-  marginal: {
-    title: "Break-even ou perda",
+  testing: {
+    title: "Em teste",
     description:
-      "ROAS no BER ou abaixo — rever criativo, público ou pausar.",
+      "Ainda a acumular dias consecutivos com gasto, ou o ciclo foi interrompido (sem spend recente).",
   },
   performing: {
-    title: "A performar bem",
-    description: "ROAS acima do BER — candidatas a scale.",
+    title: "A performar",
+    description: "ROAS acima do BER — candidatas a aumentar budget.",
+  },
+  watch: {
+    title: "Perto do break-even",
+    description:
+      "ROAS no BER ou ligeiramente abaixo — ainda aceitável, pode melhorar antes de pausar.",
   },
 };
 
@@ -299,17 +361,28 @@ export async function buildCampaignDecisionAnalysis(input: {
   );
   const currency = input.currency ?? "EUR";
 
-  const [seriesList, scaleMap] = await Promise.all([
+  const [seriesList, scaleMap, pauseMap, statusMap] = await Promise.all([
     loadCampaignSpendSeries(input.storeId, accountIds, input.windowDays + 7),
     loadLatestScaleEvents(input.storeId, accountIds),
+    loadLatestPauseMap(input.storeId, accountIds),
+    loadLatestCampaignStatusMap(input.storeId, accountIds),
   ]);
 
+  const referenceDateKey = formatDateInput(new Date());
   const rows: CampaignDecisionRow[] = [];
 
   for (const series of seriesList) {
-    const windowDays = series.spendDays.slice(0, input.windowDays);
-    const spendDays = windowDays.length;
-    const hasFullWindow = spendDays >= input.windowDays;
+    const seriesKey = `${series.platform}:${series.adAccountId}:${series.campaignId}`;
+    if (isPausedCampaignStatus(statusMap.get(seriesKey) ?? "")) continue;
+    const spendWindow = buildContiguousSpendWindow(
+      series.spendDays,
+      input.windowDays,
+      referenceDateKey,
+    );
+    const windowDays = spendWindow.windowDays;
+    const spendDays = spendWindow.spendDayCount;
+    const hasFullWindow = spendWindow.hasFullWindow;
+    const staleSpend = spendWindow.staleSpend;
     const m = metricsFromSpendDays(windowDays);
     const ber = input.storeBer;
     const bucket = classifyBucket(
@@ -325,6 +398,10 @@ export async function buildCampaignDecisionAnalysis(input: {
       input.windowDays,
       m.roas,
       ber,
+      {
+        staleSpend,
+        lastSpendDateKey: spendWindow.lastSpendDateKey,
+      },
     );
 
     const scaleKey = `${series.platform}:${series.adAccountId}:${series.campaignId}`;
@@ -332,6 +409,43 @@ export async function buildCampaignDecisionAnalysis(input: {
     const postScale = lastScale
       ? postScaleMetrics(lastScale, series.spendDays)
       : undefined;
+
+    const pauseEntry = pauseMap.get(scaleKey);
+    const lastPause: CampaignPauseSnapshot | undefined = pauseEntry
+      ? {
+          dateKey: pauseEntry.dateKey,
+          preSpendDays: pauseEntry.preSpendDays,
+          preSpend: pauseEntry.preSpend,
+          preConversions: pauseEntry.preConversions,
+          preRoas: pauseEntry.preRoas,
+          preAccountRoas: pauseEntry.preAccountRoas,
+        }
+      : undefined;
+    const postPauseAccount: CampaignPostPauseAccountSnapshot | undefined =
+      pauseEntry?.postPause
+        ? {
+            accountSpendDays: pauseEntry.postPause.accountSpendDays,
+            accountSpend: pauseEntry.postPause.accountSpend,
+            accountConversions: pauseEntry.postPause.accountConversions,
+            accountRoas: pauseEntry.postPause.accountRoas,
+            campaignSpend: pauseEntry.postPause.campaignSpend,
+            verdict: pauseEntry.postPause.verdict,
+          }
+        : undefined;
+
+    const viewSection = classifyDecisionViewSection({
+      hasFullWindow,
+      conversions: m.conversions,
+      roasValue: m.roas,
+      berRoas: ber,
+      bucket,
+    });
+    const pauseCause = pauseCauseForRow({
+      hasFullWindow,
+      conversions: m.conversions,
+      roasValue: m.roas,
+      berRoas: ber,
+    });
 
     const adAccountName =
       accountNames.get(series.adAccountId) ?? series.adAccountId;
@@ -349,6 +463,7 @@ export async function buildCampaignDecisionAnalysis(input: {
       spendDays,
       spendDaysRequired: input.windowDays,
       hasFullWindow,
+      staleSpend: staleSpend || undefined,
       spend: m.spend,
       conversions: m.conversions,
       conversionValue: m.conversionValue,
@@ -358,8 +473,12 @@ export async function buildCampaignDecisionAnalysis(input: {
       cpc: m.cpc,
       ctr: m.ctr,
       reason,
+      viewSection,
+      pauseCause,
       lastScale,
       postScale,
+      lastPause,
+      postPauseAccount,
     };
 
     rows.push({
@@ -374,37 +493,59 @@ export async function buildCampaignDecisionAnalysis(input: {
     });
   }
 
-  const bucketOrder: CampaignPerformanceBucket[] = [
-    "no_conversions",
-    "marginal",
+  const viewOrder: CampaignDecisionViewSection[] = [
+    "pause",
+    "testing",
     "performing",
+    "watch",
   ];
 
-  const sections: CampaignDecisionSection[] = bucketOrder.map((id) => ({
+  const sections: CampaignDecisionSection[] = viewOrder.map((id) => ({
     id,
-    ...SECTION_META[id],
+    ...VIEW_SECTION_META[id],
     rows: rows
-      .filter((r) => r.bucket === id)
+      .filter((r) => r.viewSection === id)
       .sort((a, b) => {
-        if (a.hasFullWindow !== b.hasFullWindow) {
-          return a.hasFullWindow ? -1 : 1;
+        if (id === "pause") {
+          const causeOrder = { no_sales: 0, below_ber: 1 };
+          const ca = a.pauseCause ? causeOrder[a.pauseCause] : 2;
+          const cb = b.pauseCause ? causeOrder[b.pauseCause] : 2;
+          if (ca !== cb) return ca - cb;
+          if (a.pauseCause === "below_ber" && b.pauseCause === "below_ber") {
+            return (a.roasValue ?? 0) - (b.roasValue ?? 0);
+          }
+          return b.spend - a.spend;
         }
-        if (a.bucket === "no_conversions") return b.spend - a.spend;
-        return (b.roasValue ?? 0) - (a.roasValue ?? 0);
+        if (id === "testing") return b.spend - a.spend;
+        if (id === "performing") return (b.roasValue ?? 0) - (a.roasValue ?? 0);
+        return (a.roasValue ?? 0) - (b.roasValue ?? 0);
       }),
   }));
 
+  const pauseRows = rows.filter((r) => r.viewSection === "pause");
+  const mediaBuyerPauseMessage = buildMediaBuyerPauseCopyMessage(
+    pauseRows,
+    input.windowDays,
+  );
+
   const agentLines: string[] = [
-    `Análise de campanhas — ${input.storeName}`,
-    `Janela: ${input.windowDays} dias com gasto (dados completos)`,
+    `Campaign analysis — ${input.storeName}`,
+    `Window: ${input.windowDays} days with spend`,
     input.storeBer != null
-      ? `BER loja: ${fmtRoas(input.storeBer)}`
-      : "BER loja: indisponível (COGS incompleto)",
+      ? `Store BER: ${input.storeBer.toFixed(2)}x`
+      : "Store BER: unavailable",
     "",
   ];
 
+  if (mediaBuyerPauseMessage) {
+    agentLines.push("## Pause — send to media buyer");
+    agentLines.push("");
+    agentLines.push(mediaBuyerPauseMessage);
+    agentLines.push("");
+  }
+
   for (const section of sections) {
-    if (!section.rows.length) continue;
+    if (section.id === "pause" || !section.rows.length) continue;
     agentLines.push(`## ${section.title}`);
     for (const row of section.rows) {
       agentLines.push("");
@@ -416,6 +557,7 @@ export async function buildCampaignDecisionAnalysis(input: {
   return {
     windowDays: input.windowDays,
     sections,
+    mediaBuyerPauseMessage,
     agentExport: agentLines.join("\n").trim(),
     storeBerRoas:
       input.storeBer != null
