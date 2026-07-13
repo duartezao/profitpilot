@@ -398,7 +398,7 @@ export function DecisaoClient() {
   const storeId = searchParams.get("store");
   const windowDays = searchParams.get("window") === "5" ? 5 : 7;
 
-  const { data, isError, isLoading } = useQuery({
+  const { data, isError, isLoading } = useQuery<DecisionSummary>({
     queryKey: ["decision-summary", workspaceId, storeId, windowDays],
     queryFn: () => fetchDecision(searchParams, windowDays),
     refetchInterval: 120 * 1000,
