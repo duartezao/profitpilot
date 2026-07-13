@@ -24,6 +24,7 @@ import type {
   DecisionRow,
   DecisionStatus,
   DecisionSummary,
+  RecentPauseEvent,
   TodayAction,
 } from "@/lib/decision-types";
 
@@ -243,7 +244,7 @@ export async function buildDecisionSummary(
   let campaignRows: CampaignDecisionRow[] = [];
   let storeBerRoas: string | null = null;
   let recentScales: Awaited<ReturnType<typeof listRecentScaleEvents>> = [];
-  let recentPauses: Awaited<ReturnType<typeof listRecentPauseEvents>> = [];
+  let recentPauses: RecentPauseEvent[] = [];
 
   if (storeId) {
     const storeLine = pnl.stores[0];

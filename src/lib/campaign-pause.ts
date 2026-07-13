@@ -224,6 +224,27 @@ export async function recordCampaignPauseIfNeeded(input: {
 
 export type PostPauseAccountVerdict = "better" | "worse" | "same" | "early";
 
+export type PostPauseAccountMetrics = {
+  accountSpendDays: number;
+  accountSpend: number;
+  accountConversions: number;
+  accountRoas: number | null;
+  campaignSpend: number;
+  verdict: PostPauseAccountVerdict;
+};
+
+export type RecentPauseListItem = {
+  campaignId: string;
+  campaignName: string;
+  adAccountName: string;
+  platform: AdPlatform;
+  dateKey: string;
+  preRoas: number | null;
+  preConversions: number;
+  preAccountRoas: number | null;
+  postPause?: PostPauseAccountMetrics;
+};
+
 /** Compara ROAS da conta nos dias após a pausa (campanha deixa de gastar). */
 export async function computePostPauseAccountMetrics(input: {
   storeId: Types.ObjectId | string;
@@ -233,14 +254,7 @@ export async function computePostPauseAccountMetrics(input: {
   pauseDateKey: string;
   preAccountRoas: number | null;
   maxDays?: number;
-}): Promise<{
-  accountSpendDays: number;
-  accountSpend: number;
-  accountConversions: number;
-  accountRoas: number | null;
-  campaignSpend: number;
-  verdict: PostPauseAccountVerdict;
-} | null> {
+}): Promise<PostPauseAccountMetrics | null> {
   const storeOid =
     typeof input.storeId === "string"
       ? new mongoose.Types.ObjectId(input.storeId)
@@ -323,26 +337,14 @@ export async function computePostPauseAccountMetrics(input: {
 export async function listRecentPauseEvents(
   storeId: string,
   limit = 20,
-): Promise<
-  Array<{
-    campaignId: string;
-    campaignName: string;
-    adAccountName: string;
-    platform: AdPlatform;
-    dateKey: string;
-    preRoas: number | null;
-    preConversions: number;
-    preAccountRoas: number | null;
-    postPause?: Awaited<ReturnType<typeof computePostPauseAccountMetrics>>;
-  }>
-> {
+): Promise<RecentPauseListItem[]> {
   const storeOid = new mongoose.Types.ObjectId(storeId);
   const rows = await CampaignPauseEvent.find({ storeId: storeOid })
     .sort({ dateKey: -1 })
     .limit(limit)
     .lean();
 
-  const out: Awaited<ReturnType<typeof listRecentPauseEvents>> = [];
+  const out: RecentPauseListItem[] = [];
   for (const r of rows) {
     const postPause = await computePostPauseAccountMetrics({
       storeId: storeOid,

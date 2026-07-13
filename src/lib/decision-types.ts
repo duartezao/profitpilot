@@ -59,6 +59,8 @@ export type RecentPauseEvent = {
   preAccountRoas: number | null;
   postPause?: {
     accountSpendDays: number;
+    accountSpend: number;
+    accountConversions: number;
     accountRoas: number | null;
     verdict: "better" | "worse" | "same" | "early";
     campaignSpend: number;
