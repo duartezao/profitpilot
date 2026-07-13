@@ -72,7 +72,9 @@ async function upsertOneCampaignRow(
   const alloc = allocationPct / 100;
   const campaignId = row.campaignId;
   const dailyBudget =
-    row.dailyBudget != null && row.dailyBudget > 0
+    "dailyBudget" in row &&
+    row.dailyBudget != null &&
+    row.dailyBudget > 0
       ? row.dailyBudget * alloc
       : null;
   const setFields = {

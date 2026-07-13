@@ -45,6 +45,8 @@ export type CampaignDayMetrics = {
   daysRunning?: number;
   /** Conversões acumuladas desde o primeiro dia. */
   lifetimeConversions?: number;
+  /** Valor de conversão acumulado desde o primeiro dia. */
+  lifetimeConversionValue?: number;
   /** ROAS acumulado desde o primeiro dia. */
   lifetimeRoas?: number | null;
   /** Último estado conhecido (activa/pausada). */
@@ -740,6 +742,7 @@ export async function loadStoreCampaignsForDecision(
         campaignName: c.campaignName || lc?.campaignName || "Campanha",
         daysRunning: lc?.daysRunning,
         lifetimeConversions: lc?.lifetimeConversions,
+        lifetimeConversionValue: lc?.lifetimeConversionValue,
         lifetimeRoas: lc?.lifetimeRoas,
         isActiveCampaign: lc?.isActive,
       };
