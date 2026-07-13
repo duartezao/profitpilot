@@ -1,4 +1,8 @@
-import type { CampaignAnalysisWindow } from "@/lib/campaign-analysis-core-types";
+import type {
+  CampaignAnalysisWindow,
+  CampaignDecisionAnalysis,
+  CampaignDecisionRow,
+} from "@/lib/campaign-analysis-core-types";
 
 export type {
   CampaignAnalysisWindow,

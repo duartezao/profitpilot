@@ -412,8 +412,9 @@ export function DecisaoClient() {
     router.push(`/decisao?${q.toString()}`);
   }
 
-  const visibleSections =
-    data?.campaignAnalysis?.sections.filter((s) => s.rows.length > 0) ?? [];
+  const visibleSections = (
+    data?.campaignAnalysis?.sections ?? []
+  ).filter((s) => s.rows.length > 0);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
