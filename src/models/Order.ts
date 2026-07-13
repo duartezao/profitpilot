@@ -72,6 +72,8 @@ const OrderSchema = new Schema(
 
     /** País de envio ISO2 (Shopify shippingAddress.countryCodeV2). */
     shippingCountryCode: { type: String, trim: true, default: null, index: true },
+
+    lineItems: { type: [LineItemSchema], default: [] },
   },
   { timestamps: true },
 );
