@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Google Ads API candidatura (local only)
+/docs/ProfitPilot-Google-Ads-API-Design-Document.md
+/docs/ProfitPilot-Google-Ads-API-Design-Document.pdf
+/scripts/md-to-pdf.py

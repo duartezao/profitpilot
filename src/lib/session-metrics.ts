@@ -1,6 +1,7 @@
 import "server-only";
 import type { Types } from "mongoose";
 import { connectToDatabase } from "@/lib/db";
+import { formatGlobalSyncInterval } from "@/lib/sync-config";
 import {
   dateKeyInTimezone,
   addDaysToDateKey,
@@ -566,7 +567,7 @@ export async function aggregateSessionFunnelFromDb(
   if (missingDays > 0 && totals.sessions === 0) {
     return {
       ...base,
-      error: `Sessões ainda não sincronizadas (${missingDays} dia${missingDays === 1 ? "" : "s"}). O sync automático (4 h) preenche em breve.`,
+      error: `Sessões ainda não sincronizadas (${missingDays} dia${missingDays === 1 ? "" : "s"}). O sync automático (a cada ${formatGlobalSyncInterval()}) preenche em breve.`,
     };
   }
 

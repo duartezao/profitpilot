@@ -1,7 +1,7 @@
 /**
  * Agendador interno só para desenvolvimento / servidor Node long-running.
- * Em produção na Vercel o sync Shopify é feito por Vercel Cron (`/api/cron/sync`).
- * Ads: loop próprio de 5 min (hoje + lacunas) em dev; cron Vercel `/api/cron/ads-sync` a cada 15 min.
+ * Em produção na Vercel o sync Shopify é feito por Vercel Cron (`/api/cron/sync`, de 2 em 2 h).
+ * Ads: cron Vercel `/api/cron/ads-sync` 1×/dia às 01:00 UTC (quota Google).
  * Com a app aberta, o cliente lê a BD a cada 30 s e pede sync API a cada 5 min.
  */
 export async function register() {
