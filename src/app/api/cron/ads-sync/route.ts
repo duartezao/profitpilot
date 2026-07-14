@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Sync automático de ads (cron Vercel, 1×/dia).
- * Hoje + até 2 dias em falta por loja; throttle 24 h por conta.
+ * Sync automático de ads (cron Vercel, de 2 em 2 h).
+ * Hoje + até 2 dias em falta por loja; throttle 2 h por conta.
  *
  * Protegido por CRON_SECRET (header `Authorization: Bearer <CRON_SECRET>`).
  */

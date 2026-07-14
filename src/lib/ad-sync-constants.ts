@@ -1,8 +1,8 @@
 /** Leitura rápida da BD no cliente (sem chamar APIs externas). */
 export const LIVE_DATA_POLL_MS = 30 * 1000;
 
-/** Intervalo mínimo entre syncs automáticos de ads (cron Vercel). */
-export const AD_CRON_SYNC_INTERVAL_MINUTES = 24 * 60;
+/** Intervalo mínimo entre syncs automáticos de ads (cron Vercel, alinhado ao Shopify). */
+export const AD_CRON_SYNC_INTERVAL_MINUTES = 120;
 
 /** Throttle interno do cron — alinhado ao intervalo do cron ads. */
 export const AD_CRON_SYNC_INTERVAL_MS =

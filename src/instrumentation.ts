@@ -1,6 +1,6 @@
 /**
  * Agendador interno só para desenvolvimento / servidor Node long-running.
- * Produção (Vercel): Shopify `/api/cron/sync` de 2 em 2 h; Ads `/api/cron/ads-sync` 1×/dia.
+ * Produção (Vercel): Shopify e Ads — cron de 2 em 2 h (`/api/cron/sync`, `/api/cron/ads-sync`).
  * Com a app aberta o cliente só lê a BD (30 s) — sync ads API só cron ou botão manual.
  */
 export async function register() {
