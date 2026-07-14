@@ -5,7 +5,7 @@ import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
 import { isStoreAdApiQuotaPaused } from "@/lib/ad-api-quota";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 
-/** Intervalo mínimo entre syncs automáticos de ads (cron Vercel, 1×/dia). */
+/** Intervalo mínimo entre syncs automáticos de ads (cron Vercel, de 2 em 2 h). */
 import { AD_CRON_SYNC_INTERVAL_MS } from "@/lib/ad-sync-constants";
 
 export type AdIntradaySyncResult = {
