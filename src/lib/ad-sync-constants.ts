@@ -10,5 +10,5 @@ export const LIVE_DATA_POLL_MS = 30 * 1000;
 /** Loop de background local (instrumentation) — alinhado ao throttle API. */
 export const AD_BACKGROUND_SYNC_CHECK_MS = AD_API_SYNC_INTERVAL_MS;
 
-/** Cron Vercel / agendador externo (mais conservador que o intradiário com app aberta). */
-export const AD_CRON_SYNC_INTERVAL_MINUTES = 15;
+/** Cron Vercel — 1×/dia (quota Google Ads em Explorer/Basic). */
+export const AD_CRON_SYNC_INTERVAL_MINUTES = 24 * 60;

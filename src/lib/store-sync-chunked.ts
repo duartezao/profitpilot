@@ -39,11 +39,11 @@ export type ChunkedSyncPhase =
   | "sessions"
   | "done";
 
-/** Lote menor na fase products do sync UI — cabe no timeout serverless. */
-const CHUNKED_SOLD_VARIANT_BATCH = 25;
+/** Lote na fase products do sync UI (Vercel Pro — maxDuration 300 s). */
+const CHUNKED_SOLD_VARIANT_BATCH = 50;
 
-/** Páginas de encomendas por passo — menor para caber no timeout Vercel Hobby (~10s). */
-const CHUNKED_ORDERS_PAGE_SIZE = 20;
+/** Encomendas por passo no sync manual (Vercel Pro — maxDuration 300 s). */
+const CHUNKED_ORDERS_PAGE_SIZE = 50;
 
 export type ChunkedSyncStatus = {
   status: "idle" | "running" | "done" | "error";
