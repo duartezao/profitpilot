@@ -9,7 +9,6 @@ import { scopeQueryFromInput } from "@/lib/scope-query";
 import type { AdSpendView } from "@/lib/ad-spend-view";
 import { AnunciosStoreView } from "@/components/anuncios/anuncios-store-view";
 import {
-  AD_API_SYNC_INTERVAL_MS,
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
 import { LastSyncBadge } from "@/components/last-sync-badge";
@@ -58,35 +57,6 @@ export function AnunciosClient() {
       });
     }
   }, [data, queryClient, workspaceId]);
-
-  useQuery({
-    queryKey: ["ad-intraday-sync", workspaceId, storeId],
-    queryFn: async () => {
-      if (!storeId) return null;
-      const res = await fetch(
-        `/api/anuncios/sync-today?store=${encodeURIComponent(storeId)}`,
-        { cache: "no-store" },
-      );
-      if (!res.ok) return null;
-      const body = (await res.json()) as {
-        synced?: boolean;
-        backfill?: { synced?: number; spendDays?: number };
-      };
-      if (body.synced || (body.backfill?.synced ?? 0) > 0 || (body.backfill?.spendDays ?? 0) > 0) {
-        void queryClient.invalidateQueries({
-          queryKey: ["ad-spend-view", workspaceId, storeId],
-        });
-        void queryClient.invalidateQueries({
-          queryKey: ["ad-campaigns", storeId],
-        });
-        void queryClient.invalidateQueries({ queryKey: ["metrics-summary"] });
-      }
-      return body;
-    },
-    enabled: Boolean(storeId),
-    refetchInterval: AD_API_SYNC_INTERVAL_MS,
-    staleTime: AD_API_SYNC_INTERVAL_MS - 60_000,
-  });
 
   function onDataChanged() {
     void queryClient.invalidateQueries({

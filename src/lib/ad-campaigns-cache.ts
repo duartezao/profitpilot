@@ -1,8 +1,9 @@
 import "server-only";
-import { unstable_cache, revalidateTag } from "next/cache";
+import { unstable_cache } from "next/cache";
 import { loadStoreCampaignsLive } from "@/lib/ad-campaign-live";
 import type { StoreCampaignsView } from "@/lib/ad-campaign-types";
 import type { PeriodInput } from "@/lib/period";
+import { safeRevalidateTag } from "@/lib/safe-revalidate";
 
 const CAMPAIGNS_TTL_SEC = 45;
 
@@ -20,7 +21,7 @@ export function adCampaignsCacheTag(storeId: string): string {
 }
 
 export function invalidateAdCampaignsCache(storeId: string): void {
-  revalidateTag(adCampaignsCacheTag(storeId), { expire: 0 });
+  safeRevalidateTag(adCampaignsCacheTag(storeId));
 }
 
 /**

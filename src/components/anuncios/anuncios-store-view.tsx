@@ -237,6 +237,7 @@ export function AnunciosStoreView({
           <CampaignsPanel
             storeId={s.storeId}
             hasLinkedAccounts={apiCount > 0}
+            adApiQuotaPaused={s.adApiQuotaPaused}
             embedded
           />
         )}
