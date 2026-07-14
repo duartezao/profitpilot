@@ -22,6 +22,7 @@ import {
   listAdAccountsForStore,
   type AdAccountRow,
 } from "@/lib/ad-accounts";
+import { isStoreAdApiQuotaPaused } from "@/lib/ad-api-quota";
 import { googleAdsServerConfigStatus } from "@/lib/google-ads";
 import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
 import {
@@ -46,6 +47,8 @@ export type AdSpendStoreView = {
   adAccounts: AdAccountRow[];
   workspaceGoogleLogins: WorkspaceGoogleLogin[];
   googleAdsApiReady: boolean;
+  /** Sync automático API pausado (quota) — usar botão «Actualizar». */
+  adApiQuotaPaused: boolean;
 };
 
 export type AdSpendOverviewView = {
@@ -121,6 +124,7 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
         adAccounts,
         workspaceGoogleLogins,
         googleAdsApiReady,
+        adApiQuotaPaused: isStoreAdApiQuotaPaused(adAccounts),
       },
     };
   }

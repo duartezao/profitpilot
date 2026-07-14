@@ -1,5 +1,5 @@
 import "server-only";
-import { unstable_cache, revalidateTag } from "next/cache";
+import { unstable_cache } from "next/cache";
 import {
   buildWorkspaceSummary,
   type DashboardSummary,
@@ -10,6 +10,7 @@ import {
   type StoreAccess,
 } from "@/lib/store-access";
 import { invalidatePortfolioCachesForWorkspace } from "@/lib/portfolio-summary-cache";
+import { safeRevalidateTag } from "@/lib/safe-revalidate";
 
 const SUMMARY_TTL_SEC = 60;
 
@@ -28,7 +29,7 @@ export function workspaceMetricsCacheTag(workspaceId: string): string {
 
 /** Invalida cache de summary após sync ou alterações financeiras. */
 export function invalidateWorkspaceMetricsCache(workspaceId: string): void {
-  revalidateTag(workspaceMetricsCacheTag(workspaceId), { expire: 0 });
+  safeRevalidateTag(workspaceMetricsCacheTag(workspaceId));
   invalidatePortfolioCachesForWorkspace(workspaceId);
 }
 

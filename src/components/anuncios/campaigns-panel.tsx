@@ -10,7 +10,6 @@ import { syncAdAccountsNowAction } from "@/app/(app)/anuncios/ad-account-actions
 import type { StoreCampaignsView } from "@/lib/ad-campaign-types";
 import { cn } from "@/lib/utils";
 import {
-  AD_API_SYNC_INTERVAL_MS,
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
 import {
@@ -172,10 +171,12 @@ async function fetchCampaigns(
 export function CampaignsPanel({
   storeId,
   hasLinkedAccounts,
+  adApiQuotaPaused = false,
   embedded = false,
 }: {
   storeId: string;
   hasLinkedAccounts: boolean;
+  adApiQuotaPaused?: boolean;
   embedded?: boolean;
 }) {
   const searchParams = useSearchParams();
@@ -195,33 +196,14 @@ export function CampaignsPanel({
     refetchInterval: includesToday ? LIVE_DATA_POLL_MS : false,
   });
 
-  useQuery({
-    queryKey: ["ad-intraday-sync", storeId],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/anuncios/sync-today?store=${encodeURIComponent(storeId)}`,
-        { cache: "no-store" },
-      );
-      if (!res.ok) return null;
-      const body = (await res.json()) as { synced?: boolean };
-      if (body.synced) {
-        await queryClient.invalidateQueries({
-          queryKey: ["ad-campaigns", storeId],
-        });
-      }
-      return body;
-    },
-    enabled: hasLinkedAccounts && includesToday,
-    refetchInterval: AD_API_SYNC_INTERVAL_MS,
-    staleTime: AD_API_SYNC_INTERVAL_MS - 60_000,
-  });
-
   function runSync() {
     startSync(async () => {
       setSyncError(null);
       const res = await syncAdAccountsNowAction(storeId);
       if (res.error) {
         setSyncError(res.error);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ["ad-spend-view"] });
       }
       await queryClient.invalidateQueries({ queryKey: ["ad-campaigns", storeId] });
       const fresh = await fetchCampaigns(storeId, periodQs, true);
@@ -325,6 +307,13 @@ export function CampaignsPanel({
       {syncError && (
         <p className="mb-4 rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
           {syncError}
+        </p>
+      )}
+
+      {adApiQuotaPaused && (
+        <p className="mb-4 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-muted-foreground">
+          Quota da API esgotada — sync automático pausado (só cron + botão
+          «Actualizar»). Os dados na BD mantêm-se.
         </p>
       )}
 

@@ -54,7 +54,6 @@ import {
   orderShouldBeRemoved,
 } from "@/lib/order-financial-status";
 import { snapshotYesterdayMetrics, reconcileDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
-import { syncApiAdSpendForStore } from "@/lib/ad-spend-sync";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
@@ -1855,16 +1854,6 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
     });
   } catch (e) {
     console.error("[sync] daily metrics snapshot", e);
-  }
-
-  try {
-    await syncApiAdSpendForStore(storeId);
-    const { syncMissingAdMetricsForStore } = await import("@/lib/ad-metrics-backfill");
-    await syncMissingAdMetricsForStore(storeId, {
-      maxDays: incremental ? 14 : 45,
-    });
-  } catch (e) {
-    console.error("[sync] ad spend api", e);
   }
 
   await persistStoreSyncFields(store._id, {

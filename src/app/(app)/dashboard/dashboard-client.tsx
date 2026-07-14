@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ProfitChart } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
@@ -26,7 +26,6 @@ import { parsePortfolioParam } from "@/lib/portfolio-scope";
 import type { DashboardSummary } from "@/lib/metrics";
 import type { PortfolioSummary } from "@/lib/portfolio-metrics";
 import {
-  AD_API_SYNC_INTERVAL_MS,
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
 import { hrefWithScopeAndStore } from "@/lib/scope-query";
@@ -63,7 +62,6 @@ async function fetchPortfolio(
 
 export function DashboardClient() {
   const { workspaceId } = useWorkspace();
-  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
   const portfolioParam = searchParams.get("portfolio");
@@ -84,31 +82,6 @@ export function DashboardClient() {
     placeholderData: (prev) => prev,
     staleTime: LIVE_DATA_POLL_MS - 10_000,
     refetchInterval: LIVE_DATA_POLL_MS,
-  });
-
-  useQuery({
-    queryKey: ["ad-intraday-sync", workspaceId, storeId],
-    queryFn: async () => {
-      if (!storeId) return null;
-      const res = await fetch(
-        `/api/anuncios/sync-today?store=${encodeURIComponent(storeId)}`,
-        { cache: "no-store" },
-      );
-      if (!res.ok) return null;
-      const body = (await res.json()) as { synced?: boolean };
-      if (body.synced) {
-        await queryClient.invalidateQueries({
-          queryKey: ["metrics-summary", workspaceId, storeId],
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["ad-campaigns", storeId],
-        });
-      }
-      return body;
-    },
-    enabled: Boolean(storeId) && !isPortfolio,
-    refetchInterval: AD_API_SYNC_INTERVAL_MS,
-    staleTime: AD_API_SYNC_INTERVAL_MS - 60_000,
   });
 
   const portfolioData =

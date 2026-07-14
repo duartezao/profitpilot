@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getCachedWorkspaceSummary } from "@/lib/metrics-summary-cache";
-import { syncAdSpendIfDue } from "@/lib/ad-intraday-sync";
 import {
   authErrorResponse,
   requireUser,
@@ -9,6 +8,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/** Summary da dashboard — só lê BD; sync ads é via cron ou botão manual. */
 export async function GET(request: Request) {
   try {
     const user = await requireUser();
@@ -16,7 +16,6 @@ export async function GET(request: Request) {
     const storeId = params.get("store") ?? undefined;
     if (storeId) {
       await requireWorkspaceStore(user, storeId, { activeOnly: true });
-      await syncAdSpendIfDue(storeId, user.workspaceId);
     }
 
     const summary = await getCachedWorkspaceSummary(

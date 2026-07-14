@@ -1,10 +1,11 @@
 import "server-only";
-import { unstable_cache, revalidateTag } from "next/cache";
+import { unstable_cache } from "next/cache";
 import {
   buildPortfolioSummary,
   type PortfolioSummary,
 } from "@/lib/portfolio-metrics";
 import type { PeriodInput } from "@/lib/period";
+import { safeRevalidateTag } from "@/lib/safe-revalidate";
 
 const PORTFOLIO_TTL_SEC = 60;
 
@@ -23,7 +24,7 @@ export function portfolioWorkspaceCacheTag(workspaceId: string): string {
 
 /** Invalida caches de portfolio que incluem este workspace. */
 export function invalidatePortfolioCachesForWorkspace(workspaceId: string): void {
-  revalidateTag(portfolioWorkspaceCacheTag(workspaceId), { expire: 0 });
+  safeRevalidateTag(portfolioWorkspaceCacheTag(workspaceId));
 }
 
 export async function getCachedPortfolioSummary(

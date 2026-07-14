@@ -4,6 +4,7 @@ import { Store } from "@/models/Store";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { AdCampaignDay } from "@/models/AdCampaignDay";
 import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
+import { isStoreAdApiQuotaPaused } from "@/lib/ad-api-quota";
 import { syncAdAccountsSpendForStore } from "@/lib/ad-api-sync";
 import {
   dateKeyInTimezone,
@@ -54,6 +55,10 @@ export async function syncMissingAdMetricsForStore(
 
   const accounts = await loadSyncAdAccountsForStore(store._id);
   if (!accounts.length) {
+    return { checked: 0, synced: 0, spendDays: 0, cursor: emptyCursor };
+  }
+
+  if (!force && isStoreAdApiQuotaPaused(accounts)) {
     return { checked: 0, synced: 0, spendDays: 0, cursor: emptyCursor };
   }
 
