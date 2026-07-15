@@ -16,6 +16,10 @@ import {
   googleConversionRefreshDateKeys,
   resolveIncrementalAdDateKeys,
 } from "@/lib/ad-metrics-cursor";
+import {
+  isApiCampaignDayClosed,
+  isApiSpendDayClosed,
+} from "@/lib/ad-spend-complete";
 
 export type AdMetricsBackfillResult = {
   checked: number;
@@ -77,20 +81,30 @@ export async function syncMissingAdMetricsForStore(
   const accountIds = accounts.map((a) => a._id);
   const activePlatforms = [...new Set(accounts.map((a) => a.platform))];
 
-  const [spendDocs, campaignDates, lastSpendDoc, lastCampaignDoc] =
+  const [spendDocs, campaignSyncedAgg, lastSpendDoc, lastCampaignDoc] =
     await Promise.all([
       ManualAdSpend.find({
         storeId: store._id,
         dateKey: { $in: allKeys },
       })
-        .select("dateKey")
+        .select("dateKey source amount updatedAt")
         .lean(),
-      AdCampaignDay.distinct("dateKey", {
-        storeId: store._id,
-        adAccountId: { $in: accountIds },
-        platform: { $in: activePlatforms },
-        dateKey: { $in: allKeys },
-      }),
+      AdCampaignDay.aggregate<{ _id: string; maxSyncedAt: Date }>([
+        {
+          $match: {
+            storeId: store._id,
+            adAccountId: { $in: accountIds },
+            platform: { $in: activePlatforms },
+            dateKey: { $in: allKeys },
+          },
+        },
+        {
+          $group: {
+            _id: "$dateKey",
+            maxSyncedAt: { $max: "$syncedAt" },
+          },
+        },
+      ]),
       ManualAdSpend.findOne({ storeId: store._id })
         .sort({ dateKey: -1 })
         .select("dateKey")
@@ -104,12 +118,44 @@ export async function syncMissingAdMetricsForStore(
         .lean(),
     ]);
 
+  const completeSpendDays = new Set<string>();
+  for (const d of spendDocs) {
+    if (
+      isApiSpendDayClosed(
+        {
+          dateKey: d.dateKey,
+          source: d.source as string | undefined,
+          amount: d.amount,
+          updatedAt: d.updatedAt,
+        },
+        today,
+        tz,
+      )
+    ) {
+      completeSpendDays.add(d.dateKey);
+    }
+  }
+
+  const completeCampaignDays = new Set<string>();
+  for (const row of campaignSyncedAgg) {
+    if (
+      isApiCampaignDayClosed(
+        row._id,
+        row.maxSyncedAt,
+        today,
+        tz,
+      )
+    ) {
+      completeCampaignDays.add(row._id);
+    }
+  }
+
   const hasSpend = new Set(spendDocs.map((d) => d.dateKey));
-  const hasCampaign = new Set(campaignDates as string[]);
+  const hasCampaign = new Set(campaignSyncedAgg.map((r) => r._id));
 
   const cursor = buildAdMetricsCursor(
     spendDocs.map((d) => d.dateKey),
-    campaignDates as string[],
+    [...hasCampaign],
   );
   if (lastSpendDoc?.dateKey) cursor.lastSpendDateKey = lastSpendDoc.dateKey;
   if (lastCampaignDoc?.dateKey) {
@@ -120,8 +166,8 @@ export async function syncMissingAdMetricsForStore(
     allKeys,
     today,
     maxDays,
-    spendDays: hasSpend,
-    campaignDays: hasCampaign,
+    completeSpendDays,
+    completeCampaignDays,
   });
   const hasGoogle = accounts.some((a) => a.platform === "google");
   const googleRefreshOnly = hasGoogle
@@ -139,16 +185,18 @@ export async function syncMissingAdMetricsForStore(
 
   for (const dateKey of toSync) {
     const googleOnlyRefresh = googleRefreshOnly.includes(dateKey);
+    const spendClosed = completeSpendDays.has(dateKey);
+    const forceOverwrite =
+      force || (dateKey !== today && hasSpend.has(dateKey) && !spendClosed);
     try {
       const result = await syncAdAccountsSpendForStore(storeId, {
         dateKey,
         campaignDateKeys: [dateKey],
         skipDailyNote: dateKey !== today,
         skipSpendSync:
-          googleOnlyRefresh ||
-          (!force && hasSpend.has(dateKey) && dateKey !== today),
+          googleOnlyRefresh || (dateKey !== today && spendClosed && !force),
         campaignPlatforms: googleOnlyRefresh ? ["google"] : undefined,
-        forceOverwrite: force,
+        forceOverwrite,
       });
       synced++;
       if (result.updated) spendDays++;

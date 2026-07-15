@@ -2,7 +2,6 @@ import "server-only";
 import type { Types } from "mongoose";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { Workspace } from "@/models/Workspace";
-import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import {
   getTodayDateKey,
   canApiWriteAdSpendForStore,
@@ -58,9 +57,14 @@ async function upsertApiAdSpendForDay(
   storeTimeZone: string | null | undefined,
   baseCurrency: string,
   apiByPlatform: Map<AdPlatform, PlatformApiSpend>,
+  opts?: { forceOverwrite?: boolean },
 ): Promise<boolean> {
   const existing = await ManualAdSpend.findOne({ storeId, dateKey }).lean();
-  if (!canApiWriteAdSpendForStore(dateKey, storeTimeZone, Boolean(existing))) {
+  if (
+    !canApiWriteAdSpendForStore(dateKey, storeTimeZone, Boolean(existing), new Date(), {
+      forceOverwrite: Boolean(opts?.forceOverwrite),
+    })
+  ) {
     return false;
   }
 
@@ -85,8 +89,7 @@ async function upsertApiAdSpendForDay(
   for (const [platform, data] of apiByPlatform) {
     const hasValue =
       data.spend > 0 ||
-      data.fees.extraFeeFixed > 0 ||
-      data.fees.agencyFeePercent > 0;
+      data.fees.extraFeeFixed > 0;
     if (!hasValue) continue;
 
     apiLines.push(
@@ -263,10 +266,17 @@ export async function syncAdAccountsSpendForStore(
       storeTz,
       baseCurrency,
       apiByPlatform,
+      {
+        forceOverwrite:
+          Boolean(options?.forceOverwrite) && existingSource === "api",
+      },
     );
   }
 
   if (updated) {
+    const { invalidateWorkspaceMetricsCache } = await import(
+      "@/lib/metrics-summary-cache"
+    );
     invalidateWorkspaceMetricsCache(String(store.workspaceId));
   }
 

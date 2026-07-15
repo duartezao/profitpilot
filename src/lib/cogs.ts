@@ -657,8 +657,13 @@ export async function listVariantIdsNeedingCostSync(
             $project: {
               resolved: {
                 $or: [
-                  { $ne: ["$manualCost", null] },
                   { $gt: [{ $ifNull: ["$unitCost", 0] }, 0] },
+                  {
+                    $in: [
+                      { $type: "$manualCost" },
+                      ["double", "int", "long", "decimal"],
+                    ],
+                  },
                 ],
               },
             },

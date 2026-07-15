@@ -13,34 +13,37 @@ export type ResolveIncrementalAdDateKeysInput = {
   allKeys: string[];
   today: string;
   maxDays: number;
-  spendDays: Set<string>;
-  campaignDays: Set<string>;
+  /** Dias com gasto API/manual já fechados (não re-pedir spend). */
+  completeSpendDays: Set<string>;
+  /** Dias com campanhas já fechadas (não re-pedir campanhas completas). */
+  completeCampaignDays: Set<string>;
 };
 
 /**
  * Dias a sincronizar — incremental como Shopify (taxas/encomendas):
  * - **Hoje**: sempre (substitui totais frescos da API; não soma em cima).
- * - **Passado**: só lacunas (falta gasto ou campanhas); dias completos não voltam à API.
+ * - **Passado**: lacunas ou dias gravados **antes de 00:00** (sync intraday parcial).
  * - Janela limitada a `maxDays` (os mais recentes).
  */
 export function resolveIncrementalAdDateKeys(
   input: ResolveIncrementalAdDateKeysInput,
 ): string[] {
-  const { allKeys, today, maxDays, spendDays, campaignDays } = input;
+  const { allKeys, today, maxDays, completeSpendDays, completeCampaignDays } =
+    input;
   const need = new Set<string>();
 
   for (const dateKey of allKeys) {
     if (dateKey > today) continue;
 
-    const hasSpend = spendDays.has(dateKey);
-    const hasCampaign = campaignDays.has(dateKey);
+    const spendComplete = completeSpendDays.has(dateKey);
+    const campaignComplete = completeCampaignDays.has(dateKey);
 
     if (dateKey === today) {
       need.add(dateKey);
       continue;
     }
 
-    if (!hasSpend || !hasCampaign) {
+    if (!spendComplete || !campaignComplete) {
       need.add(dateKey);
     }
   }
@@ -93,12 +96,12 @@ export function googleConversionRefreshDateKeys(
   return eligible.slice(-Math.max(1, days));
 }
 
-/** Gasto API só precisa de sync se for hoje ou dia passado ainda sem registo. */
+/** Gasto API só precisa de sync se for hoje ou dia passado ainda não fechado. */
 export function needsAdSpendSyncForDay(
   dateKey: string,
   today: string,
-  hasSpend: boolean,
+  spendClosed: boolean,
 ): boolean {
   if (dateKey === today) return true;
-  return !hasSpend;
+  return !spendClosed;
 }

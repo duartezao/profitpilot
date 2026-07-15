@@ -189,12 +189,13 @@ export async function softDeleteAdAccount(
   return res.modifiedCount > 0;
 }
 
+/** Contas ligadas (sync ou leitura BD) — inclui `error` (ex. quota) para não esconder dados guardados. */
 export async function loadActiveAdAccounts(storeId: Types.ObjectId) {
   await connectToDatabase();
   return AdAccount.find({
     storeId,
     deletedAt: null,
-    status: "active",
+    status: { $in: ["active", "error"] },
   })
     .sort({ createdAt: -1 })
     .lean();

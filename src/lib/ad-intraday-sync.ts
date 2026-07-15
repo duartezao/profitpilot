@@ -4,6 +4,11 @@ import { syncAdAccountsSpendForStore } from "@/lib/ad-api-sync";
 import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
 import { isStoreAdApiQuotaPaused } from "@/lib/ad-api-quota";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
+import { yesterdayDateKey } from "@/lib/ad-spend-complete";
+import {
+  dateKeyInTimezone,
+  normalizeStoreTimezone,
+} from "@/lib/store-timezone";
 
 /** Intervalo mínimo entre syncs automáticos de ads (cron Vercel, de 2 em 2 h). */
 import { AD_CRON_SYNC_INTERVAL_MS } from "@/lib/ad-sync-constants";
@@ -52,8 +57,48 @@ export async function syncAdSpendIfDue(
   }
 
   const result = await syncAdAccountsSpendForStore(storeId);
-  const didWork =
+  let didWork =
     result.updated || (result.campaignsSynced ?? 0) > 0;
+
+  const { Store } = await import("@/models/Store");
+  const { ManualAdSpend } = await import("@/models/ManualAdSpend");
+  const store = await Store.findById(storeId).select("ianaTimezone").lean();
+  const tz = normalizeStoreTimezone(store?.ianaTimezone);
+  const today = dateKeyInTimezone(new Date(), tz);
+  const yesterday = yesterdayDateKey(today);
+  const yDoc = await ManualAdSpend.findOne({
+    storeId: storeOid,
+    dateKey: yesterday,
+  })
+    .select("dateKey source amount updatedAt")
+    .lean();
+  const { isApiSpendDayClosed } = await import("@/lib/ad-spend-complete");
+  if (
+    !isApiSpendDayClosed(
+      yDoc
+        ? {
+            dateKey: yesterday,
+            source: yDoc.source as string | undefined,
+            amount: yDoc.amount,
+            updatedAt: yDoc.updatedAt,
+          }
+        : null,
+      today,
+      tz,
+    )
+  ) {
+    const yResult = await syncAdAccountsSpendForStore(storeId, {
+      dateKey: yesterday,
+      campaignDateKeys: [yesterday],
+      forceOverwrite: Boolean(yDoc),
+      skipDailyNote: true,
+    });
+    didWork =
+      didWork ||
+      yResult.updated ||
+      (yResult.campaignsSynced ?? 0) > 0;
+  }
+
   if (didWork) {
     invalidateWorkspaceMetricsCache(workspaceId);
     return { synced: true, today: result.today };

@@ -92,6 +92,7 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
           baseCurrency,
           scoped.importStartDate,
           scoped.createdAt,
+          scoped.ianaTimezone,
         ),
         listAdAccountsForStore(user.workspaceId, String(scoped._id)),
         listWorkspaceGoogleLogins(user.workspaceId),

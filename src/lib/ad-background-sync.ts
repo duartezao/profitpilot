@@ -17,7 +17,7 @@ export type AdBackgroundSyncResult = {
 
 /**
  * Sync contínuo de ads enquanto o processo Node está activo (instrumentation local).
- * Hoje: throttle 2 h por conta. Lacunas: até 2 dias em falta por loja por ciclo.
+ * Hoje: throttle 2 h por conta. Lacunas/parciais: até 14 dias por loja por ciclo.
  */
 export async function runDueAdSyncs(): Promise<AdBackgroundSyncResult> {
   if (running) {
@@ -62,7 +62,7 @@ export async function runDueAdSyncs(): Promise<AdBackgroundSyncResult> {
         else if (intraday.skippedReason === "throttled") result.intradayThrottled++;
 
         const backfill = await syncMissingAdMetricsForStore(storeId, {
-          maxDays: 2,
+          maxDays: 14,
         });
         result.backfillDays += backfill.synced;
       } catch {

@@ -9,7 +9,7 @@ import {
 import { buildWorkspaceTreasury, type WorkspaceTreasury } from "@/lib/treasury";
 import type { PeriodInput } from "@/lib/period";
 import type { StoreAccess } from "@/lib/store-access";
-import { loadActiveAdAccounts } from "@/lib/ad-accounts";
+import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
 import { Types } from "mongoose";
 import {
   buildCampaignDecisionAnalysis,
@@ -251,7 +251,9 @@ export async function buildDecisionSummary(
     const storeBer = storeLine ? berRoas(storeLine) : berRoas(pnl.totals);
     const storeName =
       productRanking?.storeName ?? storeLine?.name ?? "Loja";
-    const accounts = await loadActiveAdAccounts(new Types.ObjectId(storeId));
+    const accounts = await loadSyncAdAccountsForStore(
+      new Types.ObjectId(storeId),
+    );
     const adAccounts = accounts.map((a) => ({
       id: String(a._id),
       name: a.accountName?.trim() || a.externalAccountId || a.platform,
