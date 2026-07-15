@@ -2,6 +2,7 @@ import "server-only";
 import { convertToBaseCurrency } from "@/lib/fx";
 import { orderNetRevenue } from "@/lib/order-revenue";
 import { dateKeyInTimezone, normalizeStoreTimezone } from "@/lib/store-timezone";
+import type { CogsMode } from "@/lib/cogs-modes";
 
 export type OrderAmountsBase = {
   netRevenue: number;
@@ -55,6 +56,13 @@ export const orderModeCogsSumExpr = {
     $ifNull: ["$manualCogs", { $ifNull: ["$amountsBase.cogs", "$cogs"] }],
   },
 } as const;
+
+/** Expressão MongoDB de COGS conforme o modo da loja (day = 0 na agregação por encomenda). */
+export function cogsSumExprForMode(mode?: CogsMode | null) {
+  if (mode === "order") return orderModeCogsSumExpr;
+  if (mode === "day") return { $sum: 0 } as const;
+  return cogsSumBaseExpr;
+}
 
 export async function buildOrderAmountsBase(
   order: {

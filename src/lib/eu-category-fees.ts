@@ -39,6 +39,7 @@ import {
   parseDateInput,
 } from "@/lib/period";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
+import { mergeEuCustomsEligibleOrderFilter } from "@/lib/order-fulfillment-status";
 
 /** Taxa EU automática — só lojas com COGS automático da Shopify. */
 export { appliesAutoEuCustomsFees } from "@/lib/cogs-modes";
@@ -152,13 +153,15 @@ function euOrderMatch(
   };
 
   if (scope === "all_paid_orders") {
-    return mergePaidOrderFilter(base);
+    return mergeEuCustomsEligibleOrderFilter(mergePaidOrderFilter(base));
   }
 
-  return mergePaidOrderFilter({
-    ...base,
-    shippingCountryCode: { $in: [...EU_SHIPPING_COUNTRY_CODES] },
-  });
+  return mergeEuCustomsEligibleOrderFilter(
+    mergePaidOrderFilter({
+      ...base,
+      shippingCountryCode: { $in: [...EU_SHIPPING_COUNTRY_CODES] },
+    }),
+  );
 }
 
 async function countEuOrdersByDay(

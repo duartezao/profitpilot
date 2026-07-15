@@ -10,8 +10,7 @@ import { Order } from "@/models/Order";
 import { sumAdSpendForPeriod } from "@/lib/ad-spend";
 import { moneyToBase } from "@/lib/fx";
 import {
-  cogsSumBaseExpr,
-  orderModeCogsSumExpr,
+  cogsSumExprForMode,
   shippingSumBaseExpr,
 } from "@/lib/order-money";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
@@ -338,8 +337,7 @@ async function sumOrderOutflowsSince(
   if (cogsMode === "day") {
     cogs = await sumManualCogsForPeriod([storeId], slice, tz);
   } else {
-    const cogsExpr =
-      cogsMode === "order" ? orderModeCogsSumExpr : cogsSumBaseExpr;
+    const cogsExpr = cogsSumExprForMode(cogsMode);
     const cogsRows = await Order.aggregate<{ cogs: number }>([
       { $match: mergePaidOrderFilter({ storeId, ...dateMatch }) },
       { $group: { _id: null, cogs: cogsExpr } },

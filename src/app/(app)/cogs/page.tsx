@@ -160,8 +160,9 @@ export default async function CogsPage({
         </p>
         {showEuCustomsFeeInfo && scoped && (
           <p className="mt-2 text-sm text-muted-foreground">
-            A taxa alfandegária UE (3 € por encomenda para destinos UE) é calculada
-            automaticamente e soma ao COGS — vê o detalhe no{" "}
+            A taxa alfandegária UE (3 € por encomenda paga para
+            destinos UE) conta no dia e é corrigida no sync se for
+            cancelada sem envio — vê o detalhe no{" "}
             <a
               href={`/metricas?store=${String(scoped._id)}`}
               className="text-accent hover:underline"
