@@ -49,6 +49,14 @@ export function assimilatesCogsOnSync(
   return m === "shopify" || m === "variant";
 }
 
+/** Avisos e listagens «produto sem COGS» — só modos Shopify ou variante manual. */
+export function tracksVariantCogs(
+  mode: CogsMode | null | undefined,
+): boolean {
+  const m = mode ?? defaultCogsMode();
+  return m === "shopify" || m === "variant";
+}
+
 export const COGS_MODE_LABELS: Record<CogsMode, string> = {
   shopify: "Automático (Shopify)",
   variant: "Por variante (manual)",

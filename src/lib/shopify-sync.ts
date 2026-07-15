@@ -47,6 +47,10 @@ import {
   resolveVariantCatalogPrice,
   type CatalogVariantInput,
 } from "@/lib/catalog-fallback";
+import {
+  upsertProductCatalogEntries,
+  type ShopifyCollectionRef,
+} from "@/lib/product-catalog";
 import { syncSessionMetricsForStore } from "@/lib/session-metrics";
 import { syncDisputes } from "@/lib/dispute-sync";
 import {
@@ -407,6 +411,9 @@ type ShopifyVariantCostNode = CatalogVariantInput & {
   product: {
     id: string;
     title: string;
+    collections?: {
+      nodes: ShopifyCollectionRef[];
+    } | null;
     priceRangeV2?: {
       minVariantPrice?: { amount?: string | null } | null;
     } | null;
@@ -436,6 +443,13 @@ const SHOPIFY_VARIANT_CATALOG_FIELDS = `
   product {
     id
     title
+    collections(first: 25) {
+      nodes {
+        id
+        title
+        handle
+      }
+    }
     priceRangeV2 { minVariantPrice { amount } }
     variants(first: 100) {
       nodes {
@@ -533,6 +547,23 @@ async function upsertProductCostNodes(
     ops.map(({ updateOne }) => ({ updateOne })),
     { ordered: false },
   );
+
+  const catalogByProduct = new Map<
+    string,
+    { productId: string; title: string; collections: ShopifyCollectionRef[] }
+  >();
+  for (const node of nodes) {
+    const productId = node.product?.id;
+    if (!productId) continue;
+    catalogByProduct.set(productId, {
+      productId,
+      title: node.product?.title ?? "",
+      collections: node.product?.collections?.nodes ?? [],
+    });
+  }
+  if (catalogByProduct.size > 0) {
+    await upsertProductCatalogEntries(store._id, [...catalogByProduct.values()]);
+  }
 
   for (const op of ops) {
     const variantId = String(op.variantId);
@@ -696,18 +727,13 @@ export async function syncSoldProductCostsPage(
   if (newIds.length) {
     variantIds = newIds;
   } else if (incremental) {
-    const skip = store.catalogRefreshOffset ?? 0;
-    variantIds = await listSoldVariantIdsByOffset(store._id, skip, batchSize);
-    mode = "refresh";
-    if (!variantIds.length) {
-      return {
-        count: 0,
-        hasMore: false,
-        changedVariantIds: [],
-        nextRefreshOffset: refreshOffset,
-        mode: "none",
-      };
-    }
+    return {
+      count: 0,
+      hasMore: false,
+      changedVariantIds: [],
+      nextRefreshOffset: refreshOffset,
+      mode: "none",
+    };
   } else {
     variantIds = await listSoldVariantIdsByOffset(
       store._id,
@@ -784,13 +810,6 @@ export async function syncSoldProductCostsPage(
   }
 
   if (incremental) {
-    const total = await countDistinctSoldVariants(store._id);
-    const skip = store.catalogRefreshOffset ?? 0;
-    const nextSkip = total > 0 ? (skip + variantIds.length) % total : 0;
-    await Store.updateOne(
-      { _id: store._id },
-      { $set: { catalogRefreshOffset: nextSkip } },
-    );
     return {
       count,
       hasMore: false,
@@ -808,6 +827,141 @@ export async function syncSoldProductCostsPage(
     nextRefreshOffset,
     mode: "refresh",
   };
+}
+
+const SHOPIFY_PRODUCT_CATALOG_FIELDS = `
+  id
+  product {
+    id
+    title
+    collections(first: 25) {
+      nodes {
+        id
+        title
+        handle
+      }
+    }
+  }
+`;
+
+/** Sincroniza coleções Shopify dos produtos vendidos (independente do modo COGS). */
+async function fetchAndUpsertProductCatalogNodes(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+  variantIds: string[],
+): Promise<number> {
+  if (!variantIds.length) return 0;
+
+  const query = `query($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        ${SHOPIFY_PRODUCT_CATALOG_FIELDS}
+      }
+    }
+  }`;
+
+  type CatalogNode = {
+    id: string;
+    product?: {
+      id: string;
+      title: string;
+      collections?: { nodes: ShopifyCollectionRef[] } | null;
+    } | null;
+  };
+
+  const data = await shopifyGraphQL<{ nodes: Array<CatalogNode | null> }>(
+    domain,
+    token,
+    query,
+    { ids: variantIds },
+  );
+
+  const catalogByProduct = new Map<
+    string,
+    { productId: string; title: string; collections: ShopifyCollectionRef[] }
+  >();
+  for (const node of data.nodes) {
+    if (!node?.product?.id) continue;
+    catalogByProduct.set(node.product.id, {
+      productId: node.product.id,
+      title: node.product.title ?? "",
+      collections: node.product.collections?.nodes ?? [],
+    });
+  }
+
+  return upsertProductCatalogEntries(store._id, [...catalogByProduct.values()]);
+}
+
+/** Coleções só das variantes indicadas (sync incremental — encomendas novas). */
+export async function syncProductCatalogForVariantIds(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+  variantIds: string[],
+): Promise<number> {
+  const unique = [...new Set(variantIds.filter(Boolean))];
+  if (!unique.length) return 0;
+
+  let total = 0;
+  for (let i = 0; i < unique.length; i += SOLD_VARIANT_BATCH) {
+    total += await fetchAndUpsertProductCatalogNodes(
+      store,
+      domain,
+      token,
+      unique.slice(i, i + SOLD_VARIANT_BATCH),
+    );
+  }
+  return total;
+}
+
+export async function syncProductCatalogPage(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+  options: { offset?: number; batchSize?: number } = {},
+): Promise<{ count: number; hasMore: boolean; nextOffset: number }> {
+  const offset = options.offset ?? 0;
+  const batchSize = options.batchSize ?? SOLD_VARIANT_BATCH;
+  const variantIds = await listSoldVariantIdsByOffset(
+    store._id,
+    offset,
+    batchSize,
+  );
+  const soldTotal = await countDistinctSoldVariants(store._id);
+  if (!variantIds.length) {
+    return { count: 0, hasMore: false, nextOffset: offset };
+  }
+
+  const count = await fetchAndUpsertProductCatalogNodes(
+    store,
+    domain,
+    token,
+    variantIds,
+  );
+  const nextOffset = offset + variantIds.length;
+  return {
+    count,
+    hasMore: nextOffset < soldTotal,
+    nextOffset,
+  };
+}
+
+/** Importa coleções de todas as variantes vendidas (cron / sync completa). */
+export async function syncAllSoldProductCatalog(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+): Promise<{ count: number }> {
+  let total = 0;
+  let offset = 0;
+  for (let step = 0; step < 200; step++) {
+    const page = await syncProductCatalogPage(store, domain, token, { offset });
+    total += page.count;
+    if (!page.hasMore) break;
+    offset = page.nextOffset;
+  }
+  return { count: total };
 }
 
 /** Importa custos de todas as variantes vendidas em falta (cron / sync completa). */
@@ -1786,6 +1940,12 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
     const sold = await syncAllSoldProductCosts(store, domain, accessToken);
     products = sold.count;
     changedVariantIds = sold.changedVariantIds;
+  }
+
+  try {
+    await syncAllSoldProductCatalog(store, domain, accessToken);
+  } catch (e) {
+    console.error("[sync] product catalog", e);
   }
 
   const assimilated = assimilateCogs

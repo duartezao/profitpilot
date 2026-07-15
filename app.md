@@ -375,6 +375,7 @@ Net Profit =
 * Lucro por loja, por produto, por país, por canal de aquisição
 * **Profit por order** (margem média por encomenda)
 * Breakeven ROAS por produto (a partir de que ROAS o produto deixa de dar prejuízo) — coluna **BER** em `/produtos` e dashboard da loja; exportação CSV em `/produtos`.
+* **Vendas por coleção** (`/colecoes-vendas`, por loja) — ranking de coleções Shopify por unidades e receita no período; expandir cada coleção para ver **vendas por dia**; tabela de produtos com a **coleção principal** associada. Catálogo (`ProductCatalog`) sincronizado **sempre** no sync (fase «Coleções Shopify», independente do modo COGS). GraphQL `product.collections`. A coleção principal é a primeira coleção manual da Shopify (exclui handles genéricos como `all`). Export CSV. Destinado a cruzar vendas reais Shopify com campanhas Google Ads sem pausar campanhas automaticamente.
 
 ## Pedidos e reembolsos (por loja)
 
