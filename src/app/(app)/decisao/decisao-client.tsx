@@ -117,6 +117,27 @@ function fmtMetric(v: number | null, suffix = ""): string {
   return `${v.toFixed(2).replace(".", ",")}${suffix}`;
 }
 
+function fmtInt(v: number): string {
+  return v.toLocaleString("pt-PT");
+}
+
+function fmtMoney(v: number, currency: string): string {
+  const n = v.toLocaleString("pt-PT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return currency === "EUR" ? `${n} €` : `${n} ${currency}`;
+}
+
+function CampaignStatusApiBadge({ label }: { label: string }) {
+  if (!label) return null;
+  return (
+    <span className="inline-flex rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+      {label}
+    </span>
+  );
+}
+
 function CopyButton({
   text,
   label,
@@ -167,6 +188,7 @@ function CampaignCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Sensitive className="font-medium leading-snug">{row.name}</Sensitive>
+            <CampaignStatusApiBadge label={row.campaignStatusLabel} />
             {showPauseCause && <PauseCauseBadge cause={row.pauseCause} />}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -176,7 +198,7 @@ function CampaignCard({
         <CampaignStatusBadge status={row.status} label={row.statusLabel} />
       </div>
 
-      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4 lg:grid-cols-5">
+      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3 lg:grid-cols-4">
         <div>
           <dt className="text-muted-foreground">Dias c/ gasto</dt>
           <dd className="mt-0.5 font-semibold tabular-nums">
@@ -188,7 +210,13 @@ function CampaignCard({
         <div>
           <dt className="text-muted-foreground">Gasto</dt>
           <dd className="mt-0.5 font-semibold tabular-nums">
-            <Sensitive>{row.spend.toFixed(2).replace(".", ",")}</Sensitive>
+            <Sensitive>{fmtMoney(row.spend, row.currency)}</Sensitive>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Receita</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{fmtMoney(row.conversionValue, row.currency)}</Sensitive>
           </dd>
         </div>
         <div>
@@ -212,6 +240,18 @@ function CampaignCard({
           </div>
         )}
         <div>
+          <dt className="text-muted-foreground">Impressões</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{fmtInt(row.impressions)}</Sensitive>
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Cliques</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{fmtInt(row.clicks)}</Sensitive>
+          </dd>
+        </div>
+        <div>
           <dt className="text-muted-foreground">CPC</dt>
           <dd className="mt-0.5 font-semibold tabular-nums">
             <Sensitive>{fmtMetric(row.cpc)}</Sensitive>
@@ -223,6 +263,20 @@ function CampaignCard({
             <Sensitive>{fmtMetric(row.ctr, "%")}</Sensitive>
           </dd>
         </div>
+        <div>
+          <dt className="text-muted-foreground">CPM</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums">
+            <Sensitive>{fmtMetric(row.cpm)}</Sensitive>
+          </dd>
+        </div>
+        {row.dailyBudget != null && row.dailyBudget > 0 && (
+          <div>
+            <dt className="text-muted-foreground">Budget/dia</dt>
+            <dd className="mt-0.5 font-semibold tabular-nums">
+              <Sensitive>{fmtMoney(row.dailyBudget, row.currency)}</Sensitive>
+            </dd>
+          </div>
+        )}
       </dl>
 
       <p className="mt-3 text-xs text-muted-foreground">
@@ -497,7 +551,7 @@ export function DecisaoClient() {
             <p className="text-sm text-muted-foreground">
               BER loja: <span className="font-medium tabular-nums">{data.storeBerRoas}x</span>
               {" · "}
-              {data.campaignAnalysis?.campaignCount ?? 0} campanha(s) activas com gasto
+              {data.campaignAnalysis?.campaignCount ?? 0} campanha(s) sincronizadas na BD
             </p>
           )}
 
@@ -533,12 +587,12 @@ export function DecisaoClient() {
               </div>
             ) : (
               <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                Sem campanhas activas com gasto. Liga uma ad account e sincroniza em Anúncios.
+                Sem campanhas na BD para esta loja. Liga uma ad account e sincroniza em Anúncios.
               </p>
             )
           ) : (
             <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              Sem campanhas com gasto. Liga uma ad account e sincroniza em Anúncios.
+              Sem campanhas na BD. Liga uma ad account e sincroniza em Anúncios.
             </p>
           )}
 

@@ -4,7 +4,7 @@ import { AdCampaignDay } from "@/models/AdCampaignDay";
 import { CampaignScaleEvent } from "@/models/CampaignScaleEvent";
 import type { AdPlatform } from "@/lib/ad-spend-platforms";
 import { AD_PLATFORM_LABELS } from "@/lib/ad-spend-platforms";
-import { roasFromCampaign, isPausedCampaignStatus } from "@/lib/ad-campaign-types";
+import { roasFromCampaign, isPausedCampaignStatus, isActiveCampaignStatus } from "@/lib/ad-campaign-types";
 import { formatDateInput } from "@/lib/period";
 import {
   metricsFromSpendDays,
@@ -49,6 +49,7 @@ type CampaignSpendSeries = {
   campaignName: string;
   platform: AdPlatform;
   adAccountId: string;
+  currency: string;
   spendDays: SpendDayRowLocal[];
 };
 
@@ -193,7 +194,7 @@ async function loadCampaignSpendSeries(
     spend: { $gt: 0 },
   })
     .select(
-      "campaignId campaignName platform adAccountId dateKey spend impressions clicks conversions conversionValue dailyBudget",
+      "campaignId campaignName platform adAccountId dateKey spend impressions clicks conversions conversionValue dailyBudget currency",
     )
     .sort({ dateKey: -1 })
     .lean();
@@ -211,6 +212,7 @@ async function loadCampaignSpendSeries(
         campaignName: r.campaignName?.trim() || "Campanha",
         platform,
         adAccountId,
+        currency: r.currency?.trim() || "EUR",
         spendDays: [],
       };
       byKey.set(key, series);
@@ -235,12 +237,66 @@ async function loadCampaignSpendSeries(
   return [...byKey.values()];
 }
 
+function seriesKey(series: Pick<CampaignSpendSeries, "platform" | "adAccountId" | "campaignId">): string {
+  return `${series.platform}:${series.adAccountId}:${series.campaignId}`;
+}
+
+/** Campanhas activas no último dia sincronizado, ainda sem gasto na janela. */
+async function loadActiveCampaignsWithoutSpend(
+  storeId: string,
+  adAccountIds: string[],
+  existing: CampaignSpendSeries[],
+  referenceDateKey: string,
+): Promise<CampaignSpendSeries[]> {
+  if (!adAccountIds.length) return [];
+
+  const storeOid = new mongoose.Types.ObjectId(storeId);
+  const accountOids = adAccountIds.map((id) => new mongoose.Types.ObjectId(id));
+  const existingKeys = new Set(existing.map((s) => seriesKey(s)));
+
+  const latestDate = await AdCampaignDay.findOne({
+    storeId: storeOid,
+    adAccountId: { $in: accountOids },
+    dateKey: { $lte: referenceDateKey },
+  })
+    .sort({ dateKey: -1 })
+    .select("dateKey")
+    .lean();
+  if (!latestDate?.dateKey) return [];
+
+  const rows = await AdCampaignDay.find({
+    storeId: storeOid,
+    adAccountId: { $in: accountOids },
+    dateKey: latestDate.dateKey,
+  })
+    .select("campaignId campaignName platform adAccountId status currency")
+    .lean();
+
+  const out: CampaignSpendSeries[] = [];
+  for (const r of rows) {
+    if (!isActiveCampaignStatus(r.status ?? "")) continue;
+    const platform = r.platform as AdPlatform;
+    const adAccountId = String(r.adAccountId);
+    const candidate: CampaignSpendSeries = {
+      campaignId: r.campaignId,
+      campaignName: r.campaignName?.trim() || "Campanha",
+      platform,
+      adAccountId,
+      currency: r.currency?.trim() || "EUR",
+      spendDays: [],
+    };
+    if (existingKeys.has(seriesKey(candidate))) continue;
+    out.push(candidate);
+  }
+  return out;
+}
+
 /** Estado mais recente por campanha (último dia na BD). */
 async function loadLatestCampaignStatusMap(
   storeId: string,
   adAccountIds: string[],
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+): Promise<Map<string, { status: string; statusLabel: string }>> {
+  const out = new Map<string, { status: string; statusLabel: string }>();
   if (!adAccountIds.length) return out;
 
   const storeOid = new mongoose.Types.ObjectId(storeId);
@@ -262,13 +318,17 @@ async function loadLatestCampaignStatusMap(
           campaignId: "$campaignId",
         },
         status: { $first: "$status" },
+        statusLabel: { $first: "$statusLabel" },
       },
     },
   ]);
 
   for (const r of rows) {
     const key = `${r._id.platform}:${String(r._id.adAccountId)}:${r._id.campaignId}`;
-    out.set(key, (r.status as string) ?? "");
+    out.set(key, {
+      status: (r.status as string) ?? "",
+      statusLabel: (r.statusLabel as string)?.trim() || "",
+    });
   }
 
   return out;
@@ -364,20 +424,37 @@ export async function buildCampaignDecisionAnalysis(input: {
     input.adAccounts.map((a) => [a.id, a.name || a.id]),
   );
   const currency = input.currency ?? "EUR";
+  const referenceDateKey = formatDateInput(new Date());
 
-  const [seriesList, scaleMap, pauseMap, statusMap] = await Promise.all([
-    loadCampaignSpendSeries(input.storeId, accountIds, input.windowDays + 7),
+  const spendSeries = await loadCampaignSpendSeries(
+    input.storeId,
+    accountIds,
+    input.windowDays + 7,
+  );
+  const activeWithoutSpend = await loadActiveCampaignsWithoutSpend(
+    input.storeId,
+    accountIds,
+    spendSeries,
+    referenceDateKey,
+  );
+  const seriesList = [...spendSeries, ...activeWithoutSpend];
+
+  const [scaleMap, pauseMap, statusMap] = await Promise.all([
     loadLatestScaleEvents(input.storeId, accountIds),
     loadLatestPauseMap(input.storeId, accountIds),
     loadLatestCampaignStatusMap(input.storeId, accountIds),
   ]);
 
-  const referenceDateKey = formatDateInput(new Date());
   const rows: CampaignDecisionRow[] = [];
 
   for (const series of seriesList) {
-    const seriesKey = `${series.platform}:${series.adAccountId}:${series.campaignId}`;
-    if (isPausedCampaignStatus(statusMap.get(seriesKey) ?? "")) continue;
+    const key = seriesKey(series);
+    const latestStatus = statusMap.get(key);
+    const campaignStatus = latestStatus?.status ?? "";
+    const campaignStatusLabel =
+      latestStatus?.statusLabel ||
+      (isPausedCampaignStatus(campaignStatus) ? "Pausada" : "Activa");
+    const isPaused = isPausedCampaignStatus(campaignStatus);
     const spendWindow = buildContiguousSpendWindow(
       series.spendDays,
       input.windowDays,
@@ -396,7 +473,7 @@ export async function buildCampaignDecisionAnalysis(input: {
       ber,
       hasFullWindow,
     );
-    const { status, reason } = decideStatus(
+    let { status, reason } = decideStatus(
       bucket,
       hasFullWindow,
       spendDays,
@@ -408,8 +485,12 @@ export async function buildCampaignDecisionAnalysis(input: {
         lastSpendDateKey: spendWindow.lastSpendDateKey,
       },
     );
+    if (isPaused) {
+      reason = `Estado na API: ${campaignStatusLabel}. ${reason}`;
+      if (status === "scale") status = "maintain";
+    }
 
-    const scaleKey = `${series.platform}:${series.adAccountId}:${series.campaignId}`;
+    const scaleKey = key;
     const lastScale = scaleMap.get(scaleKey);
     const postScale = lastScale
       ? postScaleMetrics(lastScale, series.spendDays)
@@ -456,6 +537,10 @@ export async function buildCampaignDecisionAnalysis(input: {
 
     const adAccountName =
       accountNames.get(series.adAccountId) ?? series.adAccountId;
+    const rowCurrency = series.currency || currency;
+    const dailyBudget =
+      windowDays.find((d) => d.dailyBudget != null && d.dailyBudget > 0)
+        ?.dailyBudget ?? null;
 
     const base: Omit<CampaignDecisionRow, "agentBrief"> = {
       campaignId: series.campaignId,
@@ -474,11 +559,18 @@ export async function buildCampaignDecisionAnalysis(input: {
       spend: m.spend,
       conversions: m.conversions,
       conversionValue: m.conversionValue,
+      impressions: m.impressions,
+      clicks: m.clicks,
       roas: fmtRoas(m.roas),
       roasValue: m.roas,
       berRoas: ber,
       cpc: m.cpc,
       ctr: m.ctr,
+      cpm: m.cpm,
+      currency: rowCurrency,
+      dailyBudget,
+      campaignStatus,
+      campaignStatusLabel,
       reason,
       viewSection,
       pauseCause,

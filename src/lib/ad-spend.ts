@@ -12,8 +12,13 @@ import {
 } from "@/lib/period";
 import type { AdSpendLineStored } from "@/lib/ad-spend-platforms";
 import { AD_PLATFORM_LABELS, adSpendLineTotalBase } from "@/lib/ad-spend-platforms";
-import { isAdSpendDayLockedForApi } from "@/lib/ad-spend-lock";
-import { dayKeysBetweenInTimezone, normalizeStoreTimezone } from "@/lib/store-timezone";
+import { isAdSpendDayLockedForApiForStore } from "@/lib/ad-spend-lock";
+import { isApiSpendDayClosed } from "@/lib/ad-spend-complete";
+import {
+  dateKeyInTimezone,
+  dayKeysBetweenInTimezone,
+  normalizeStoreTimezone,
+} from "@/lib/store-timezone";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { Workspace } from "@/models/Workspace";
@@ -87,6 +92,10 @@ export type AdSpendDayRow = {
   isYesterday: boolean;
   /** Fechado — sync API não volta a escrever (ontem e anteriores). */
   isLocked: boolean;
+  /** Gasto API gravado após 00:00 do dia seguinte (dia completo). */
+  isApiClosed: boolean;
+  /** Sync intraday no mesmo dia civil — valor pode estar incompleto. */
+  isPartialApi: boolean;
   source: "manual" | "api" | null;
   note?: string;
   /** ISO timestamp para detecção de conflitos (optimistic locking). */
@@ -268,7 +277,10 @@ export async function buildAdSpendCalendar(
   baseCurrency = "EUR",
   importStartDate?: Date | null,
   storeCreatedAt?: Date | null,
+  storeTimeZone?: string | null,
 ): Promise<AdSpendDayRow[]> {
+  const tz = normalizeStoreTimezone(storeTimeZone);
+  const todayKey = dateKeyInTimezone(new Date(), tz);
   const { from, to: yesterday } = resolveAdSpendRange(
     importStartDate,
     storeCreatedAt,
@@ -348,6 +360,24 @@ export async function buildAdSpendCalendar(
       const amount = entry != null ? Number(entry.amount) : null;
       const extraFee =
         entry?.extraFee != null ? Number(entry.extraFee) : null;
+      const source = (entry?.source as "manual" | "api" | undefined) ?? null;
+      const apiClosed =
+        source === "api" &&
+        isApiSpendDayClosed(
+          {
+            dateKey,
+            source,
+            amount,
+            updatedAt: entry?.updatedAt ?? null,
+          },
+          todayKey,
+          tz,
+        );
+      const partialApi =
+        source === "api" &&
+        amount != null &&
+        dateKey < todayKey &&
+        !apiClosed;
       return {
         dateKey,
         label: formatDayLabel(dateKey),
@@ -365,8 +395,10 @@ export async function buildAdSpendCalendar(
         baseCurrency,
         hasOrders: orderDays.has(dateKey),
         isYesterday: dateKey === yesterdayKey,
-        isLocked: isAdSpendDayLockedForApi(dateKey),
-        source: entry?.source ?? null,
+        isLocked: isAdSpendDayLockedForApiForStore(dateKey, tz),
+        isApiClosed: apiClosed || source === "manual",
+        isPartialApi: partialApi,
+        source,
         note: entry?.note,
         revisionAt: entry?.revisionAt ?? null,
         updatedAt: entry?.updatedAt ?? null,
@@ -385,6 +417,7 @@ export async function buildStoreAdSpendSummaries(
     name: string;
     importStartDate?: Date | null;
     createdAt?: Date;
+    ianaTimezone?: string | null;
   }>,
   baseCurrency = "EUR",
 ): Promise<StoreAdSpendSummary[]> {
@@ -395,6 +428,7 @@ export async function buildStoreAdSpendSummaries(
         baseCurrency,
         s.importStartDate,
         s.createdAt,
+        s.ianaTimezone,
       );
       const missing = calendar.filter((d) => d.amount === null);
       return {

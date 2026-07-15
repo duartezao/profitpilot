@@ -76,11 +76,18 @@ export type CampaignDecisionRow = {
   spend: number;
   conversions: number;
   conversionValue: number;
+  impressions: number;
+  clicks: number;
   roas: string;
   roasValue: number | null;
   berRoas: number | null;
   cpc: number | null;
   ctr: number | null;
+  cpm: number | null;
+  currency: string;
+  dailyBudget: number | null;
+  campaignStatus: string;
+  campaignStatusLabel: string;
   reason: string;
   agentBrief: string;
   viewSection: CampaignDecisionViewSection;

@@ -141,6 +141,7 @@ export function metricsFromSpendDays(days: SpendDayRow[]) {
     roas,
     cpc: clicks > 0 ? spend / clicks : null,
     ctr: impressions > 0 ? (clicks / impressions) * 100 : null,
+    cpm: impressions > 0 ? (spend / impressions) * 1000 : null,
   };
 }
 

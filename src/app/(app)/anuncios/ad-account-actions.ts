@@ -460,13 +460,10 @@ export async function syncAdAccountsNowAction(
   if (!user?.workspaceId) return { error: "Sessão inválida." };
   assertStoreAccess(user.storeAccess, storeId);
   try {
-    const { Store } = await import("@/models/Store");
-    const { dateKeyInTimezone, normalizeStoreTimezone } =
-      await import("@/lib/store-timezone");
-    const store = await Store.findById(storeId).select("ianaTimezone").lean();
-    const tz = normalizeStoreTimezone(store?.ianaTimezone);
-    const today = dateKeyInTimezone(new Date(), tz);
-    await syncAdAccountsSpendForStore(storeId, { campaignDateKeys: [today] });
+    const { syncMissingAdMetricsForStore } = await import(
+      "@/lib/ad-metrics-backfill"
+    );
+    await syncMissingAdMetricsForStore(storeId, { force: true, maxDays: 45 });
     revalidatePath("/anuncios");
     revalidatePath("/definicoes");
     return { ok: true };

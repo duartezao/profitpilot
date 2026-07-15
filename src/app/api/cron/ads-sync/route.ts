@@ -6,7 +6,7 @@ export const maxDuration = 300;
 
 /**
  * Sync automático de ads (cron Vercel, de 2 em 2 h).
- * Hoje + até 2 dias em falta por loja; throttle 2 h por conta.
+ * Hoje + até 14 dias em falta/parciais por loja; throttle 2 h por conta.
  *
  * Protegido por CRON_SECRET (header `Authorization: Bearer <CRON_SECRET>`).
  */

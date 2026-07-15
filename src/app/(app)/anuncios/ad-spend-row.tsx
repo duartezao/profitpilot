@@ -60,6 +60,12 @@ export function AdSpendRow({
   const missing = row.amount === null;
   const isZero = row.amount === 0;
   const hasExtra = (row.extraFee ?? 0) > 0;
+  const showApiOriginal =
+    row.source === "api" &&
+    row.inputAmount != null &&
+    row.inputAmount > 0 &&
+    row.inputCurrency &&
+    row.inputCurrency !== row.baseCurrency;
   const updatedLabel = row.updatedAt
     ? new Date(row.updatedAt).toLocaleTimeString("pt-PT", {
         hour: "2-digit",
@@ -89,6 +95,8 @@ export function AdSpendRow({
             <span className="text-xs font-medium text-warning">Em falta</span>
           ) : isZero ? (
             <span className="text-xs text-muted-foreground">0€ confirmado</span>
+          ) : row.isPartialApi ? (
+            <span className="text-xs font-medium text-warning">Parcial</span>
           ) : (
             <span className="text-xs text-muted-foreground">Fechado</span>
           )}
@@ -98,7 +106,7 @@ export function AdSpendRow({
           {!missing && row.source && (
             <span className="ml-2 text-xs text-muted-foreground">
               · {row.source === "manual" ? "manual" : "API"}
-              {updatedLabel ? ` · ${updatedLabel}` : ""}
+              {row.isPartialApi && updatedLabel ? ` · ${updatedLabel}` : ""}
             </span>
           )}
         </td>
@@ -108,6 +116,14 @@ export function AdSpendRow({
               <p className="font-medium">
                 {fmt(row.totalAmount, row.baseCurrency)}
               </p>
+              {showApiOriginal && (
+                <p className="text-xs text-muted-foreground">
+                  orig. {fmt(row.inputAmount as number, row.inputCurrency as string)}
+                  {row.inputExtraFee != null && row.inputExtraFee > 0
+                    ? ` · fees ${fmt(row.inputExtraFee, row.inputCurrency as string)}`
+                    : null}
+                </p>
+              )}
               {hasExtra && row.amount != null && (
                 <p className="text-xs text-muted-foreground">
                   ads {fmt(row.amount, row.baseCurrency)}
