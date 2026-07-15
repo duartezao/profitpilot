@@ -14,6 +14,8 @@ import {
   refundsSumBaseExpr,
   cogsSumBaseExpr,
   orderModeCogsSumExpr,
+  cogsSumExprForMode,
+  orderCogsBase,
 } from "@/lib/order-money";
 import {
   mergePaidOrderFilter,
@@ -1030,12 +1032,7 @@ async function aggregateDailyOrders(
       : orderDateMatch(slice)),
   });
 
-  const cogsExpr =
-    cogsMode === "order"
-      ? orderModeCogsSumExpr
-      : cogsMode === "day"
-        ? { $sum: 0 }
-        : cogsSumBaseExpr;
+  const cogsExpr = cogsSumExprForMode(cogsMode);
 
   const rows = await Order.aggregate<{
     _id: string;
@@ -1152,12 +1149,7 @@ async function aggregateDailyOrdersByStore(
           timezone: tz,
         },
       };
-      const cogsExpr =
-        mode === "order"
-          ? orderModeCogsSumExpr
-          : mode === "day"
-            ? { $sum: 0 }
-            : cogsSumBaseExpr;
+      const cogsExpr = cogsSumExprForMode(mode);
 
       const rows = await Order.aggregate<{
         _id: string;
@@ -1825,7 +1817,7 @@ async function buildTopProductsByProfit(
     }),
   )
     .select(
-      "lineItems shipping fees refunded totalPrice subtotal netRevenue amountsBase",
+      "lineItems shipping fees refunded totalPrice subtotal netRevenue amountsBase manualCogs cogs",
     )
     .lean();
 
@@ -1851,7 +1843,7 @@ async function buildTopProductsByProfit(
     for (const li of lines) {
       orderCogsStore += (li.unitCost ?? 0) * (li.quantity ?? 0);
     }
-    const cogsBaseTotal = order.amountsBase?.cogs;
+    const cogsBaseTotal = orderCogsBase(order);
 
     for (const li of lines) {
       const lineRevStore = lineStoreRevenue(li);
@@ -2385,12 +2377,7 @@ export async function buildWorkspaceSummary(
     });
 
     const mode = storeOid ? scopedCogsMode : null;
-    const cogsExpr =
-      mode === "order"
-        ? orderModeCogsSumExpr
-        : mode === "day"
-          ? { $sum: 0 }
-          : cogsSumBaseExpr;
+    const cogsExpr = cogsSumExprForMode(mode);
 
     const [row] = await Order.aggregate<StoreAgg>([
       { $match: match },

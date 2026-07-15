@@ -39,8 +39,9 @@ export function EuCustomsFeeAutoPanel({
             Taxa alfandegária UE (automática)
           </h2>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Win-Win: {summary.feePerOrderEur} € por encomenda enviada para a UE —
-            soma ao COGS desde {summary.effectiveFrom}.
+            Win-Win: {summary.feePerOrderEur} € por encomenda paga
+            para a UE — soma ao COGS desde {summary.effectiveFrom}.
+            Canceladas sem envio são corrigidas no sync.
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm font-medium text-muted-foreground">
@@ -67,9 +68,12 @@ export function EuCustomsFeeAutoPanel({
         <div className="overflow-hidden">
           <div className="space-y-4 border-t border-border px-4 pb-4 pt-4 sm:px-5 sm:pb-5">
             <p className="text-sm text-muted-foreground">
-              Calculado automaticamente a partir das encomendas pagas da loja.
-              O mercado UE vem do <strong className="font-medium text-foreground">país das sessões</strong>{" "}
-              em Definições (ex. Bélgica = todas as encomendas contam para a taxa).
+              Conta automaticamente nas encomendas pagas (report do dia). Se
+              forem canceladas ou reembolsadas{" "}
+              <strong className="font-medium text-foreground">sem envio</strong>,
+              o sync remove a taxa. O mercado UE vem do{" "}
+              <strong className="font-medium text-foreground">país das sessões</strong>{" "}
+              em Definições (ex. Bélgica = todas as encomendas pagas elegíveis).
               Não precisas de registar faturas do fornecedor.
             </p>
 

@@ -33,6 +33,12 @@ const OrderSchema = new Schema(
     currency: { type: String, default: "EUR" },
     financialStatus: { type: String },
 
+    /** displayFulfillmentStatus Shopify (normalizado). */
+    fulfillmentStatus: { type: String, trim: true, default: null, index: true },
+
+    /** cancelledAt da Shopify — sync reverte COGS/taxa UE se cancelada sem envio. */
+    cancelledAt: { type: Date, default: null, index: true },
+
     // Valores monetários (na moeda da loja).
     totalPrice: { type: Number, default: 0 },
     subtotal: { type: Number, default: 0 },

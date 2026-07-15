@@ -35,7 +35,7 @@ import {
   shippingSumBaseExpr,
   feesSumBaseExpr,
   refundsSumBaseExpr,
-  cogsSumBaseExpr,
+  cogsSumExprForMode,
 } from "@/lib/order-money";
 import { calcNetProfit, calcPoas } from "@/lib/profit";
 import { sumAdSpendForPeriod } from "@/lib/ad-spend";
@@ -278,6 +278,8 @@ export async function buildWorkspaceAlerts(
       ? orderDateMatchInTimezone(healthSlice, storeTz)
       : orderDateMatch(healthSlice);
 
+    const cogsMode = (store.cogsMode ?? "shopify") as CogsMode;
+
     const [agg] = await Order.aggregate<{
       revenue: number;
       cogs: number;
@@ -296,7 +298,7 @@ export async function buildWorkspaceAlerts(
         $group: {
           _id: null,
           revenue: netRevenueSumBaseExpr,
-          cogs: cogsSumBaseExpr,
+          cogs: cogsSumExprForMode(cogsMode),
           shipping: shippingSumBaseExpr,
           fees: feesSumBaseExpr,
           refunds: refundsSumBaseExpr,

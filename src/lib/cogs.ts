@@ -20,6 +20,7 @@ import {
 } from "@/lib/line-snapshots";
 import { buildOrderAmountsBase } from "@/lib/order-money";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
+import { shouldRevertUnshippedProductCogs } from "@/lib/order-fulfillment-status";
 
 export type CogsPeriodSlice = {
   start: Date;
@@ -852,7 +853,7 @@ export async function assimilatePendingCogsForStore(
 
     const orders = await Order.find(filter)
       .select(
-        "_id orderDate lineItems subtotal totalPrice refunded netRevenue shipping fees cogs currency manualCogs",
+        "_id orderDate financialStatus fulfillmentStatus cancelledAt lineItems subtotal totalPrice refunded netRevenue shipping fees cogs currency manualCogs",
       )
       .sort({ _id: 1 })
       .limit(batchSize)
@@ -864,6 +865,16 @@ export async function assimilatePendingCogsForStore(
 
     for (const order of orders) {
       lastId = order._id;
+      // Não repor COGS em canceladas/reembolsadas sem envio (corrigidas no sync).
+      if (
+        shouldRevertUnshippedProductCogs({
+          fulfillmentStatus: order.fulfillmentStatus,
+          financialStatus: order.financialStatus,
+          cancelledAt: order.cancelledAt,
+        })
+      ) {
+        continue;
+      }
       const orderDate = new Date(order.orderDate);
       let changed = false;
       const lineItems = (order.lineItems ?? []).map((li) => {

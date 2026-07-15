@@ -11,6 +11,7 @@ import {
   orderNetRevenueBase,
   orderProfitBase,
   orderRefundedBase,
+  orderCogsBase,
 } from "@/lib/order-money";
 import {
   mergePaidOrderFilter,
@@ -165,7 +166,7 @@ export async function listStoreOrders(
     .sort({ orderDate: -1 })
     .limit(limit)
     .select(
-      "name orderDate financialStatus totalPrice subtotal netRevenue cogs shipping fees refunded manualCogs amountsBase",
+      "name orderDate financialStatus fulfillmentStatus totalPrice subtotal netRevenue cogs shipping fees refunded manualCogs amountsBase",
     )
     .lean();
 
@@ -247,7 +248,7 @@ export async function listStoreOrdersForExport(
     .sort({ orderDate: -1 })
     .limit(limit)
     .select(
-      "name orderDate financialStatus cogs shipping fees refunded manualCogs amountsBase netRevenue subtotal totalPrice",
+      "name orderDate financialStatus fulfillmentStatus cogs shipping fees refunded manualCogs amountsBase netRevenue subtotal totalPrice",
     )
     .lean();
 
@@ -258,7 +259,7 @@ export async function listStoreOrdersForExport(
       orderDateIso: o.orderDate ? new Date(o.orderDate).toISOString() : "",
       financialStatus: statusLabel(o.financialStatus),
       revenue: counts ? orderNetRevenueBase(o) : 0,
-      cogs: counts ? (o.amountsBase?.cogs ?? o.cogs ?? 0) : 0,
+      cogs: counts ? orderCogsBase(o) : 0,
       shipping: counts ? (o.amountsBase?.shipping ?? o.shipping ?? 0) : 0,
       fees: counts ? (o.amountsBase?.fees ?? o.fees ?? 0) : 0,
       profit: counts ? orderProfitBase(o) : 0,
@@ -311,7 +312,7 @@ export async function listStoreRefunds(
       }),
     )
       .select(
-        "financialStatus totalPrice subtotal netRevenue refunded amountsBase cogs shipping fees manualCogs",
+        "financialStatus fulfillmentStatus totalPrice subtotal netRevenue refunded amountsBase cogs shipping fees manualCogs",
       )
       .lean(),
     Order.find({
@@ -325,7 +326,7 @@ export async function listStoreRefunds(
       .sort({ orderDate: -1 })
       .limit(limit)
       .select(
-        "name orderDate financialStatus totalPrice subtotal netRevenue cogs shipping fees refunded manualCogs amountsBase",
+        "name orderDate financialStatus fulfillmentStatus totalPrice subtotal netRevenue cogs shipping fees refunded manualCogs amountsBase",
       )
       .lean(),
   ]);

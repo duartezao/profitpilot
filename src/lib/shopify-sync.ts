@@ -57,6 +57,7 @@ import {
   normalizeOrderFinancialStatus,
   orderShouldBeRemoved,
 } from "@/lib/order-financial-status";
+import { normalizeOrderFulfillmentStatus, shouldRevertUnshippedProductCogs } from "@/lib/order-fulfillment-status";
 import { snapshotYesterdayMetrics, reconcileDailyMetricsForStore } from "@/lib/daily-metrics-snapshot";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import { Payout } from "@/models/Payout";
@@ -1037,6 +1038,8 @@ type OrderSetPayload = {
   orderDate: Date;
   currency: string;
   financialStatus: string | null;
+  fulfillmentStatus: string | null;
+  cancelledAt: Date | null;
   totalPrice: number;
   subtotal: number;
   netRevenue: number;
@@ -1107,6 +1110,8 @@ function orderSetMatchesExisting(
     orderDate?: Date;
     currency?: string | null;
     financialStatus?: string | null;
+    fulfillmentStatus?: string | null;
+    cancelledAt?: Date | null;
     totalPrice?: number;
     subtotal?: number;
     netRevenue?: number;
@@ -1141,6 +1146,19 @@ function orderSetMatchesExisting(
   ) {
     return false;
   }
+  if (
+    (existing.fulfillmentStatus ?? "").toLowerCase() !==
+    (payload.fulfillmentStatus ?? "").toLowerCase()
+  ) {
+    return false;
+  }
+  const existingCancelled = existing.cancelledAt
+    ? new Date(existing.cancelledAt).getTime()
+    : 0;
+  const payloadCancelled = payload.cancelledAt
+    ? payload.cancelledAt.getTime()
+    : 0;
+  if (existingCancelled !== payloadCancelled) return false;
   if (!moneyEq(existing.totalPrice ?? 0, payload.totalPrice)) return false;
   if (!moneyEq(existing.subtotal ?? 0, payload.subtotal)) return false;
   if (!moneyEq(existing.netRevenue ?? 0, payload.netRevenue)) return false;
@@ -1188,7 +1206,9 @@ export async function syncOrdersPage(
         id
         name
         createdAt
+        cancelledAt
         displayFinancialStatus
+        displayFulfillmentStatus
         currentTotalPriceSet { shopMoney { amount currencyCode } }
         subtotalPriceSet { shopMoney { amount } }
         totalDiscountsSet { shopMoney { amount } }
@@ -1214,7 +1234,9 @@ export async function syncOrdersPage(
     id: string;
     name: string;
     createdAt: string;
+    cancelledAt: string | null;
     displayFinancialStatus: string | null;
+    displayFulfillmentStatus: string | null;
     currentTotalPriceSet: Money;
     subtotalPriceSet: Money;
     totalDiscountsSet: Money;
@@ -1253,7 +1275,7 @@ export async function syncOrdersPage(
       shopifyId: { $in: ids },
     })
       .select(
-        "shopifyId name orderDate currency financialStatus totalPrice subtotal netRevenue discounts shipping tax refunded cogs fees lineItems amountsBase manualCogs shippingCountryCode",
+        "shopifyId name orderDate currency financialStatus fulfillmentStatus cancelledAt totalPrice subtotal netRevenue discounts shipping tax refunded cogs fees lineItems amountsBase manualCogs shippingCountryCode",
       )
       .lean<Array<{
         shopifyId: string;
@@ -1261,6 +1283,8 @@ export async function syncOrdersPage(
         orderDate?: Date;
         currency?: string | null;
         financialStatus?: string | null;
+        fulfillmentStatus?: string | null;
+        cancelledAt?: Date | null;
         totalPrice?: number;
         subtotal?: number;
         netRevenue?: number;
@@ -1314,6 +1338,9 @@ export async function syncOrdersPage(
 
     for (const o of conn.nodes) {
       const finStatus = normalizeOrderFinancialStatus(o.displayFinancialStatus);
+      const fulfillmentStatus = normalizeOrderFulfillmentStatus(
+        o.displayFulfillmentStatus,
+      );
       if (orderShouldBeRemoved(finStatus)) {
         ops.push({
           deleteOne: {
@@ -1327,15 +1354,22 @@ export async function syncOrdersPage(
       const existing = existingByShopifyId.get(o.id);
       const isNew = !existing;
       const prevLine = existingLineMap.get(o.id);
+      const revertCogs = shouldRevertUnshippedProductCogs({
+        fulfillmentStatus,
+        financialStatus: finStatus,
+        cancelledAt: o.cancelledAt,
+      });
       const lineItems = o.lineItems.nodes.map((li) => {
         const variantId = li.variant?.id ?? "";
         const prev = prevLine?.get(variantId);
-        const unitCost = applyLineUnitCost(
-          variantId,
-          orderDate,
-          prev?.unitCost ?? 0,
-          resolveCost,
-        );
+        const unitCost = revertCogs
+          ? 0
+          : applyLineUnitCost(
+              variantId,
+              orderDate,
+              prev?.unitCost ?? 0,
+              resolveCost,
+            );
         const apiPrice = num(li.originalUnitPriceSet?.shopMoney.amount);
         const catalogPrice = variantId
           ? resolvePrice(variantId, orderDate)
@@ -1365,7 +1399,9 @@ export async function syncOrdersPage(
       const netRevenue = orderNetRevenue({ subtotal, totalPrice, refunded });
       const feesForBase = existingFees.get(o.id) ?? 0;
 
-      const manualCogs = existingManualCogs.get(o.id) ?? null;
+      const manualCogs = revertCogs
+        ? null
+        : (existingManualCogs.get(o.id) ?? null);
       const cogsForBase = manualCogs != null ? manualCogs : cogs;
       const amountsBase = await buildOrderAmountsBase(
         {
@@ -1395,6 +1431,8 @@ export async function syncOrdersPage(
         orderDate,
         currency,
         financialStatus: finStatus || null,
+        fulfillmentStatus: fulfillmentStatus || null,
+        cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : null,
         totalPrice,
         subtotal,
         netRevenue,
@@ -1431,6 +1469,8 @@ export async function syncOrdersPage(
               orderDate: payload.orderDate,
               currency: payload.currency,
               financialStatus: payload.financialStatus,
+              fulfillmentStatus: payload.fulfillmentStatus,
+              cancelledAt: payload.cancelledAt,
               totalPrice: payload.totalPrice,
               subtotal: payload.subtotal,
               netRevenue: payload.netRevenue,
@@ -1442,6 +1482,7 @@ export async function syncOrdersPage(
               lineItems: payload.lineItems,
               amountsBase: payload.amountsBase,
               shippingCountryCode: payload.shippingCountryCode,
+              ...(revertCogs ? { manualCogs: null } : {}),
             },
             $setOnInsert: { fees: 0, feesSource: null },
           },
