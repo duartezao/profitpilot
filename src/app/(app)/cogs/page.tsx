@@ -13,7 +13,11 @@ import {
   listOrdersForCogsPanel,
 } from "@/lib/manual-cogs";
 import { appliesAutoEuCustomsFees } from "@/lib/eu-category-fees";
-import { COGS_MODE_LABELS, type CogsMode } from "@/lib/cogs-modes";
+import {
+  COGS_MODE_LABELS,
+  tracksVariantCogs,
+  type CogsMode,
+} from "@/lib/cogs-modes";
 import { CostRow, type CostRowData } from "./cost-row";
 import { CogsCsvImport } from "./cogs-csv-import";
 import { OrderCogsPanel } from "./order-cogs-panel";
@@ -53,10 +57,16 @@ export default async function CogsPage({
       },
     ]),
   );
-  const storeIds = scoped ? [scoped._id] : stores.map((s) => s._id);
   const activeMode = scoped
     ? ((scoped.cogsMode ?? "shopify") as CogsMode)
     : null;
+  const variantStoreIds = scoped
+    ? tracksVariantCogs(activeMode)
+      ? [scoped._id]
+      : []
+    : stores
+        .filter((s) => tracksVariantCogs(s.cogsMode))
+        .map((s) => s._id);
 
   const baseCurrency = scoped
     ? await getBaseCurrency(scoped.workspaceId)
@@ -77,17 +87,16 @@ export default async function CogsPage({
   const showEuCustomsFeeInfo =
     scoped && activeMode && appliesAutoEuCustomsFees(activeMode);
 
-  const showVariantTable =
-    !activeMode || activeMode === "shopify" || activeMode === "variant";
+  const showVariantTable = variantStoreIds.length > 0;
 
   const soldMissing = showVariantTable
-    ? await listSoldVariantsMissingCost(storeIds)
+    ? await listSoldVariantsMissingCost(variantStoreIds)
     : [];
 
   const costDocs =
     soldMissing.length > 0
       ? await ProductCost.find({
-          storeId: { $in: storeIds },
+          storeId: { $in: variantStoreIds },
           variantId: { $in: soldMissing.map((s) => s.variantId) },
         }).lean()
       : [];
@@ -145,7 +154,9 @@ export default async function CogsPage({
               ? "Preenche o COGS total por dia civil (fuso da loja)."
               : scoped
                 ? "Produtos vendidos nesta loja sem custo definido."
-                : "Produtos vendidos sem custo definido."}
+                : showVariantTable
+                  ? "Produtos vendidos sem custo (lojas Shopify ou por variante)."
+                  : "Selecciona uma loja para gerir COGS por dia ou por encomenda."}
         </p>
         {showEuCustomsFeeInfo && scoped && (
           <p className="mt-2 text-sm text-muted-foreground">
@@ -220,7 +231,7 @@ export default async function CogsPage({
         variantTable={
           rows.length === 0 ? (
             <div className="p-12 text-center text-sm text-muted-foreground">
-              {storeIds.length === 0
+              {variantStoreIds.length === 0
                 ? "Liga uma loja e sincroniza para ver produtos vendidos."
                 : "Não há vendas sem custo. O lucro usa o COGS registado."}
             </div>

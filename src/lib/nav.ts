@@ -20,6 +20,7 @@ import {
   Layers,
   FlaskConical,
   ListTodo,
+  Tags,
   type LucideIcon,
 } from "lucide-react";
 import type { AppViewMode } from "@/lib/app-view-mode";
@@ -54,6 +55,7 @@ export const storeNavItems: NavItem[] = [
   { label: "Lucro & Finanças", href: "/financas", icon: LineChart },
   { label: "Decisão", href: "/decisao", icon: Scale },
   { label: "Produtos", href: "/produtos", icon: Package },
+  { label: "Vendas por coleção", href: "/colecoes-vendas", icon: Tags },
   { label: "Pedidos", href: "/pedidos", icon: ShoppingBag },
   { label: "Anúncios", href: "/anuncios", icon: Megaphone },
   { label: "Payouts", href: "/payouts", icon: Banknote },
@@ -81,6 +83,7 @@ export const workspaceOnlyPaths = new Set(["/lojas"]);
 export const storeRequiredPaths = new Set([
   "/metricas",
   "/produtos",
+  "/colecoes-vendas",
   "/pedidos",
   "/reembolsos",
   "/chargebacks",
@@ -117,6 +120,7 @@ export function navGroupsForStoreScope(
       label: "Operação",
       items: pick(
         "/produtos",
+        "/colecoes-vendas",
         "/pedidos",
         "/anuncios",
         "/payouts",

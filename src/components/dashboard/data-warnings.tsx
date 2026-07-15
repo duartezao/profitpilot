@@ -30,8 +30,8 @@ function DataWarningsInner({
   const cogsText =
     missingCogsMessage ||
     (missingCogsCount === 1
-      ? "1 produto sem COGS neste período."
-      : `${missingCogsCount} produtos sem COGS neste período.`);
+      ? "1 entrada de COGS em falta neste período."
+      : `${missingCogsCount} entradas de COGS em falta neste período.`);
 
   return (
     <div className="space-y-1">

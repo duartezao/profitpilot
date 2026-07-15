@@ -1584,7 +1584,7 @@ async function buildStoreDailyMetrics(
       operatingExpenses: dayOpEx,
     });
     if (missingCogs > 0) {
-      profitTitle += ` · ${missingCogsNote(missingCogs)}`;
+      profitTitle += ` · ${missingCogsNote(missingCogs, cogsMode ?? undefined)}`;
     }
     return {
       dateKey,

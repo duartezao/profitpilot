@@ -27,6 +27,9 @@ import {
   syncOrdersPage,
   syncPayouts,
   syncSoldProductCostsPage,
+  syncProductCatalogPage,
+  syncProductCatalogForVariantIds,
+  syncAllSoldProductCatalog,
   backfillOrderShippingCountriesForStore,
 } from "@/lib/shopify-sync";
 
@@ -202,6 +205,17 @@ function orderProgress(pagesDone: number, incremental: boolean): number {
   return Math.min(82, 10 + pagesDone * 1.2);
 }
 
+async function needsProductCatalogSync(
+  storeId: import("mongoose").Types.ObjectId,
+  incremental: boolean,
+  pendingVariantIds?: string[],
+): Promise<boolean> {
+  if (incremental) {
+    return (pendingVariantIds?.length ?? 0) > 0;
+  }
+  return (await countDistinctSoldVariants(storeId)) > 0;
+}
+
 async function needsSoldProductCostSync(
   storeId: import("mongoose").Types.ObjectId,
   cogsMode: CogsMode | null | undefined,
@@ -218,9 +232,7 @@ async function needsSoldProductCostSync(
     );
     return ids.length > 0;
   }
-  if ((await listVariantIdsNeedingCostSync(storeId, 1)).length > 0) return true;
-  const sold = await countDistinctSoldVariants(storeId);
-  return sold > 0;
+  return (await listVariantIdsNeedingCostSync(storeId, 1)).length > 0;
 }
 
 function formatCostSyncMessage(
@@ -337,6 +349,7 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
     orderCursor: null,
     productCursor: null,
     productRefreshOffset: 0,
+    catalogRefreshOffset: 0,
     pendingCostVariantIds: [],
     pendingCostVariantOffset: 0,
     sessionRangeIndex: 0,
@@ -456,86 +469,141 @@ export async function runChunkedSyncStep(
     const incremental = isIncrementalSync(freshStore) && !ordersFullResync;
 
     if (phase === "products") {
-      if (!syncsShopifyProductCosts(freshStore.cogsMode)) {
-        await patchSyncState(storeId, {
-          phase: "post_orders_backfill",
-          progress: 84,
-          message: "A finalizar encomendas…",
-        });
-        return getChunkedSyncStatus(storeId);
-      }
-
-      const refreshOffset = store.syncState.productRefreshOffset ?? 0;
+      const syncCosts = syncsShopifyProductCosts(freshStore.cogsMode);
+      const catalogOffset = store.syncState.catalogRefreshOffset ?? 0;
+      let variantsChecked = store.syncState.productsImported ?? 0;
       const pendingIds = store.syncState.pendingCostVariantIds ?? [];
-      const pendingOffset = store.syncState.pendingCostVariantOffset ?? 0;
-      const prevProductsImported = store.syncState.productsImported ?? 0;
       const usePendingRestrict = incremental && pendingIds.length > 0;
-      const page = await syncSoldProductCostsPage(
-        freshStore,
-        domain,
-        accessToken,
-        {
-          refreshOffset,
+      let costWorkRemaining = false;
+      if (syncCosts && usePendingRestrict) {
+        const pre = await filterVariantIdsNeedingCostSync(
+          freshStore._id,
+          pendingIds,
+          1,
+        );
+        costWorkRemaining = pre.total > 0;
+      } else if (syncCosts && !incremental) {
+        costWorkRemaining =
+          (await listVariantIdsNeedingCostSync(freshStore._id, 1)).length > 0;
+      }
+
+      if (syncCosts && costWorkRemaining) {
+        const refreshOffset = store.syncState.productRefreshOffset ?? 0;
+        const pendingOffset = store.syncState.pendingCostVariantOffset ?? 0;
+        const prevProductsImported = store.syncState.productsImported ?? 0;
+        const page = await syncSoldProductCostsPage(
+          freshStore,
+          domain,
+          accessToken,
+          {
+            refreshOffset,
+            incremental,
+            deferAssimilate: true,
+            batchSize: CHUNKED_SOLD_VARIANT_BATCH,
+            ...(usePendingRestrict
+              ? {
+                  restrictVariantIds: pendingIds,
+                  restrictOffset: pendingOffset,
+                }
+              : {}),
+          },
+        );
+
+        let costTotal: number;
+        if (usePendingRestrict) {
+          costTotal = page.pendingTotal ?? pendingIds.length;
+          variantsChecked = page.pendingDone ?? pendingOffset + page.count;
+        } else {
+          const soldTotal = await countDistinctSoldVariants(freshStore._id);
+          costTotal = soldTotal;
+          variantsChecked =
+            page.mode === "new"
+              ? prevProductsImported + page.count
+              : page.mode === "refresh" && !incremental
+                ? page.nextRefreshOffset
+                : prevProductsImported + page.count;
+          variantsChecked = Math.min(variantsChecked, soldTotal);
+        }
+
+        const costMsg = formatCostSyncMessage(
+          page.mode,
           incremental,
-          deferAssimilate: true,
-          batchSize: CHUNKED_SOLD_VARIANT_BATCH,
-          ...(usePendingRestrict
-            ? {
-                restrictVariantIds: pendingIds,
-                restrictOffset: pendingOffset,
-              }
-            : {}),
-        },
-      );
+          variantsChecked,
+          costTotal,
+          page.count,
+        );
 
-      let costTotal: number;
-      let variantsChecked: number;
-      if (usePendingRestrict) {
-        costTotal = page.pendingTotal ?? pendingIds.length;
-        variantsChecked = page.pendingDone ?? pendingOffset + page.count;
-      } else {
-        const soldTotal = await countDistinctSoldVariants(freshStore._id);
-        costTotal = soldTotal;
-        variantsChecked =
-          page.mode === "new"
-            ? prevProductsImported + page.count
-            : page.mode === "refresh" && !incremental
+        if (page.hasMore) {
+          await patchSyncState(storeId, {
+            phase: "products",
+            productsImported: variantsChecked,
+            productRefreshOffset: usePendingRestrict ? 0 : page.nextRefreshOffset,
+            pendingCostVariantOffset: usePendingRestrict
               ? page.nextRefreshOffset
-              : prevProductsImported + page.count;
-        variantsChecked = Math.min(variantsChecked, soldTotal);
-      }
+              : 0,
+            progress: Math.min(
+              80,
+              costTotal > 0
+                ? 72 + (variantsChecked / costTotal) * 8
+                : 76,
+            ),
+            message: costMsg,
+          });
+          return getChunkedSyncStatus(storeId);
+        }
 
-      const costMsg = formatCostSyncMessage(
-        page.mode,
-        incremental,
-        variantsChecked,
-        costTotal,
-        page.count,
-      );
+        if (assimilatesCogsOnSync(freshStore.cogsMode)) {
+          await assimilatePendingCogsForStore(freshStore._id);
+        }
+        await assimilatePendingPricesForStore(freshStore._id);
 
-      if (page.hasMore) {
         await patchSyncState(storeId, {
-          phase: "products",
           productsImported: variantsChecked,
-          productRefreshOffset: usePendingRestrict ? 0 : page.nextRefreshOffset,
-          pendingCostVariantOffset: usePendingRestrict
-            ? page.nextRefreshOffset
-            : 0,
-          progress: Math.min(
-            83,
-            costTotal > 0
-              ? 72 + (variantsChecked / costTotal) * 11
-              : 80,
-          ),
-          message: costMsg,
+          productRefreshOffset: 0,
+          pendingCostVariantIds: [],
+          pendingCostVariantOffset: 0,
         });
-        return getChunkedSyncStatus(storeId);
       }
 
-      if (assimilatesCogsOnSync(freshStore.cogsMode)) {
-        await assimilatePendingCogsForStore(freshStore._id);
+      const soldTotal = await countDistinctSoldVariants(freshStore._id);
+
+      if (incremental) {
+        if (pendingIds.length > 0) {
+          await syncProductCatalogForVariantIds(
+            freshStore,
+            domain,
+            accessToken,
+            pendingIds,
+          );
+        }
+      } else {
+        const catalogPage = await syncProductCatalogPage(
+          freshStore,
+          domain,
+          accessToken,
+          {
+            offset: catalogOffset,
+            batchSize: CHUNKED_SOLD_VARIANT_BATCH,
+          },
+        );
+        const catalogChecked = catalogPage.nextOffset;
+
+        if (catalogPage.hasMore) {
+          await patchSyncState(storeId, {
+            phase: "products",
+            catalogRefreshOffset: catalogPage.nextOffset,
+            progress: Math.min(
+              83,
+              soldTotal > 0 ? 80 + (catalogChecked / soldTotal) * 3 : 82,
+            ),
+            message:
+              soldTotal > 0
+                ? `Coleções Shopify — ${catalogChecked}/${soldTotal}…`
+                : "A importar coleções Shopify…",
+          });
+          return getChunkedSyncStatus(storeId);
+        }
       }
-      await assimilatePendingPricesForStore(freshStore._id);
 
       await patchSyncState(storeId, {
         phase: "post_orders_backfill",
@@ -543,6 +611,7 @@ export async function runChunkedSyncStep(
         message: "A finalizar encomendas…",
         productsImported: variantsChecked,
         productRefreshOffset: 0,
+        catalogRefreshOffset: 0,
         pendingCostVariantIds: [],
         pendingCostVariantOffset: 0,
       });
@@ -600,6 +669,12 @@ export async function runChunkedSyncStep(
         incremental && !ordersFullResync,
         pendingList,
       );
+      const wantProductCatalog = await needsProductCatalogSync(
+        freshStore._id,
+        incremental && !ordersFullResync,
+        pendingList,
+      );
+      const enterProductsPhase = wantProductCosts || wantProductCatalog;
 
       if (ordersFullResync) {
         await restoreStoreOrdersResyncManualCogs(
@@ -609,12 +684,12 @@ export async function runChunkedSyncStep(
       }
 
       await patchSyncState(storeId, {
-        phase: wantProductCosts ? "products" : "post_orders_backfill",
+        phase: enterProductsPhase ? "products" : "post_orders_backfill",
         orderCursor: null,
         orderPagesDone: pagesDone,
         ordersImported,
         ordersUpdated,
-        progress: wantProductCosts
+        progress: enterProductsPhase
           ? ordersFullResync
             ? 72
             : incremental
@@ -631,12 +706,17 @@ export async function runChunkedSyncStep(
             ? incremental
               ? "A verificar custos novos (cor/tamanho)…"
               : "A importar custos vendidos (cor/tamanho)…"
-            : incremental
-              ? "A finalizar atualização…"
-              : "A finalizar encomendas…",
+            : wantProductCatalog
+              ? incremental
+                ? "A actualizar coleções (produtos novos)…"
+                : "A importar coleções Shopify…"
+              : incremental
+                ? "A finalizar atualização…"
+                : "A finalizar encomendas…",
         productsImported: 0,
         productRefreshOffset: 0,
-        pendingCostVariantIds: pendingList,
+        catalogRefreshOffset: 0,
+        pendingCostVariantIds: enterProductsPhase ? pendingList : [],
         pendingCostVariantOffset: 0,
       });
       return getChunkedSyncStatus(storeId);
@@ -670,6 +750,27 @@ export async function runChunkedSyncStep(
         await assimilatePendingCogsForStore(freshStore._id);
       }
       await assimilatePendingPricesForStore(freshStore._id);
+
+      // Rotação leve: refresca coleções de ~40 variantes vendidas por sync
+      // (captura movimentos/apagamentos na Shopify sem varrer tudo).
+      const soldForCatalog = await countDistinctSoldVariants(freshStore._id);
+      if (soldForCatalog > 0) {
+        const rotateOffset = freshStore.catalogRefreshOffset ?? 0;
+        const catRotate = await syncProductCatalogPage(
+          freshStore,
+          domain,
+          accessToken,
+          { offset: rotateOffset, batchSize: 40 },
+        );
+        await Store.updateOne(
+          { _id: freshStore._id },
+          {
+            $set: {
+              catalogRefreshOffset: catRotate.hasMore ? catRotate.nextOffset : 0,
+            },
+          },
+        );
+      }
 
       await patchSyncState(storeId, {
         phase: "post_orders_fees",

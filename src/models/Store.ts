@@ -38,6 +38,8 @@ const SyncStateSchema = new Schema(
     pendingCostVariantIds: { type: [String], default: [] },
     /** Offset no lote de pendingCostVariantIds (sync incremental UI). */
     pendingCostVariantOffset: { type: Number, default: 0 },
+    /** Variantes vendidas já processadas na fase de coleções (ProductCatalog). */
+    catalogRefreshOffset: { type: Number, default: 0 },
     sessionRangeIndex: { type: Number, default: 0 },
     orderPagesDone: { type: Number, default: 0 },
     ordersImported: { type: Number, default: 0 },

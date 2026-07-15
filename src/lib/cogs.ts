@@ -592,8 +592,8 @@ export const SOLD_VARIANT_BATCH = 50;
  * Usa $lookup + $limit na BD — não carrega todas as variantes em memória.
  */
 /**
- * Filtra candidatos (ex. variantes de encomendas novas) aos que ainda precisam de custo Shopify.
- * Evita varrer todo o histórico de vendas no sync incremental.
+ * Filtra candidatos (ex. variantes de encomendas novas) aos que ainda não têm
+ * registo em ProductCost (sync Shopify feito pelo menos uma vez).
  */
 export async function filterVariantIdsNeedingCostSync(
   storeId: Types.ObjectId,
@@ -608,16 +608,11 @@ export async function filterVariantIdsNeedingCostSync(
     storeId,
     variantId: { $in: unique },
   })
-    .select("variantId unitCost manualCost")
+    .select("variantId")
     .lean();
 
-  const resolved = new Set(
-    catalog
-      .filter((c) => c.manualCost != null || num(c.unitCost) > 0)
-      .map((c) => String(c.variantId)),
-  );
-
-  const needing = unique.filter((id) => !resolved.has(id));
+  const existing = new Set(catalog.map((c) => String(c.variantId)));
+  const needing = unique.filter((id) => !existing.has(id));
   return {
     ids: needing.slice(offset, offset + limit),
     total: needing.length,
@@ -653,41 +648,14 @@ export async function listVariantIdsNeedingCostSync(
               },
             },
           },
-          {
-            $project: {
-              resolved: {
-                $or: [
-                  { $gt: [{ $ifNull: ["$unitCost", 0] }, 0] },
-                  {
-                    $in: [
-                      { $type: "$manualCost" },
-                      ["double", "int", "long", "decimal"],
-                    ],
-                  },
-                ],
-              },
-            },
-          },
+          { $limit: 1 },
         ],
         as: "costDoc",
       },
     },
     {
       $match: {
-        $expr: {
-          $eq: [
-            {
-              $size: {
-                $filter: {
-                  input: "$costDoc",
-                  as: "c",
-                  cond: "$$c.resolved",
-                },
-              },
-            },
-            0,
-          ],
-        },
+        $expr: { $eq: [{ $size: "$costDoc" }, 0] },
       },
     },
     { $sort: { _id: 1 } },

@@ -20,6 +20,16 @@ export function CogsView({
     return <div className="space-y-5">{main}</div>;
   }
 
+  if (mode === null) {
+    return (
+      <PageTabCard>
+        <p className="text-sm text-muted-foreground">
+          Selecciona uma loja no filtro para gerir COGS por dia ou por encomenda.
+        </p>
+      </PageTabCard>
+    );
+  }
+
   const tabs: PageTab[] = [
     {
       id: "sem-custo",
