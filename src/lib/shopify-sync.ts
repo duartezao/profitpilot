@@ -1210,8 +1210,8 @@ export async function syncOrdersPage(
         displayFinancialStatus
         displayFulfillmentStatus
         currentTotalPriceSet { shopMoney { amount currencyCode } }
-        subtotalPriceSet { shopMoney { amount } }
-        totalDiscountsSet { shopMoney { amount } }
+        currentSubtotalPriceSet { shopMoney { amount } }
+        currentTotalDiscountsSet { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
         totalShippingPriceSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
@@ -1219,6 +1219,7 @@ export async function syncOrdersPage(
         lineItems(first: 100) {
           nodes {
             quantity
+            currentQuantity
             title
             variant { id }
             product { id }
@@ -1238,8 +1239,8 @@ export async function syncOrdersPage(
     displayFinancialStatus: string | null;
     displayFulfillmentStatus: string | null;
     currentTotalPriceSet: Money;
-    subtotalPriceSet: Money;
-    totalDiscountsSet: Money;
+    currentSubtotalPriceSet: Money;
+    currentTotalDiscountsSet: Money;
     totalRefundedSet: Money;
     totalShippingPriceSet: Money;
     totalTaxSet: Money;
@@ -1247,6 +1248,7 @@ export async function syncOrdersPage(
     lineItems: {
       nodes: Array<{
         quantity: number;
+        currentQuantity: number | null;
         title: string;
         variant: { id: string } | null;
         product: { id: string } | null;
@@ -1359,41 +1361,46 @@ export async function syncOrdersPage(
         financialStatus: finStatus,
         cancelledAt: o.cancelledAt,
       });
-      const lineItems = o.lineItems.nodes.map((li) => {
-        const variantId = li.variant?.id ?? "";
-        const prev = prevLine?.get(variantId);
-        const unitCost = revertCogs
-          ? 0
-          : applyLineUnitCost(
-              variantId,
-              orderDate,
-              prev?.unitCost ?? 0,
-              resolveCost,
-            );
-        const apiPrice = num(li.originalUnitPriceSet?.shopMoney.amount);
-        const catalogPrice = variantId
-          ? resolvePrice(variantId, orderDate)
-          : 0;
-        const unitPrice = applyLineUnitPrice(
-          prev?.unitPrice ?? 0,
-          apiPrice > 0 ? apiPrice : catalogPrice,
-        );
-        return {
-          productId: li.product?.id,
-          variantId,
-          title: li.title,
-          quantity: num(li.quantity),
-          unitPrice,
-          unitCost,
-        };
-      });
+      const lineItems = o.lineItems.nodes
+        .map((li) => {
+          const qty =
+            li.currentQuantity != null ? num(li.currentQuantity) : num(li.quantity);
+          if (qty <= 0) return null;
+          const variantId = li.variant?.id ?? "";
+          const prev = prevLine?.get(variantId);
+          const unitCost = revertCogs
+            ? 0
+            : applyLineUnitCost(
+                variantId,
+                orderDate,
+                prev?.unitCost ?? 0,
+                resolveCost,
+              );
+          const apiPrice = num(li.originalUnitPriceSet?.shopMoney.amount);
+          const catalogPrice = variantId
+            ? resolvePrice(variantId, orderDate)
+            : 0;
+          const unitPrice = applyLineUnitPrice(
+            prev?.unitPrice ?? 0,
+            apiPrice > 0 ? apiPrice : catalogPrice,
+          );
+          return {
+            productId: li.product?.id,
+            variantId,
+            title: li.title,
+            quantity: qty,
+            unitPrice,
+            unitCost,
+          };
+        })
+        .filter((li): li is NonNullable<typeof li> => li != null);
 
       const cogs = lineItems.reduce(
         (sum, li) => sum + li.unitCost * li.quantity,
         0,
       );
       const totalPrice = num(o.currentTotalPriceSet?.shopMoney.amount);
-      const subtotal = num(o.subtotalPriceSet?.shopMoney.amount);
+      const subtotal = num(o.currentSubtotalPriceSet?.shopMoney.amount);
       const refunded = num(o.totalRefundedSet?.shopMoney.amount);
       const shipping = num(o.totalShippingPriceSet?.shopMoney.amount);
       const netRevenue = orderNetRevenue({ subtotal, totalPrice, refunded });
@@ -1436,7 +1443,7 @@ export async function syncOrdersPage(
         totalPrice,
         subtotal,
         netRevenue,
-        discounts: num(o.totalDiscountsSet?.shopMoney.amount),
+        discounts: num(o.currentTotalDiscountsSet?.shopMoney.amount),
         shipping,
         tax: num(o.totalTaxSet?.shopMoney.amount),
         refunded,
