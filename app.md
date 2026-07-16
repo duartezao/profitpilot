@@ -8,7 +8,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 
 * **Visão consolidada** — ver todas as lojas ao mesmo tempo num único dashboard, e fazer drill-down loja a loja.
 * **Histórico permanente** — guardar todos os dados (mesmo de lojas removidas ou de plataformas que cancelaste), sem depender da retenção limitada da Shopify/WooCommerce.
-* **Lucro real (Net Profit)** — não apenas revenue bruto, mas o lucro depois de COGS, envio, taxas de pagamento, ad spend, chargebacks, custos de apps e impostos. **REV** nas métricas = vendas líquidas (Shopify Net sales) de encomendas **já pagas** (`paid`, parcialmente pagas/reembolsadas). **Pendentes** (ex. Multibanco à espera) ficam em `/pedidos` mas **não entram** em REV/lucro até pagarem; **expiradas/anuladas** são removidas no sync.
+* **Lucro real (Net Profit)** — não apenas revenue bruto, mas o lucro depois de COGS, envio, taxas de pagamento, ad spend, chargebacks, custos de apps e impostos. **REV** nas métricas = vendas líquidas (Shopify Net sales) de encomendas **já pagas** (`paid`, parcialmente pagas/reembolsadas), usando `currentSubtotalPriceSet` / total actual (reflete edições de encomenda). **Pendentes** (ex. Multibanco à espera) ficam em `/pedidos` mas **não entram** em REV/lucro até pagarem; **expiradas/anuladas** são removidas no sync.
 
 > Alternativa própria ao **Triple Whale** e **Polar Analytics**, focada em dropshipping, com controlo total dos dados.
 
