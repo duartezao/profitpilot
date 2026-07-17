@@ -439,6 +439,10 @@ export async function buildCollectionRoasReport(
       const realRoas = adSpend > 0 ? revenue / adSpend : null;
       const realRoasFmt = fmtRoas(realRoas);
       const collectionTitle = sales?.collectionTitle ?? handle;
+      const periodDays = dateKeys.length;
+      const minCampaignActiveDays = uniqueCampaigns.length
+        ? Math.min(...uniqueCampaigns.map((c) => c.activeDays))
+        : activeDays;
 
       const briefingText = buildCollectionBriefingMessage({
         periodFromLabel,
@@ -450,6 +454,8 @@ export async function buildCollectionRoasReport(
         spendFmt: fmtMoney(adSpend),
         roasFmt: realRoasFmt,
         collectionTitle,
+        periodDays,
+        campaignActiveDays: minCampaignActiveDays,
       });
 
       return {

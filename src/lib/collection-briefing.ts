@@ -42,6 +42,13 @@ export type CollectionBriefingInput = {
   spendFmt: string;
   roasFmt: string;
   collectionTitle: string;
+  /** Dias do período seleccionado (ex. 5 ou 7). */
+  periodDays?: number;
+  /**
+   * Dias activos seguidos da campanha/coleção (mínimo entre as campanhas).
+   * Se < periodDays, acrescenta nota em baixo.
+   */
+  campaignActiveDays?: number;
 };
 
 /** Mensagem EN pronta a colar para o media buyer / coach. */
@@ -55,14 +62,26 @@ export function buildCollectionBriefingMessage(
   const store = input.storeDomain.trim() || "—";
   const roas = input.roasFmt === "—" ? "n/a" : input.roasFmt;
 
-  return [
+  const lines = [
     `Day ${input.periodFromLabel} to ${input.periodToLabel}`,
     `Ad account: ${ad}`,
     `Store: ${store}`,
     `Campaign: ${campaign}`,
     `Had ${input.revenueFmt} rev and ${input.spendFmt} spend, so overall collection ROAS is ${roas}.`,
-  ].join("\n");
+  ];
+
+  const periodDays = input.periodDays ?? 0;
+  const activeDays = input.campaignActiveDays ?? 0;
+  if (periodDays > 0 && activeDays < periodDays) {
+    const n = Math.max(0, activeDays);
+    lines.push(
+      `(Campaign active for ${n} day${n === 1 ? "" : "s"})`,
+    );
+  }
+
+  return lines.join("\n");
 }
+
 
 /** Junta os briefings de todas as coleções da loja num bloco só. */
 export function joinStoreBriefingMessages(messages: string[]): string {
