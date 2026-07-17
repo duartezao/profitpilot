@@ -20,6 +20,8 @@ const ProductCatalogSchema = new Schema(
     },
     productId: { type: String, required: true },
     title: { type: String, trim: true, default: "" },
+    /** Handle Shopify do produto (`/products/{handle}`). */
+    handle: { type: String, trim: true, default: null, index: true },
     collections: { type: [CollectionRefSchema], default: [] },
     primaryCollectionId: { type: String, default: null },
     primaryCollectionTitle: { type: String, default: null },
@@ -31,6 +33,7 @@ const ProductCatalogSchema = new Schema(
 
 ProductCatalogSchema.index({ storeId: 1, productId: 1 }, { unique: true });
 ProductCatalogSchema.index({ storeId: 1, primaryCollectionId: 1 });
+ProductCatalogSchema.index({ storeId: 1, handle: 1 });
 
 export type ProductCatalogDoc = mongoose.InferSchemaType<
   typeof ProductCatalogSchema

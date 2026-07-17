@@ -412,6 +412,7 @@ type ShopifyVariantCostNode = CatalogVariantInput & {
   product: {
     id: string;
     title: string;
+    handle?: string | null;
     collections?: {
       nodes: ShopifyCollectionRef[];
     } | null;
@@ -444,6 +445,7 @@ const SHOPIFY_VARIANT_CATALOG_FIELDS = `
   product {
     id
     title
+    handle
     collections(first: 25) {
       nodes {
         id
@@ -551,7 +553,12 @@ async function upsertProductCostNodes(
 
   const catalogByProduct = new Map<
     string,
-    { productId: string; title: string; collections: ShopifyCollectionRef[] }
+    {
+      productId: string;
+      title: string;
+      handle?: string | null;
+      collections: ShopifyCollectionRef[];
+    }
   >();
   for (const node of nodes) {
     const productId = node.product?.id;
@@ -559,6 +566,7 @@ async function upsertProductCostNodes(
     catalogByProduct.set(productId, {
       productId,
       title: node.product?.title ?? "",
+      handle: node.product?.handle ?? null,
       collections: node.product?.collections?.nodes ?? [],
     });
   }
@@ -835,6 +843,7 @@ const SHOPIFY_PRODUCT_CATALOG_FIELDS = `
   product {
     id
     title
+    handle
     collections(first: 25) {
       nodes {
         id
@@ -867,6 +876,7 @@ async function fetchAndUpsertProductCatalogNodes(
     product?: {
       id: string;
       title: string;
+      handle?: string | null;
       collections?: { nodes: ShopifyCollectionRef[] } | null;
     } | null;
   };
@@ -880,13 +890,19 @@ async function fetchAndUpsertProductCatalogNodes(
 
   const catalogByProduct = new Map<
     string,
-    { productId: string; title: string; collections: ShopifyCollectionRef[] }
+    {
+      productId: string;
+      title: string;
+      handle?: string | null;
+      collections: ShopifyCollectionRef[];
+    }
   >();
   for (const node of data.nodes) {
     if (!node?.product?.id) continue;
     catalogByProduct.set(node.product.id, {
       productId: node.product.id,
       title: node.product.title ?? "",
+      handle: node.product.handle ?? null,
       collections: node.product.collections?.nodes ?? [],
     });
   }

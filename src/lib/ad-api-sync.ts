@@ -316,6 +316,14 @@ export async function syncAdAccountsSpendForStore(
     /* campanhas — não bloqueia spend */
   }
   try {
+    const { syncAdCampaignLandingsForStore } = await import(
+      "@/lib/ad-campaign-landing-sync"
+    );
+    await syncAdCampaignLandingsForStore(storeId, campaignOptions);
+  } catch {
+    /* landings — não bloqueia spend */
+  }
+  try {
     if (!options?.skipDailyNote) {
       await syncApiMetricsToDailyNote(
         String(store.workspaceId),

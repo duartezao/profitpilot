@@ -40,6 +40,7 @@ export type ChunkedSyncPhase =
   | "post_orders_fees"
   | "payouts"
   | "sessions"
+  | "ad_landings"
   | "done";
 
 /** Lote na fase products do sync UI (Vercel Pro — maxDuration 300 s). */
@@ -162,6 +163,7 @@ function resumeSyncMessage(phase: string | null | undefined): string {
   if (phase === "products") return "A retomar custos (cor/tamanho)…";
   if (phase === "orders") return "A retomar encomendas…";
   if (phase === "sessions") return "A retomar sessões…";
+  if (phase === "ad_landings") return "A retomar destinos das ads…";
   return "A retomar sincronização…";
 }
 
@@ -866,7 +868,7 @@ export async function runChunkedSyncStep(
             phase: "sessions",
             sessionRangeIndex: chunk.nextRangeIndex,
             sessionDaysSynced: sessionDays,
-            progress: Math.min(98, 92 + chunk.nextRangeIndex * 2),
+            progress: Math.min(96, 90 + chunk.nextRangeIndex * 2),
             message: `Sessões (${chunk.nextRangeIndex}/${chunk.totalRanges})…`,
           });
           return getChunkedSyncStatus(storeId);
@@ -878,6 +880,42 @@ export async function runChunkedSyncStep(
         freshStore.lastSessionMetricsError = sessionError;
       }
 
+      await patchSyncState(storeId, {
+        phase: "ad_landings",
+        sessionDaysSynced: sessionDays,
+        progress: 97,
+        message: "A cruzar destinos das ads com coleções…",
+        ...(sessionError
+          ? { resultSummary: `sessões: erro — ${sessionError}` }
+          : {}),
+      });
+      return getChunkedSyncStatus(storeId);
+    }
+
+    if (phase === "ad_landings") {
+      const sessionDays = store.syncState.sessionDaysSynced ?? 0;
+      let landingsPart = "destinos ads em dia";
+      try {
+        const { syncAdCampaignLandingsForStore } = await import(
+          "@/lib/ad-campaign-landing-sync"
+        );
+        const r = await syncAdCampaignLandingsForStore(storeId);
+        if (r.campaignsUpdated > 0) {
+          landingsPart = `${r.campaignsUpdated} destino${r.campaignsUpdated === 1 ? "" : "s"} de ads`;
+          if (r.urlsFound > 0) {
+            landingsPart += ` (${r.urlsFound} URL${r.urlsFound === 1 ? "" : "s"})`;
+          }
+        }
+        if (r.accountsFailed > 0) {
+          landingsPart += ` (${r.accountsFailed} conta${r.accountsFailed === 1 ? "" : "s"} falhou)`;
+          if (r.errors[0]) landingsPart += `: ${r.errors[0]}`;
+        }
+      } catch (e) {
+        const msg =
+          e instanceof Error ? e.message : "Falha a sincronizar destinos das ads.";
+        landingsPart = `destinos ads: erro — ${msg}`;
+      }
+
       const latest = await Store.findById(storeId).select("syncState").lean();
       const syncCounts = latest?.syncState ?? store.syncState;
       const ordersInserted = syncCounts?.ordersImported ?? 0;
@@ -886,8 +924,13 @@ export async function runChunkedSyncStep(
       const balance = store.syncState.balanceTransactionsImported ?? 0;
       const payoutsErr = freshStore.payoutsError ?? undefined;
 
-      const sessionPart = sessionError
-        ? `sessões: erro — ${sessionError}`
+      const priorSessionNote =
+        typeof store.syncState.resultSummary === "string" &&
+        store.syncState.resultSummary.startsWith("sessões: erro")
+          ? store.syncState.resultSummary
+          : null;
+      const sessionPart = priorSessionNote
+        ? priorSessionNote
         : sessionDays > 0
           ? `${sessionDays} dia${sessionDays === 1 ? "" : "s"} de sessões`
           : "sessões em dia";
@@ -903,14 +946,14 @@ export async function runChunkedSyncStep(
         products > 0 ? ` · ${products} custo${products === 1 ? "" : "s"} novos` : "";
 
       const summary = ordersFullResync
-        ? `Reimportação · ${orderPart}${productPart} · ${sessionPart}`
+        ? `Reimportação · ${orderPart}${productPart} · ${sessionPart} · ${landingsPart}`
         : incremental
           ? payoutsErr
-            ? `Atualizado · ${orderPart}${productPart} · ${sessionPart} · payouts: ${payoutsErr}`
-            : `Atualizado · ${orderPart}${productPart} · ${sessionPart}`
+            ? `Atualizado · ${orderPart}${productPart} · ${sessionPart} · ${landingsPart} · payouts: ${payoutsErr}`
+            : `Atualizado · ${orderPart}${productPart} · ${sessionPart} · ${landingsPart}`
           : payoutsErr
-            ? `${orderPart} · ${products} produtos · ${sessionPart} · payouts: ${payoutsErr}`
-            : `${orderPart} · ${products} produtos · ${sessionPart} · ${payouts} payouts · ${balance} pendentes`;
+            ? `${orderPart} · ${products} produtos · ${sessionPart} · ${landingsPart} · payouts: ${payoutsErr}`
+            : `${orderPart} · ${products} produtos · ${sessionPart} · ${landingsPart} · ${payouts} payouts · ${balance} pendentes`;
 
       await persistStoreSyncFields(freshStore._id, {
         lastSyncAt: new Date(),

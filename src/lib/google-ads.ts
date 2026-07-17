@@ -333,21 +333,35 @@ async function googleAdsSearchOnce<T>(
     headers["login-customer-id"] = loginCustomerId;
   }
 
-  const res = await fetch(`${GOOGLE_ADS_BASE}/customers/${cid}/googleAds:search`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ query }),
-    cache: "no-store",
-  });
-  const json = (await res.json()) as {
-    results?: T[];
-    error?: { message?: string; status?: string };
-  };
-  if (!res.ok) {
-    const raw = json.error?.message ?? `Google Ads API HTTP ${res.status}`;
-    throw new GoogleAdsApiError(humanizeGoogleAdsError(raw, cid));
-  }
-  return json.results ?? [];
+  const all: T[] = [];
+  let pageToken: string | undefined;
+  do {
+    const body: { query: string; pageToken?: string } = { query };
+    if (pageToken) body.pageToken = pageToken;
+
+    const res = await fetch(
+      `${GOOGLE_ADS_BASE}/customers/${cid}/googleAds:search`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        cache: "no-store",
+      },
+    );
+    const json = (await res.json()) as {
+      results?: T[];
+      nextPageToken?: string;
+      error?: { message?: string; status?: string };
+    };
+    if (!res.ok) {
+      const raw = json.error?.message ?? `Google Ads API HTTP ${res.status}`;
+      throw new GoogleAdsApiError(humanizeGoogleAdsError(raw, cid));
+    }
+    all.push(...(json.results ?? []));
+    pageToken = json.nextPageToken || undefined;
+  } while (pageToken);
+
+  return all;
 }
 
 async function googleAdsSearch<T>(
@@ -959,3 +973,160 @@ export async function fetchGoogleLiveCampaigns(
     }))
     .sort((a, b) => b.spend - a.spend);
 }
+
+export type CampaignLandingUrlsRow = {
+  campaignId: string;
+  campaignName: string;
+  landingUrls: string[];
+};
+
+/**
+ * URLs de destino por campanha — agrega todas as fontes disponíveis:
+ * - ads clássicos: final_urls + final_mobile_urls
+ * - Performance Max: asset_group.final_urls
+ * - landing_page_view: URLs reais com cliques (Shopping/DSA/PMax/product)
+ * Cada fonte falha de forma independente (não zera as outras).
+ */
+export async function fetchGoogleCampaignLandingUrls(
+  refreshToken: string,
+  customerId: string,
+  loginCustomerId?: string,
+): Promise<CampaignLandingUrlsRow[]> {
+  const accessToken = await refreshGoogleAccessToken(refreshToken);
+  const cid = normalizeCustomerId(customerId);
+
+  const byCampaign = new Map<
+    string,
+    { name: string; urls: Set<string> }
+  >();
+
+  const addUrls = (
+    campaignId: string,
+    campaignName: string,
+    urls: Array<string | null | undefined>,
+  ) => {
+    const id = String(campaignId ?? "").trim();
+    if (!id) return;
+    let entry = byCampaign.get(id);
+    if (!entry) {
+      entry = {
+        name: campaignName.trim() || `Campanha ${id}`,
+        urls: new Set(),
+      };
+      byCampaign.set(id, entry);
+    } else if (campaignName.trim()) {
+      entry.name = campaignName.trim();
+    }
+    for (const u of urls) {
+      if (typeof u === "string" && u.trim()) entry.urls.add(u.trim());
+    }
+  };
+
+  type AdUrlRow = {
+    campaign?: { id?: string; name?: string };
+    adGroupAd?: {
+      ad?: {
+        finalUrls?: string[];
+        finalMobileUrls?: string[];
+        trackingUrlTemplate?: string | null;
+      };
+    };
+  };
+
+  try {
+    const rows = await googleAdsSearch<AdUrlRow>(
+      accessToken,
+      cid,
+      `SELECT campaign.id, campaign.name, ad_group_ad.ad.final_urls, ad_group_ad.ad.final_mobile_urls ` +
+        `FROM ad_group_ad ` +
+        `WHERE campaign.status != 'REMOVED'`,
+      loginCustomerId,
+    );
+    for (const row of rows) {
+      const ad = row.adGroupAd?.ad;
+      addUrls(String(row.campaign?.id ?? ""), row.campaign?.name ?? "", [
+        ...(ad?.finalUrls ?? []),
+        ...(ad?.finalMobileUrls ?? []),
+      ]);
+    }
+  } catch {
+    /* ads clássicos — continua com outras fontes */
+  }
+
+  type AssetGroupRow = {
+    campaign?: { id?: string; name?: string };
+    assetGroup?: { finalUrls?: string[]; finalMobileUrls?: string[] };
+  };
+  try {
+    const rows = await googleAdsSearch<AssetGroupRow>(
+      accessToken,
+      cid,
+      `SELECT campaign.id, campaign.name, asset_group.final_urls, asset_group.final_mobile_urls ` +
+        `FROM asset_group ` +
+        `WHERE campaign.status != 'REMOVED'`,
+      loginCustomerId,
+    );
+    for (const row of rows) {
+      const ag = row.assetGroup;
+      addUrls(String(row.campaign?.id ?? ""), row.campaign?.name ?? "", [
+        ...(ag?.finalUrls ?? []),
+        ...(ag?.finalMobileUrls ?? []),
+      ]);
+    }
+  } catch {
+    /* PMax opcional */
+  }
+
+  // URLs reais com tráfego — cobre Shopping, DSA, PMax product pages, etc.
+  type LandingPageRow = {
+    campaign?: { id?: string; name?: string };
+    landingPageView?: { unexpandedFinalUrl?: string };
+  };
+  try {
+    const rows = await googleAdsSearch<LandingPageRow>(
+      accessToken,
+      cid,
+      `SELECT campaign.id, campaign.name, landing_page_view.unexpanded_final_url ` +
+        `FROM landing_page_view ` +
+        `WHERE segments.date DURING LAST_30_DAYS AND campaign.status != 'REMOVED'`,
+      loginCustomerId,
+    );
+    for (const row of rows) {
+      addUrls(String(row.campaign?.id ?? ""), row.campaign?.name ?? "", [
+        row.landingPageView?.unexpandedFinalUrl,
+      ]);
+    }
+  } catch {
+    /* landing_page_view pode exigir scope/métricas */
+  }
+
+  type ExpandedLandingRow = {
+    campaign?: { id?: string; name?: string };
+    expandedLandingPageView?: { expandedFinalUrl?: string };
+  };
+  try {
+    const rows = await googleAdsSearch<ExpandedLandingRow>(
+      accessToken,
+      cid,
+      `SELECT campaign.id, campaign.name, expanded_landing_page_view.expanded_final_url ` +
+        `FROM expanded_landing_page_view ` +
+        `WHERE segments.date DURING LAST_30_DAYS AND campaign.status != 'REMOVED'`,
+      loginCustomerId,
+    );
+    for (const row of rows) {
+      addUrls(String(row.campaign?.id ?? ""), row.campaign?.name ?? "", [
+        row.expandedLandingPageView?.expandedFinalUrl,
+      ]);
+    }
+  } catch {
+    /* expanded opcional */
+  }
+
+  return [...byCampaign.entries()].map(([campaignId, v]) => ({
+    campaignId,
+    campaignName: v.name,
+    landingUrls: [...v.urls],
+  }));
+}
+
+
