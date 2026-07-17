@@ -27,8 +27,20 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // React 19 / Next 16: next-themes injecta <script> no client e o React avisa.
+  // No SSR mantém o script normal (anti-FOUC); no client usa type que o React não executa.
+  const scriptProps =
+    typeof window === "undefined"
+      ? undefined
+      : ({ type: "application/json" } as const);
+
   return (
-    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="dark"
+      enableSystem={false}
+      scriptProps={scriptProps}
+    >
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </ThemeProvider>
   );

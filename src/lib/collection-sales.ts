@@ -335,3 +335,155 @@ export async function buildCollectionSalesReport(
     lastCatalogSyncAt: lastCatalogSyncAt?.toISOString() ?? null,
   };
 }
+
+export type CollectionMembershipRevenue = {
+  collectionId: string;
+  collectionTitle: string;
+  handle: string;
+  units: number;
+  revenue: number;
+};
+
+/**
+ * REV Shopify por coleção com atribuição por **membership** (produto ∈ coleção),
+ * não só pela coleção «principal». Necessário para ROAS: campanha → /collections/mocassins
+ * enquanto a primary do produto é «chaussures».
+ *
+ * A REV de cada line item é a fatia do netRevenue da encomenda (como no resto da app).
+ * Um produto em N coleções conta a REV completa em cada uma (métrica por coleção, não soma global).
+ */
+export async function buildCollectionMembershipRevenue(
+  workspaceId: string,
+  storeId: string,
+  periodInput: PeriodInput,
+  handles: string[],
+): Promise<Map<string, CollectionMembershipRevenue>> {
+  const out = new Map<string, CollectionMembershipRevenue>();
+  const wanted = new Set(
+    handles.map((h) => h.trim().toLowerCase()).filter(Boolean),
+  );
+  if (!wanted.size) return out;
+
+  await connectToDatabase();
+  const wsId = new mongoose.Types.ObjectId(workspaceId);
+  const store = await Store.findOne({
+    _id: storeId,
+    workspaceId: wsId,
+    deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
+  })
+    .select("ianaTimezone")
+    .lean();
+  if (!store) return out;
+
+  const storeTz = normalizeStoreTimezone(store.ianaTimezone);
+  const period = resolvePeriodForStore(periodInput, storeTz);
+  const slice: PeriodSlice = {
+    start: period.start,
+    end: period.end,
+    specificDates: period.specificDates,
+  };
+
+  const orders = (await Order.find(
+    mergePaidOrderFilter({
+      storeId: store._id,
+      ...orderDateMatchInTimezone(slice, storeTz),
+    }),
+  )
+    .select(
+      "orderDate lineItems netRevenue subtotal totalPrice refunded amountsBase.netRevenue amountsBase.fxRate",
+    )
+    .lean()) as OrderForCollectionSales[];
+
+  const soldProductIds = new Set<string>();
+  for (const order of orders) {
+    for (const li of order.lineItems ?? []) {
+      if (li.productId) soldProductIds.add(String(li.productId));
+    }
+  }
+
+  const catalog = await loadProductCatalogMap(store._id, [...soldProductIds]);
+
+  // Meta por handle (id/title a partir do catálogo)
+  const metaByHandle = new Map<string, { id: string; title: string }>();
+  for (const cat of catalog.values()) {
+    for (const c of cat.collections) {
+      const h = c.handle;
+      if (!wanted.has(h)) continue;
+      if (!metaByHandle.has(h)) {
+        metaByHandle.set(h, {
+          id: c.id || h,
+          title: c.title || h,
+        });
+      }
+    }
+  }
+
+  for (const handle of wanted) {
+    const meta = metaByHandle.get(handle);
+    out.set(handle, {
+      collectionId: meta?.id ?? handle,
+      collectionTitle: meta?.title ?? handle,
+      handle,
+      units: 0,
+      revenue: 0,
+    });
+  }
+
+  for (const order of orders) {
+    const storeBasis =
+      orderLineRevenueBasis(order) ||
+      order.netRevenue ||
+      orderNetRevenue(order);
+    const netRevBase = order.amountsBase?.netRevenue;
+
+    for (const li of order.lineItems ?? []) {
+      const qty = li.quantity ?? 0;
+      if (qty <= 0) continue;
+
+      const productId = li.productId ? String(li.productId) : "";
+      const cat = productId ? catalog.get(productId) : undefined;
+      if (!cat) continue;
+
+      const memberHandles = new Set<string>();
+      for (const c of cat.collections) {
+        if (c.handle && wanted.has(c.handle)) memberHandles.add(c.handle);
+      }
+      // Fallback: primary se estiver no set pedido
+      if (
+        cat.primaryCollectionHandle &&
+        wanted.has(cat.primaryCollectionHandle)
+      ) {
+        memberHandles.add(cat.primaryCollectionHandle);
+      }
+      if (!memberHandles.size) continue;
+
+      const lineRevStore = lineStoreRevenue(li);
+      const rev = allocateBaseFromOrder(
+        order,
+        lineRevStore,
+        netRevBase,
+        storeBasis,
+      );
+
+      for (const handle of memberHandles) {
+        const row = out.get(handle)!;
+        row.units += qty;
+        row.revenue += rev;
+        if (
+          (!row.collectionTitle || row.collectionTitle === handle) &&
+          cat.collections.length
+        ) {
+          const match = cat.collections.find((c) => c.handle === handle);
+          if (match?.title) {
+            row.collectionTitle = match.title;
+            if (match.id) row.collectionId = match.id;
+          }
+        }
+      }
+    }
+  }
+
+  return out;
+}
+

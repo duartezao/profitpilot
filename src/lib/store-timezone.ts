@@ -139,6 +139,12 @@ function presetRangeInTimezone(
       prevStartKey = addDaysToDateKey(todayKey, -2, timeZone);
       prevEndKey = prevStartKey;
       break;
+    case "5d":
+      endKey = todayKey;
+      startKey = addDaysToDateKey(todayKey, -4, timeZone);
+      prevEndKey = addDaysToDateKey(startKey, -1, timeZone);
+      prevStartKey = addDaysToDateKey(prevEndKey, -4, timeZone);
+      break;
     case "7d":
       endKey = todayKey;
       startKey = addDaysToDateKey(todayKey, -6, timeZone);

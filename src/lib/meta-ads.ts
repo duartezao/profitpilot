@@ -618,3 +618,303 @@ export async function fetchMetaLiveCampaigns(
     }))
     .sort((a, b) => b.spend - a.spend);
 }
+
+export type CampaignLandingUrlsRow = {
+  campaignId: string;
+  campaignName: string;
+  landingUrls: string[];
+};
+
+type MetaCreativeUrlFields = {
+  id?: string;
+  link_url?: string | null;
+  object_url?: string | null;
+  template_url?: string | null;
+  call_to_action?: { value?: { link?: string | null } } | null;
+  object_story_spec?: {
+    link_data?: {
+      link?: string | null;
+      call_to_action?: { value?: { link?: string | null } } | null;
+      child_attachments?: Array<{
+        link?: string | null;
+        call_to_action?: { value?: { link?: string | null } } | null;
+      } | null> | null;
+    } | null;
+    video_data?: {
+      call_to_action?: { value?: { link?: string | null } } | null;
+    } | null;
+    template_data?: {
+      link?: string | null;
+      call_to_action?: { value?: { link?: string | null } } | null;
+    } | null;
+  } | null;
+  asset_feed_spec?: {
+    link_urls?: Array<{
+      website_url?: string | null;
+      display_url?: string | null;
+      deeplink_url?: string | null;
+    } | null> | null;
+  } | null;
+  effective_object_story_id?: string | null;
+  object_story_id?: string | null;
+};
+
+const META_CREATIVE_URL_FIELDS =
+  "id,link_url,object_url,template_url,call_to_action,object_story_spec,asset_feed_spec,effective_object_story_id,object_story_id";
+
+function pushUrl(out: string[], u?: string | null) {
+  if (u && typeof u === "string" && u.trim()) out.push(u.trim());
+}
+
+function metaCreativeLandingUrls(
+  creative: MetaCreativeUrlFields | null | undefined,
+): string[] {
+  if (!creative) return [];
+  const out: string[] = [];
+  pushUrl(out, creative.link_url);
+  pushUrl(out, creative.object_url);
+  pushUrl(out, creative.template_url);
+  pushUrl(out, creative.call_to_action?.value?.link);
+
+  const spec = creative.object_story_spec;
+  pushUrl(out, spec?.link_data?.link);
+  pushUrl(out, spec?.link_data?.call_to_action?.value?.link);
+  for (const child of spec?.link_data?.child_attachments ?? []) {
+    pushUrl(out, child?.link);
+    pushUrl(out, child?.call_to_action?.value?.link);
+  }
+  pushUrl(out, spec?.video_data?.call_to_action?.value?.link);
+  pushUrl(out, spec?.template_data?.link);
+  pushUrl(out, spec?.template_data?.call_to_action?.value?.link);
+
+  for (const lu of creative.asset_feed_spec?.link_urls ?? []) {
+    pushUrl(out, lu?.website_url);
+    pushUrl(out, lu?.deeplink_url);
+  }
+  return out;
+}
+
+function storyIdFromCreative(
+  creative: MetaCreativeUrlFields,
+): string | null {
+  const raw =
+    creative.effective_object_story_id?.trim() ||
+    creative.object_story_id?.trim() ||
+    "";
+  return raw || null;
+}
+
+async function metaGraphGetByIds<T extends { id?: string }>(
+  ids: string[],
+  accessToken: string,
+  fields: string,
+): Promise<Map<string, T>> {
+  const out = new Map<string, T>();
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+  const CHUNK = 40;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const chunk = unique.slice(i, i + CHUNK);
+    const url = new URL(META_GRAPH);
+    url.searchParams.set("ids", chunk.join(","));
+    url.searchParams.set("fields", fields);
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+    const json = (await res.json()) as Record<
+      string,
+      T & { error?: MetaErrorBody }
+    > & { error?: MetaErrorBody };
+    if (!res.ok || json.error) {
+      throw new MetaApiError(json.error ?? { message: `HTTP ${res.status}` });
+    }
+    for (const id of chunk) {
+      const row = json[id];
+      if (row && !row.error) out.set(id, row);
+    }
+  }
+  return out;
+}
+
+type MetaPostLinkFields = {
+  id?: string;
+  link?: string | null;
+  call_to_action?: { value?: { link?: string | null } } | null;
+  attachments?: {
+    data?: Array<{
+      unshimmed_url?: string | null;
+      url?: string | null;
+      target?: { url?: string | null } | null;
+    } | null>;
+  } | null;
+};
+
+function metaPostLandingUrls(
+  post: MetaPostLinkFields | null | undefined,
+): string[] {
+  if (!post) return [];
+  const out: string[] = [];
+  pushUrl(out, post.link);
+  pushUrl(out, post.call_to_action?.value?.link);
+  for (const att of post.attachments?.data ?? []) {
+    pushUrl(out, att?.unshimmed_url);
+    pushUrl(out, att?.target?.url);
+    pushUrl(out, att?.url);
+  }
+  return out;
+}
+
+/**
+ * URLs de destino por campanha Meta — todos os ads (paginação completa),
+ * creatives hidratados em batch + posts (object_story_id) quando necessário.
+ */
+export async function fetchMetaCampaignLandingUrls(
+  accessToken: string,
+  adAccountId: string,
+): Promise<CampaignLandingUrlsRow[]> {
+  const actId = normalizeActId(adAccountId);
+
+  type AdRow = {
+    campaign_id?: string;
+    campaign?: { id?: string; name?: string };
+    name?: string;
+    creative?: { id?: string } | MetaCreativeUrlFields | null;
+  };
+  type AdPage = {
+    data?: AdRow[];
+    paging?: { next?: string };
+  };
+
+  const byCampaign = new Map<
+    string,
+    { name: string; urls: Set<string>; creativeIds: Set<string> }
+  >();
+
+  const ensureCampaign = (
+    campaignId: string,
+    campaignName: string,
+  ): { name: string; urls: Set<string>; creativeIds: Set<string> } => {
+    let entry = byCampaign.get(campaignId);
+    if (!entry) {
+      entry = {
+        name: campaignName || `Campanha ${campaignId}`,
+        urls: new Set(),
+        creativeIds: new Set(),
+      };
+      byCampaign.set(campaignId, entry);
+    } else if (campaignName) {
+      entry.name = campaignName;
+    }
+    return entry;
+  };
+
+  // 1) Todos os ads (só creative id — expansão nested no /ads falha com frequência)
+  let nextUrl: string | null = null;
+  let first = true;
+  while (first || nextUrl) {
+    first = false;
+    const json: AdPage = nextUrl
+      ? await metaGraphGet<AdPage>(nextUrl, accessToken)
+      : await metaGraphGet<AdPage>(`${actId}/ads`, accessToken, {
+          fields: "campaign_id,campaign{id,name},name,creative{id}",
+          limit: "100",
+        });
+
+    for (const ad of json.data ?? []) {
+      const id = String(ad.campaign_id ?? ad.campaign?.id ?? "").trim();
+      if (!id) continue;
+      const entry = ensureCampaign(
+        id,
+        ad.campaign?.name?.trim() || ad.name?.trim() || "",
+      );
+      const creativeId =
+        ad.creative && "id" in ad.creative && ad.creative.id
+          ? String(ad.creative.id)
+          : null;
+      if (creativeId) entry.creativeIds.add(creativeId);
+    }
+    nextUrl = json.paging?.next ?? null;
+  }
+
+  // 2) Hidratar creatives em batch (todas as URLs de destino)
+  const allCreativeIds = [
+    ...new Set(
+      [...byCampaign.values()].flatMap((e) => [...e.creativeIds]),
+    ),
+  ];
+  let creatives = new Map<string, MetaCreativeUrlFields>();
+  if (allCreativeIds.length) {
+    try {
+      creatives = await metaGraphGetByIds<MetaCreativeUrlFields>(
+        allCreativeIds,
+        accessToken,
+        META_CREATIVE_URL_FIELDS,
+      );
+    } catch {
+      // Fallback: pedir cada creative individualmente (mais lento, mais fiável)
+      for (const cid of allCreativeIds) {
+        try {
+          const one = await metaGraphGet<MetaCreativeUrlFields>(
+            cid,
+            accessToken,
+            { fields: META_CREATIVE_URL_FIELDS },
+          );
+          if (one?.id || one?.link_url || one?.object_story_spec) {
+            creatives.set(cid, { ...one, id: one.id ?? cid });
+          }
+        } catch {
+          /* creative inacessível */
+        }
+      }
+    }
+  }
+
+  const storyIdsNeedingFetch = new Set<string>();
+
+  for (const entry of byCampaign.values()) {
+    for (const cid of entry.creativeIds) {
+      const creative = creatives.get(cid);
+      if (!creative) continue;
+      const urls = metaCreativeLandingUrls(creative);
+      for (const u of urls) entry.urls.add(u);
+      if (!urls.length) {
+        const storyId = storyIdFromCreative(creative);
+        if (storyId) storyIdsNeedingFetch.add(storyId);
+      }
+    }
+  }
+
+  // 3) Posts / object_story — URL só no post orgânico promovido
+  if (storyIdsNeedingFetch.size) {
+    try {
+      const posts = await metaGraphGetByIds<MetaPostLinkFields>(
+        [...storyIdsNeedingFetch],
+        accessToken,
+        "id,link,call_to_action,attachments{unshimmed_url,url,target}",
+      );
+      const storyToUrls = new Map<string, string[]>();
+      for (const [sid, post] of posts) {
+        storyToUrls.set(sid, metaPostLandingUrls(post));
+      }
+      for (const entry of byCampaign.values()) {
+        for (const cid of entry.creativeIds) {
+          const creative = creatives.get(cid);
+          if (!creative) continue;
+          if (metaCreativeLandingUrls(creative).length) continue;
+          const storyId = storyIdFromCreative(creative);
+          if (!storyId) continue;
+          for (const u of storyToUrls.get(storyId) ?? []) entry.urls.add(u);
+        }
+      }
+    } catch {
+      /* posts opcional — creatives já cobrem a maioria */
+    }
+  }
+
+  return [...byCampaign.entries()].map(([campaignId, v]) => ({
+    campaignId,
+    campaignName: v.name,
+    landingUrls: [...v.urls],
+  }));
+}
+

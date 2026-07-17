@@ -6,6 +6,7 @@
 export const PERIOD_PRESETS = [
   { id: "today", label: "Hoje" },
   { id: "yesterday", label: "Ontem" },
+  { id: "5d", label: "Últimos 5 dias" },
   { id: "7d", label: "Últimos 7 dias" },
   { id: "30d", label: "Últimos 30 dias" },
   { id: "month", label: "Este mês" },
@@ -116,6 +117,11 @@ function presetRange(id: PeriodPresetId, now = new Date()): ResolvedPeriod {
       end = endOfDay(addDays(now, -1));
       prevStart = startOfDay(addDays(now, -2));
       prevEnd = endOfDay(addDays(now, -2));
+      break;
+    case "5d":
+      end = endOfDay(now);
+      start = startOfDay(addDays(now, -4));
+      ({ prevStart, prevEnd } = rollingPrevious(start, end));
       break;
     case "7d":
       end = endOfDay(now);
@@ -443,6 +449,7 @@ export function shortPeriodLabel(period: ResolvedPeriod): string {
     return `${periodDayCount(period)} dias`;
   }
   const preset = PERIOD_PRESETS.find((p) => p.id === period.preset);
+  if (preset?.id === "5d") return "5 dias";
   if (preset?.id === "7d") return "7 dias";
   if (preset?.id === "30d") return "30 dias";
   if (preset?.id === "90d") return "3 meses";
