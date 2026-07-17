@@ -276,7 +276,7 @@ export async function listOrdersForCogsPanel(
     .select(
       "name shopifyId orderDate netRevenue manualCogs manualCogsInputAmount manualCogsInputCurrency manualCogsFxRate amountsBase",
     )
-    .sort({ orderDate: -1 })
+    .sort({ manualCogs: 1, orderDate: -1 })
     .limit(limit)
     .lean();
 
@@ -364,10 +364,21 @@ export async function countMissingCogsDays(
     createdAt?: Date | null;
     ianaTimezone?: string | null;
   },
+  period?: PeriodSlice,
 ): Promise<number> {
   const baseCurrency = await getBaseCurrency(store.workspaceId);
   const rows = await buildCogsDayRows(store, baseCurrency);
-  return rows.filter((r) => r.hasOrders && r.amount === null).length;
+  let missing = rows.filter((r) => r.hasOrders && r.amount === null);
+  if (period) {
+    const tz = normalizeStoreTimezone(store.ianaTimezone);
+    const periodKeys = new Set(
+      period.specificDates?.length
+        ? period.specificDates
+        : dayKeysBetweenInTimezone(period.start, period.end, tz),
+    );
+    missing = missing.filter((r) => periodKeys.has(r.dateKey));
+  }
+  return missing.length;
 }
 
 /** Soma COGS em falta respeitando o modo de cada loja. */
@@ -393,7 +404,7 @@ export function formatMissingCogsWarning(
   return `${detail} neste período.`;
 }
 
-/** Conta COGS em falta conforme o modo configurado na loja. */
+/** Conta COGS em falta para avisos «Gerir custos» (respeita o modo da loja). */
 export async function countMissingCogsForStore(
   store: {
     _id: Types.ObjectId;
@@ -412,7 +423,7 @@ export async function countMissingCogsForStore(
     return countOrdersMissingManualCogs([store._id], period, tz);
   }
   if (mode === "day") {
-    return countMissingCogsDays(store);
+    return countMissingCogsDays(store, period);
   }
   if (!period) return 0;
   return countSoldVariantsMissingCost([store._id], period);

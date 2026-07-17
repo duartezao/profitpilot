@@ -141,7 +141,17 @@ const StoreSchema = new Schema(
     // Erro específico do sync de payouts (ex.: falta de scope).
     payoutsError: { type: String, default: null },
     // Filtro persistente de sessões Shopify — código ISO (ex. BE) ou null = todos.
+    // Espelho do 1.º de analyticsSessionCountries (legado + taxa UE).
     analyticsSessionCountry: { type: String, default: null },
+    /** Países de sessões (ISO). Vazio = mundo. 2+ com order noutro país ⇒ COGS day. */
+    analyticsSessionCountries: { type: [String], default: [] },
+    /**
+     * A partir deste dia (YYYY-MM-DD, fuso da loja) o COGS é manual por dia.
+     * Dias anteriores mantêm o COGS automático já registado nas encomendas.
+     */
+    cogsDayFromKey: { type: String, default: null },
+    /** Modo antes do corte multi-país (para ler histórico automático). */
+    cogsModePriorToDayForce: { type: String, default: null },
     lastSessionMetricsAt: { type: Date },
     lastSessionMetricsError: { type: String, default: null },
     /** Bump quando a query ShopifyQL de sessões muda — força re-sync. */

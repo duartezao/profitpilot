@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import {
   updateStoreSettingsAction,
   type SettingsState,
@@ -30,7 +30,11 @@ export type StoreValues = {
   autoSync: boolean;
   startingBalance: number;
   startingBalanceDate: string;
-  analyticsSessionCountry: string;
+  /** Códigos ISO seleccionados; vazio = todos os países. */
+  analyticsSessionCountries: string[];
+  /** True quando já há order noutro país de sessões — COGS day a partir dessa data. */
+  forceDayCogs: boolean;
+  cogsDayFromKey?: string | null;
   cogsMode: CogsMode;
   cogsInputCurrency: string;
   externalGatewayPayoutBusinessDays: number | null;
@@ -69,11 +73,39 @@ export function StoreSettingsForm({
   const baseCur = baseCurrency.toUpperCase();
   const bankrollDiffersFromStore = storeCurrency !== baseCur;
   const countryOptions = listSessionCountryOptions();
+  const [selectedCountries, setSelectedCountries] = useState<string[]>(
+    store.analyticsSessionCountries,
+  );
+  const [cogsMode, setCogsMode] = useState<CogsMode>(store.cogsMode);
+  const multiCountry = selectedCountries.length > 1;
+  const forceDayCogs = store.forceDayCogs && multiCountry;
+  const effectiveCogsMode = forceDayCogs ? "day" : cogsMode;
+
+  const selectedLabels = useMemo(() => {
+    const map = new Map(countryOptions.map((c) => [c.code, c.label]));
+    return selectedCountries.map((code) => map.get(code) ?? code);
+  }, [countryOptions, selectedCountries]);
+
+  function toggleCountry(code: string) {
+    setSelectedCountries((prev) => {
+      if (prev.includes(code)) return prev.filter((c) => c !== code);
+      return [...prev, code].sort((a, b) => a.localeCompare(b));
+    });
+  }
 
   return (
     <div className="space-y-4">
     <form action={action} className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 sm:p-5">
       <input type="hidden" name="storeId" value={store.id} />
+      {selectedCountries.map((code) => (
+        <input
+          key={code}
+          type="hidden"
+          name="analyticsSessionCountries"
+          value={code}
+        />
+      ))}
+      <input type="hidden" name="cogsMode" value={effectiveCogsMode} />
 
       <div className="flex items-center justify-end gap-3">
         {state.ok && <span className="text-xs text-positive">Guardado</span>}
@@ -121,6 +153,83 @@ export function StoreSettingsForm({
       </div>
 
       <div>
+        <p className="text-sm font-medium">
+          Sessões Shopify{" "}
+          <span className="text-muted-foreground">(funil)</span>
+        </p>
+        <p className="mb-2 text-xs text-muted-foreground">
+          Países usados nas métricas de sessões, ATC %, checkout % e CVR.
+          Vazio = mundo inteiro. Com vários países, o report separa o funil por
+          país.
+        </p>
+        <label className={labelCls}>Países das sessões</label>
+        {selectedCountries.length === 0 ? (
+          <p className="mb-2 text-xs text-muted-foreground">
+            Nenhum seleccionado — todos os países (mundo).
+          </p>
+        ) : (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {selectedLabels.map((label, i) => (
+              <span
+                key={selectedCountries[i]}
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-0.5 text-xs"
+              >
+                {label}
+                {canEdit && (
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => toggleCountry(selectedCountries[i]!)}
+                    aria-label={`Remover ${label}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-background p-2">
+          {countryOptions.map((c) => {
+            const checked = selectedCountries.includes(c.code);
+            return (
+              <label
+                key={c.code}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/40"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={!canEdit}
+                  onChange={() => toggleCountry(c.code)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                <span data-sensitive>{c.label}</span>
+                <span className="text-xs text-muted-foreground">{c.code}</span>
+              </label>
+            );
+          })}
+        </div>
+        {multiCountry && !forceDayCogs && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Podes manter o COGS automático. Só quando houver uma encomenda no
+            novo país é que, a partir desse dia, passa a manual por dia — os
+            dias anteriores mantêm o automático já registado.
+          </p>
+        )}
+        {forceDayCogs && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Já houve encomenda noutro país de sessões
+            {store.cogsDayFromKey
+              ? ` (desde ${store.cogsDayFromKey})`
+              : ""}
+            — a partir dessa data o COGS é manual por dia; o histórico
+            automático anterior mantém-se.
+          </p>
+        )}
+      </div>
+
+      <div>
         <p className="text-sm font-medium">Custos (COGS)</p>
         <p className="mb-2 text-xs text-muted-foreground">
           Define como preenches o COGS nesta loja. Podes alterar depois do setup
@@ -130,17 +239,26 @@ export function StoreSettingsForm({
           <div>
             <label className={labelCls}>Modo de COGS</label>
             <select
-              name="cogsMode"
-              defaultValue={store.cogsMode}
-              disabled={!canEdit}
+              value={effectiveCogsMode}
+              disabled={!canEdit || forceDayCogs}
+              onChange={(e) => setCogsMode(e.target.value as CogsMode)}
               className={inputCls}
             >
               {COGS_MODES.map((m) => (
-                <option key={m} value={m}>
+                <option
+                  key={m}
+                  value={m}
+                  disabled={forceDayCogs && m !== "day"}
+                >
                   {COGS_MODE_LABELS[m]}
                 </option>
               ))}
             </select>
+            {forceDayCogs && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Fixado em «Por dia» — há vendas noutro país de sessões.
+              </p>
+            )}
           </div>
           <div>
             <label className={labelCls}>Moeda de entrada</label>
@@ -239,33 +357,6 @@ export function StoreSettingsForm({
               deste formulário.
             </p>
           )}
-      </div>
-
-      <div>
-        <p className="text-sm font-medium">
-          Sessões Shopify{" "}
-          <span className="text-muted-foreground">(funil)</span>
-        </p>
-        <p className="mb-2 text-xs text-muted-foreground">
-          País usado nas métricas de sessões, ATC %, checkout % e CVR na
-          dashboard. Todos os países ISO — definido uma vez, aplica-se a todos
-          os períodos.
-        </p>
-        <label className={labelCls}>País das sessões</label>
-        <select
-          name="analyticsSessionCountry"
-          defaultValue={store.analyticsSessionCountry}
-          disabled={!canEdit}
-          className={inputCls}
-          data-sensitive
-        >
-          <option value="">Todos os países</option>
-          {countryOptions.map((c) => (
-            <option key={c.code} value={c.code}>
-              {c.label}
-            </option>
-          ))}
-        </select>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

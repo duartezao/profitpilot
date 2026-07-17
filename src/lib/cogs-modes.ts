@@ -41,6 +41,35 @@ export function appliesAutoEuCustomsFees(
   return syncsShopifyProductCosts(mode);
 }
 
+/**
+ * Com 2+ países de sessões e encomenda noutro país (forceDay),
+ * o COGS automático deixa de servir — forçar modo `day`.
+ * Sem forceDay, manter o modo actual (automático continua até haver essa order).
+ */
+export function cogsModeForSessionCountries(
+  countries: string[],
+  current?: CogsMode | null,
+  opts?: { forceDay?: boolean },
+): CogsMode {
+  if (opts?.forceDay && countries.length > 1) return "day";
+  return current ?? defaultCogsMode();
+}
+
+/** Modo efectivo num dia civil (híbrido multi-país / cogsDayFromKey). */
+export function effectiveCogsModeForDateKey(
+  storeMode: CogsMode | null | undefined,
+  dateKey: string,
+  cogsDayFromKey?: string | null,
+  priorMode?: CogsMode | null,
+): CogsMode {
+  const mode = storeMode ?? defaultCogsMode();
+  if (mode !== "day" || !cogsDayFromKey) return mode;
+  if (dateKey < cogsDayFromKey) {
+    return priorMode && isCogsMode(priorMode) ? priorMode : "shopify";
+  }
+  return "day";
+}
+
 /** Assimilação automática de COGS nas encomendas após sync. */
 export function assimilatesCogsOnSync(
   mode: CogsMode | null | undefined,

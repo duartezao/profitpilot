@@ -19,7 +19,8 @@ import { StoreWorkspaceManager } from "./store-workspace-manager";
 import { CashInjectionPanel } from "./cash-injection-panel";
 import { TeamMembers } from "./team-members";
 import { PendingInvitations } from "./pending-invitations";
-import { normalizeSessionCountry } from "@/lib/shopify-countries";
+import { sessionCountryKeysFromStore } from "@/lib/shopify-countries";
+import { hasOrdersInSecondarySessionCountry } from "@/lib/session-cogs-policy";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { canAccessStore } from "@/lib/store-access";
 import type { CogsMode } from "@/lib/cogs-modes";
@@ -199,6 +200,15 @@ export default async function DefinicoesPage() {
       if (!appliesAutoEuCustomsFees(mode)) return;
       const count = await countMissingEuCustomsOrdersWithoutCountry(s._id);
       missingShippingByStore.set(String(s._id), count);
+    }),
+  );
+
+  const forceDayCogsByStore = new Map<string, boolean>();
+  await Promise.all(
+    stores.map(async (s) => {
+      const countries = sessionCountryKeysFromStore(s);
+      const force = await hasOrdersInSecondarySessionCountry(s._id, countries);
+      forceDayCogsByStore.set(String(s._id), force);
     }),
   );
 
@@ -403,8 +413,11 @@ export default async function DefinicoesPage() {
                           startingBalanceDate: s.startingBalanceDate
                             ? new Date(s.startingBalanceDate).toISOString().slice(0, 10)
                             : "",
-                          analyticsSessionCountry:
-                            normalizeSessionCountry(s.analyticsSessionCountry) ?? "",
+                          analyticsSessionCountries:
+                            sessionCountryKeysFromStore(s),
+                          forceDayCogs:
+                            forceDayCogsByStore.get(String(s._id)) ?? false,
+                          cogsDayFromKey: s.cogsDayFromKey ?? null,
                           cogsMode,
                           cogsInputCurrency: s.cogsInputCurrency ?? "EUR",
                           externalGatewayPayoutBusinessDays:

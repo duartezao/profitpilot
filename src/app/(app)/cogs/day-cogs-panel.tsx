@@ -124,6 +124,12 @@ export function DayCogsPanel({
   rows: CogsDayRow[];
 }) {
   const missingCount = rows.filter((r) => r.hasOrders && r.amount === null).length;
+  const orderedRows = [...rows].sort((a, b) => {
+    const aMissing = a.hasOrders && a.amount === null ? 1 : 0;
+    const bMissing = b.hasOrders && b.amount === null ? 1 : 0;
+    if (aMissing !== bMissing) return bMissing - aMissing;
+    return b.dateKey.localeCompare(a.dateKey);
+  });
 
   return (
     <div className="rounded-lg border border-border bg-surface">
@@ -152,7 +158,7 @@ export function DayCogsPanel({
             </tr>
           </thead>
           <tbody>
-            {[...rows].reverse().map((r) => (
+            {orderedRows.map((r) => (
               <DayCogsRowForm
                 key={r.dateKey}
                 row={r}

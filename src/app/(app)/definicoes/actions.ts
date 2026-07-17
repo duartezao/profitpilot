@@ -11,10 +11,15 @@ import { Order } from "@/models/Order";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { Membership } from "@/models/Membership";
-import { isValidSessionCountry, normalizeSessionCountry, sessionCountryKey } from "@/lib/shopify-countries";
+import {
+  isValidSessionCountries,
+  mirrorSessionCountry,
+  normalizeSessionCountries,
+  sessionCountryKeysFromStore,
+} from "@/lib/shopify-countries";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import {
-  invalidateSessionMetricsForCountryChange,
+  invalidateSessionMetricsForCountries,
   syncSessionMetricsForStore,
 } from "@/lib/session-metrics";
 import { isMyshopifyDomain, normalizeDisplayUrl } from "@/lib/store-display";
@@ -25,6 +30,7 @@ import {
   isCogsInputCurrency,
   isCogsMode,
 } from "@/lib/cogs-modes";
+import { resolveCogsModeForStoreSessionCountries } from "@/lib/session-cogs-policy";
 import { parseLocaleNumberOrZero } from "@/lib/parse-number";
 
 export type SettingsState = { ok?: boolean; error?: string };
@@ -105,7 +111,7 @@ const storeSchema = z.object({
   autoSync: z.boolean(),
   startingBalance: z.number(),
   startingBalanceDate: z.string().trim(),
-  analyticsSessionCountry: z.string().trim(),
+  analyticsSessionCountries: z.array(z.string()),
   displayUrl: z
     .string()
     .trim()
@@ -143,9 +149,10 @@ export async function updateStoreSettingsAction(
     autoSync: formData.get("autoSync") === "on",
     startingBalance: numOpt(formData.get("startingBalance")),
     startingBalanceDate: String(formData.get("startingBalanceDate") ?? ""),
-    analyticsSessionCountry: String(
-      formData.get("analyticsSessionCountry") ?? "",
-    ),
+    analyticsSessionCountries: formData
+      .getAll("analyticsSessionCountries")
+      .map((v) => String(v).trim())
+      .filter(Boolean),
     displayUrl: String(formData.get("displayUrl") ?? ""),
     cogsMode: String(formData.get("cogsMode") ?? ""),
     cogsInputCurrency: String(formData.get("cogsInputCurrency") ?? ""),
@@ -156,13 +163,18 @@ export async function updateStoreSettingsAction(
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
   const d = parsed.data;
-  const analyticsSessionCountry = normalizeSessionCountry(
-    d.analyticsSessionCountry || null,
-  );
-  if (!isValidSessionCountry(d.analyticsSessionCountry || null)) {
+  if (!isValidSessionCountries(d.analyticsSessionCountries)) {
     return { error: "País de sessões inválido." };
   }
-  const cogsMode = isCogsMode(d.cogsMode ?? "") ? d.cogsMode : undefined;
+  const analyticsSessionCountries = normalizeSessionCountries(
+    d.analyticsSessionCountries,
+  );
+  const analyticsSessionCountry = mirrorSessionCountry(
+    analyticsSessionCountries,
+  );
+  const requestedCogsMode = isCogsMode(d.cogsMode ?? "")
+    ? d.cogsMode
+    : undefined;
   const cogsInputCurrency = isCogsInputCurrency(d.cogsInputCurrency ?? "")
     ? d.cogsInputCurrency
     : undefined;
@@ -174,13 +186,36 @@ export async function updateStoreSettingsAction(
   const store = await findStoreForUser(
     user,
     d.storeId,
-    "_id analyticsSessionCountry platform",
+    "_id analyticsSessionCountry analyticsSessionCountries platform cogsMode cogsDayFromKey cogsModePriorToDayForce",
   );
   if (!store) return { error: "Loja não encontrada ou sem acesso." };
 
-  const previousCountryKey = sessionCountryKey(store.analyticsSessionCountry);
-  const nextCountryKey = sessionCountryKey(analyticsSessionCountry);
-  const countryChanged = previousCountryKey !== nextCountryKey;
+  const { mode: cogsMode, forceDay, cogsDayFromKey } =
+    await resolveCogsModeForStoreSessionCountries(
+      d.storeId,
+      analyticsSessionCountries,
+      requestedCogsMode ?? (store.cogsMode as typeof requestedCogsMode),
+    );
+
+  const previousKeys = sessionCountryKeysFromStore(store);
+  const nextKeys = analyticsSessionCountries;
+  const prevSet = new Set(previousKeys);
+  const nextSet = new Set(nextKeys);
+  const removedOrChanged = [
+    ...previousKeys.filter((k) => !nextSet.has(k)),
+    ...nextKeys.filter((k) => !prevSet.has(k)),
+  ];
+  // Mundo ↔ países também muda a chave ""
+  const worldChanged =
+    (previousKeys.length === 0) !== (nextKeys.length === 0);
+  const countriesChanged =
+    worldChanged ||
+    removedOrChanged.length > 0 ||
+    previousKeys.join(",") !== nextKeys.join(",");
+
+  const priorMode =
+    store.cogsModePriorToDayForce ??
+    (store.cogsMode && store.cogsMode !== "day" ? store.cogsMode : "shopify");
 
   const res = await Store.updateOne(
     { _id: d.storeId, workspaceId: user.workspaceId, deletedAt: null },
@@ -192,8 +227,15 @@ export async function updateStoreSettingsAction(
         startingBalance: d.startingBalance,
         startingBalanceDate,
         analyticsSessionCountry,
+        analyticsSessionCountries,
         displayUrl: normalizeDisplayUrl(d.displayUrl),
-        ...(cogsMode ? { cogsMode } : {}),
+        cogsMode,
+        ...(forceDay && cogsDayFromKey
+          ? {
+              cogsDayFromKey: store.cogsDayFromKey || cogsDayFromKey,
+              cogsModePriorToDayForce: priorMode,
+            }
+          : {}),
         ...(cogsInputCurrency ? { cogsInputCurrency } : {}),
         externalGatewayPayoutBusinessDays: d.externalGatewayPayoutBusinessDays,
       },
@@ -203,10 +245,13 @@ export async function updateStoreSettingsAction(
     return { error: "Loja não encontrada." };
   }
 
-  if (countryChanged) {
-    await invalidateSessionMetricsForCountryChange(
+  if (countriesChanged) {
+    const toInvalidate = worldChanged
+      ? ["", ...previousKeys, ...nextKeys]
+      : removedOrChanged;
+    await invalidateSessionMetricsForCountries(
       d.storeId,
-      analyticsSessionCountry,
+      [...new Set(toInvalidate)],
     );
     invalidateWorkspaceMetricsCache(user.workspaceId);
     if (store.platform === "shopify") {

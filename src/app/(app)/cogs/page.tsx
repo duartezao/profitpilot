@@ -1,17 +1,22 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { Workspace } from "@/models/Workspace";
+import { Order } from "@/models/Order";
 import { activeStoreQueryForUser } from "@/lib/store-scope";
 import { canAccessStore } from "@/lib/store-access";
 import { ProductCost } from "@/models/ProductCost";
 import { listSoldVariantsMissingCost } from "@/lib/cogs";
 import {
   buildCogsDayRows,
+  countMissingCogsDays,
+  cogsMissingLabel,
   getBaseCurrency,
   listOrdersForCogsPanel,
 } from "@/lib/manual-cogs";
+import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import { appliesAutoEuCustomsFees } from "@/lib/eu-category-fees";
 import {
   COGS_MODE_LABELS,
@@ -82,6 +87,42 @@ export default async function CogsPage({
   }
   if (scoped && activeMode === "day") {
     dayRows = await buildCogsDayRows(scoped, baseCurrency);
+  }
+
+  type ManualStoreLink = {
+    id: string;
+    name: string;
+    mode: CogsMode;
+    missing: number;
+  };
+  const manualStoreLinks: ManualStoreLink[] = [];
+  if (!scoped) {
+    for (const s of stores) {
+      const mode = (s.cogsMode ?? "shopify") as CogsMode;
+      if (mode === "day") {
+        const missing = await countMissingCogsDays(s);
+        if (missing > 0) {
+          manualStoreLinks.push({
+            id: String(s._id),
+            name: s.name,
+            mode,
+            missing,
+          });
+        }
+      } else if (mode === "order") {
+        const missing = await Order.countDocuments(
+          mergePaidOrderFilter({ storeId: s._id, manualCogs: null }),
+        );
+        if (missing > 0) {
+          manualStoreLinks.push({
+            id: String(s._id),
+            name: s.name,
+            mode,
+            missing,
+          });
+        }
+      }
+    }
   }
 
   const showEuCustomsFeeInfo =
@@ -185,6 +226,34 @@ export default async function CogsPage({
                 : null
         }
         missingCount={rows.length}
+        manualStoreLinks={
+          manualStoreLinks.length > 0 ? (
+            <PageTabCard>
+              <h2 className="text-lg font-semibold">COGS manual em falta</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Selecciona a loja para preencher o que falta (por dia ou por
+                encomenda).
+              </p>
+              <ul className="mt-4 space-y-2">
+                {manualStoreLinks.map((s) => (
+                  <li key={s.id}>
+                    <Link
+                      href={`/cogs?store=${s.id}`}
+                      className="text-sm font-medium text-accent hover:underline"
+                    >
+                      {s.name}
+                    </Link>
+                    <span className="text-sm text-muted-foreground">
+                      {" "}
+                      · {COGS_MODE_LABELS[s.mode]} ·{" "}
+                      {cogsMissingLabel(s.mode, s.missing)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </PageTabCard>
+          ) : undefined
+        }
         main={
           <>
             {scoped && activeMode === "order" && (
@@ -192,7 +261,11 @@ export default async function CogsPage({
                 <div className="mb-4">
                   <h2 className="text-lg font-semibold">COGS por encomenda</h2>
                   <p className="text-sm text-muted-foreground">
-                    {orderRows.length} encomendas no painel.
+                    {orderRows.filter((r) => r.missing).length} encomenda
+                    {orderRows.filter((r) => r.missing).length === 1
+                      ? ""
+                      : "s"}{" "}
+                    sem COGS no painel.
                   </p>
                 </div>
                 <OrderCogsPanel
@@ -209,7 +282,7 @@ export default async function CogsPage({
                 <div className="mb-4">
                   <h2 className="text-lg font-semibold">COGS por dia</h2>
                   <p className="text-sm text-muted-foreground">
-                    {dayRows.length} dias no calendário.
+                    Dias com vendas sem custo aparecem primeiro.
                   </p>
                 </div>
                 <DayCogsPanel

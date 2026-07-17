@@ -106,7 +106,7 @@ export function DefinicoesTabs({
           <div className="mb-4">
             <h2 className="text-lg font-semibold">Lojas</h2>
             <p className="text-sm text-muted-foreground">
-              Nome, sync, banca inicial, país das sessões, COGS e taxas — uma
+              Nome, sync, banca inicial, países das sessões, COGS e taxas — uma
               secção por loja.
             </p>
           </div>
