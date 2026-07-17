@@ -49,6 +49,41 @@ describe("collection-briefing", () => {
     assert.match(text, /Campaign: Mocassins\n/);
     assert.match(text, /overall collection ROAS is 1,76×/);
     assert.doesNotMatch(text, /scale, descale or kill/);
+    assert.doesNotMatch(text, /Campaign active for/);
+  });
+
+  it("nota dias activos se < período", () => {
+    const text = buildCollectionBriefingMessage({
+      periodFromLabel: "11 Jul 2026",
+      periodToLabel: "17 Jul 2026",
+      adAccount: "Marie Google",
+      storeDomain: "marie-bruxelles.com",
+      campaignNames: ["Mocassins #1"],
+      revenueFmt: "100 €",
+      spendFmt: "50 €",
+      roasFmt: "2,00×",
+      collectionTitle: "mocassins",
+      periodDays: 7,
+      campaignActiveDays: 3,
+    });
+    assert.match(text, /\(Campaign active for 3 days\)/);
+  });
+
+  it("sem nota se activo >= período", () => {
+    const text = buildCollectionBriefingMessage({
+      periodFromLabel: "13 Jul 2026",
+      periodToLabel: "17 Jul 2026",
+      adAccount: "Marie Google",
+      storeDomain: "marie-bruxelles.com",
+      campaignNames: ["Mocassins"],
+      revenueFmt: "100 €",
+      spendFmt: "50 €",
+      roasFmt: "2,00×",
+      collectionTitle: "mocassins",
+      periodDays: 5,
+      campaignActiveDays: 5,
+    });
+    assert.doesNotMatch(text, /Campaign active for/);
   });
 
   it("junta briefings da loja", () => {
