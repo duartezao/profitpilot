@@ -15,6 +15,7 @@ import {
 } from "@/lib/store-orders-resync";
 import { enhancePayoutsError } from "@/lib/shopify-scopes";
 import { syncSessionMetricsChunk } from "@/lib/session-metrics";
+import { enforceDayCogsIfSecondarySessionOrders } from "@/lib/session-cogs-policy";
 import { Store } from "@/models/Store";
 import { applyOrderFeesFromShopify } from "@/lib/order-fees-from-shopify";
 import {
@@ -630,6 +631,10 @@ export async function runChunkedSyncStep(
         CHUNKED_ORDERS_PAGE_SIZE,
         { fullOrderResync: ordersFullResync },
       );
+
+      if (page.imported > 0) {
+        await enforceDayCogsIfSecondarySessionOrders(storeId);
+      }
 
       const pagesDone = (store.syncState.orderPagesDone ?? 0) + 1;
       const ordersImported =

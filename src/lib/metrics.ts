@@ -44,7 +44,7 @@ import {
   aggregateAdSpendForStores,
 } from "@/lib/ad-spend";
 import { countSoldVariantsMissingCost, countMissingCogsByDay } from "@/lib/cogs";
-import { ranksProductsByUnits, type CogsMode } from "@/lib/cogs-modes";
+import { ranksProductsByUnits, isCogsMode, type CogsMode } from "@/lib/cogs-modes";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
 import { DailyMetric } from "@/models/DailyMetric";
 import {
@@ -100,8 +100,13 @@ import {
 import {
   aggregateSessionFunnelFromDb,
   loadDailySessionCountsForSlice,
+  loadDailySessionCountsByCountryForSlice,
   type SessionFunnelMetrics,
 } from "@/lib/session-metrics";
+import {
+  sessionCountryKeysFromStore,
+  sessionCountryLabel,
+} from "@/lib/shopify-countries";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
 import {
@@ -349,6 +354,8 @@ type StoreCogsCtx = {
   _id: mongoose.Types.ObjectId;
   cogsMode?: string | null;
   ianaTimezone?: string | null;
+  cogsDayFromKey?: string | null;
+  cogsModePriorToDayForce?: string | null;
 };
 
 function emptyStoreAgg(): StoreAgg {
@@ -464,12 +471,55 @@ async function aggregateStoreAggs(
   await Promise.all(
     dayStores.map(async (s) => {
       const tz = normalizeStoreTimezone(s.ianaTimezone);
-      const cogs = await sumManualCogsForPeriod(
-        [s._id],
-        slice,
-        sharedTimeZone ?? tz,
-      );
-      result.get(String(s._id))!.cogs = cogs;
+      const zone = sharedTimeZone ?? tz;
+      const fromKey = s.cogsDayFromKey ?? null;
+      const priorMode = isCogsMode(s.cogsModePriorToDayForce ?? "")
+        ? (s.cogsModePriorToDayForce as CogsMode)
+        : "shopify";
+      const agg = result.get(String(s._id))!;
+
+      if (!fromKey) {
+        agg.cogs = await sumManualCogsForPeriod([s._id], slice, zone);
+        return;
+      }
+
+      const keys = dayKeysInSlice(slice, zone);
+      const beforeKeys = keys.filter((k) => k < fromKey);
+      const afterKeys = keys.filter((k) => k >= fromKey);
+      let cogs = 0;
+
+      if (beforeKeys.length) {
+        const beforeSlice: PeriodSlice = {
+          start: slice.start,
+          end: slice.end,
+          specificDates: beforeKeys,
+        };
+        const [row] = await Order.aggregate<{ cogs: number }>([
+          {
+            $match: mergePaidOrderFilter({
+              workspaceId: wsId,
+              storeId: s._id,
+              ...orderDateMatchInTimezone(beforeSlice, zone),
+            }),
+          },
+          { $group: { _id: null, cogs: cogsSumExprForMode(priorMode) } },
+        ]);
+        cogs += row?.cogs ?? 0;
+        if (appliesEuCategoryFees(priorMode)) {
+          const euByDay = await sumEuCategoryFeesByDay(s._id, beforeKeys);
+          for (const fee of euByDay.values()) cogs += fee;
+        }
+      }
+
+      if (afterKeys.length) {
+        cogs += await sumManualCogsForPeriod(
+          [s._id],
+          { start: slice.start, end: slice.end, specificDates: afterKeys },
+          zone,
+        );
+      }
+
+      agg.cogs = cogs;
     }),
   );
 
@@ -1014,6 +1064,10 @@ async function aggregateDailyOrders(
   slice: PeriodSlice,
   storeTimeZone?: string | null,
   cogsMode?: CogsMode | null,
+  opts?: {
+    cogsDayFromKey?: string | null;
+    cogsModePriorToDayForce?: CogsMode | null;
+  },
 ): Promise<
   Map<
     string,
@@ -1032,7 +1086,11 @@ async function aggregateDailyOrders(
       : orderDateMatch(slice)),
   });
 
-  const cogsExpr = cogsSumExprForMode(cogsMode);
+  const fromKey = opts?.cogsDayFromKey ?? null;
+  const priorMode =
+    (opts?.cogsModePriorToDayForce as CogsMode | null | undefined) ?? "shopify";
+  const hybridDay = cogsMode === "day" && Boolean(fromKey);
+  const cogsExpr = cogsSumExprForMode(hybridDay ? priorMode : cogsMode);
 
   const rows = await Order.aggregate<{
     _id: string;
@@ -1094,15 +1152,19 @@ async function aggregateDailyOrders(
         refunds: 0,
         orders: 0,
       };
-      data.cogs = dayCogs.get(dateKey) ?? 0;
+      if (!fromKey || dateKey >= fromKey) {
+        data.cogs = dayCogs.get(dateKey) ?? 0;
+      }
       result.set(dateKey, data);
     }
   }
 
-  if (appliesEuCategoryFees(cogsMode) && storeOids.length === 1) {
+  const euMode = hybridDay ? priorMode : cogsMode;
+  if (appliesEuCategoryFees(euMode) && storeOids.length === 1) {
     const dayKeys = dayKeysInSlice(slice, storeTimeZone);
     const euFees = await sumEuCategoryFeesByDay(storeOids[0], dayKeys);
     for (const [dateKey, fee] of euFees) {
+      if (fromKey && dateKey >= fromKey) continue;
       const data = result.get(dateKey);
       if (data && fee > 0) data.cogs += fee;
     }
@@ -1142,6 +1204,11 @@ async function aggregateDailyOrdersByStore(
       const sid = String(store._id);
       const tz = sharedTimeZone ?? normalizeStoreTimezone(store.ianaTimezone);
       const mode = storeCogsMode(store);
+      const fromKey = store.cogsDayFromKey ?? null;
+      const priorMode = isCogsMode(store.cogsModePriorToDayForce ?? "")
+        ? (store.cogsModePriorToDayForce as CogsMode)
+        : "shopify";
+      const hybridDay = mode === "day" && Boolean(fromKey);
       const dateExpr = {
         $dateToString: {
           format: "%Y-%m-%d",
@@ -1149,7 +1216,7 @@ async function aggregateDailyOrdersByStore(
           timezone: tz,
         },
       };
-      const cogsExpr = cogsSumExprForMode(mode);
+      const cogsExpr = cogsSumExprForMode(hybridDay ? priorMode : mode);
 
       const rows = await Order.aggregate<{
         _id: string;
@@ -1194,16 +1261,20 @@ async function aggregateDailyOrdersByStore(
         for (const dateKey of dayKeys) {
           const key = storeDayKey(dateKey, sid);
           const row = map.get(key) ?? zeroRow();
-          row.cogs = dayCogs.get(dateKey) ?? 0;
+          if (!fromKey || dateKey >= fromKey) {
+            row.cogs = dayCogs.get(dateKey) ?? 0;
+          }
           map.set(key, row);
         }
       }
 
-      if (appliesEuCategoryFees(mode)) {
+      const euMode = hybridDay ? priorMode : mode;
+      if (appliesEuCategoryFees(euMode)) {
         const dayKeys = dayKeysInSlice(slice, tz);
         const euFees = await sumEuCategoryFeesByDay(store._id, dayKeys);
         for (const [dateKey, fee] of euFees) {
           if (fee <= 0) continue;
+          if (fromKey && dateKey >= fromKey) continue;
           const key = storeDayKey(dateKey, sid);
           const row = map.get(key) ?? zeroRow();
           row.cogs += fee;
@@ -1520,18 +1591,29 @@ async function buildStoreDailyMetrics(
   storeOid: mongoose.Types.ObjectId,
   slice: PeriodSlice,
   fmtMoney: (v: number) => string,
-  analyticsSessionCountry: string | null | undefined,
+  analyticsSessionCountries: string | string[] | null | undefined,
   storeTimeZone?: string | null,
   cogsMode?: CogsMode | null,
   expenseRows: ExpenseLeanRow[] = [],
+  cogsDayOpts?: {
+    cogsDayFromKey?: string | null;
+    cogsModePriorToDayForce?: CogsMode | null;
+  },
 ): Promise<StoreDailyMetricRow[]> {
   const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
     await Promise.all([
-      aggregateDailyOrders(wsId, [storeOid], slice, storeTimeZone, cogsMode),
+      aggregateDailyOrders(
+        wsId,
+        [storeOid],
+        slice,
+        storeTimeZone,
+        cogsMode,
+        cogsDayOpts,
+      ),
       aggregateDailyAdSpend([storeOid], slice, storeTimeZone),
       loadDailySessionCountsForSlice(
         storeOid,
-        analyticsSessionCountry,
+        analyticsSessionCountries,
         slice,
         storeTimeZone,
       ),
@@ -1557,8 +1639,11 @@ async function buildStoreDailyMetrics(
       String(storeOid),
     );
     const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx);
+    const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
+    const dayNeedsManual =
+      cogsMode === "day" && (!fromKey || dateKey >= fromKey);
     const missingCogs =
-      cogsMode === "day" && o.orders > 0 && o.cogs === 0
+      dayNeedsManual && o.orders > 0 && o.cogs === 0
         ? 1
         : missingCogsByDay.get(dateKey) ?? 0;
     const d = parseDateInput(dateKey);
@@ -2249,7 +2334,7 @@ export async function buildWorkspaceSummary(
     ...NON_ARCHIVED_STORE_FILTER,
   })
     .select(
-      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry ianaTimezone lastSessionMetricsError cogsMode workspaceId operationStatus operationKilledAt status collectionTestCycleDays collectionReminderDaysBefore",
+      "name shopDomain displayUrl paymentsBalance importStartDate createdAt analyticsSessionCountry analyticsSessionCountries ianaTimezone lastSessionMetricsError cogsMode cogsDayFromKey cogsModePriorToDayForce workspaceId operationStatus operationKilledAt status collectionTestCycleDays collectionReminderDaysBefore",
     )
     .lean();
 
@@ -2377,7 +2462,18 @@ export async function buildWorkspaceSummary(
     });
 
     const mode = storeOid ? scopedCogsMode : null;
-    const cogsExpr = cogsSumExprForMode(mode);
+    const fromKey = storeOid
+      ? ((scoped as { cogsDayFromKey?: string | null } | null)?.cogsDayFromKey ??
+        null)
+      : null;
+    const priorMode = isCogsMode(
+      (scoped as { cogsModePriorToDayForce?: string | null } | null)
+        ?.cogsModePriorToDayForce ?? "",
+    )
+      ? ((scoped as { cogsModePriorToDayForce?: string }).cogsModePriorToDayForce as CogsMode)
+      : "shopify";
+    const hybridDay = mode === "day" && Boolean(fromKey);
+    const cogsExpr = cogsSumExprForMode(hybridDay ? priorMode : mode);
 
     const [row] = await Order.aggregate<StoreAgg>([
       { $match: match },
@@ -2403,10 +2499,47 @@ export async function buildWorkspaceSummary(
     };
 
     if (mode === "day" && storeOid) {
-      agg.cogs = await sumManualCogsForPeriod([storeOid], slice, storeTz);
+      if (hybridDay && fromKey) {
+        const keys = dayKeysInSlice(slice, storeTz);
+        const beforeKeys = keys.filter((k) => k < fromKey);
+        const afterKeys = keys.filter((k) => k >= fromKey);
+        let cogs = 0;
+        if (beforeKeys.length) {
+          const beforeSlice: PeriodSlice = {
+            start: slice.start,
+            end: slice.end,
+            specificDates: beforeKeys,
+          };
+          const [beforeRow] = await Order.aggregate<{ cogs: number }>([
+            {
+              $match: mergePaidOrderFilter({
+                workspaceId: wsId,
+                storeId: storeOid,
+                ...orderDateMatchInTimezone(beforeSlice, storeTz),
+              }),
+            },
+            { $group: { _id: null, cogs: cogsSumExprForMode(priorMode) } },
+          ]);
+          cogs += beforeRow?.cogs ?? 0;
+          if (appliesEuCategoryFees(priorMode)) {
+            const euByDay = await sumEuCategoryFeesByDay(storeOid, beforeKeys);
+            for (const fee of euByDay.values()) cogs += fee;
+          }
+        }
+        if (afterKeys.length) {
+          cogs += await sumManualCogsForPeriod(
+            [storeOid],
+            { start: slice.start, end: slice.end, specificDates: afterKeys },
+            storeTz,
+          );
+        }
+        agg.cogs = cogs;
+      } else {
+        agg.cogs = await sumManualCogsForPeriod([storeOid], slice, storeTz);
+      }
     }
 
-    if (storeOid && mode && appliesEuCategoryFees(mode)) {
+    if (storeOid && mode && appliesEuCategoryFees(mode) && !hybridDay) {
       agg.cogs += await sumEuCategoryFeesForPeriod([storeOid], slice, storeTz);
     }
 
@@ -2472,10 +2605,17 @@ export async function buildWorkspaceSummary(
   const [missingCogsCount, missingAdSpendDays] = await Promise.all([
     scoped
       ? scopedCogsMode === "order"
-        ? countOrdersMissingManualCogs([scoped._id], effectiveCurrentSlice, storeTz)
+        ? countOrdersMissingManualCogs(
+            [scoped._id],
+            effectiveCurrentSlice,
+            storeTz,
+          )
         : scopedCogsMode === "day"
-          ? countMissingCogsDays(scoped)
-          : countSoldVariantsMissingCost([scoped._id], effectiveCurrentSlice)
+          ? countMissingCogsDays(scoped, effectiveCurrentSlice)
+          : countSoldVariantsMissingCost(
+              [scoped._id],
+              effectiveCurrentSlice,
+            )
       : countMissingCogsForStores(stores, effectiveCurrentSlice),
     sumMissingAdSpendDays(stores, currency),
   ]);
@@ -2851,6 +2991,9 @@ export async function buildWorkspaceSummary(
       scoped.createdAt,
       storeTz,
     );
+    const sessionCountries = sessionCountryKeysFromStore(scoped);
+    const sessionCountryInput =
+      sessionCountries.length > 0 ? sessionCountries : null;
 
     const [
       topProductsResult,
@@ -2887,14 +3030,14 @@ export async function buildWorkspaceSummary(
       ),
       aggregateSessionFunnelFromDb(
         scoped._id,
-        scoped.analyticsSessionCountry,
+        sessionCountryInput,
         effectiveCurrentSlice,
         storeImportFloorKey,
         storeTz,
       ),
       aggregateSessionFunnelFromDb(
         scoped._id,
-        scoped.analyticsSessionCountry,
+        sessionCountryInput,
         effectivePrevSlice,
         storeImportFloorKey,
         storeTz,
@@ -2904,10 +3047,18 @@ export async function buildWorkspaceSummary(
         scoped._id,
         effectiveCurrentSlice,
         fmtMoney,
-        scoped.analyticsSessionCountry,
+        sessionCountryInput,
         storeTz,
         scopedCogsMode,
         expenseRows,
+        {
+          cogsDayFromKey: scoped.cogsDayFromKey ?? null,
+          cogsModePriorToDayForce: isCogsMode(
+            scoped.cogsModePriorToDayForce ?? "",
+          )
+            ? (scoped.cogsModePriorToDayForce as CogsMode)
+            : null,
+        },
       ),
       appliesAutoEuCustomsFees(scopedCogsMode)
         ? sumEuCategoryFeesForPeriod(
@@ -3283,6 +3434,15 @@ export async function buildStoreProductRanking(
   };
 }
 
+export type StoreDayFunnelByCountry = {
+  code: string;
+  label: string;
+  sessions: number | null;
+  atcPct: number | null;
+  checkoutPct: number | null;
+  cvrPct: number | null;
+};
+
 export type StoreDayFinancials = {
   revenue: number;
   cogs: number;
@@ -3298,6 +3458,8 @@ export type StoreDayFinancials = {
   atcPct: number | null;
   checkoutPct: number | null;
   cvrPct: number | null;
+  /** Presente com 2+ países de sessões — report separado. */
+  funnelByCountry?: StoreDayFunnelByCountry[];
 };
 
 function pctFromCounts(part: number, total: number): number | null {
@@ -3319,7 +3481,9 @@ export async function fetchStoreDayFinancials(
     deletedAt: null,
     ...NON_ARCHIVED_STORE_FILTER,
   })
-    .select("ianaTimezone analyticsSessionCountry cogsMode")
+    .select(
+      "ianaTimezone analyticsSessionCountry analyticsSessionCountries cogsMode cogsDayFromKey cogsModePriorToDayForce",
+    )
     .lean();
   if (!store) return null;
 
@@ -3343,19 +3507,45 @@ export async function fetchStoreDayFinancials(
     storeId,
   );
 
-  const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
+  const sessionCountries = sessionCountryKeysFromStore(store);
+  const sessionCountryInput =
+    sessionCountries.length > 0 ? sessionCountries : null;
+
+  const cogsDayOpts = {
+    cogsDayFromKey: store.cogsDayFromKey ?? null,
+    cogsModePriorToDayForce: isCogsMode(store.cogsModePriorToDayForce ?? "")
+      ? (store.cogsModePriorToDayForce as CogsMode)
+      : null,
+  };
+
+  const [orderByDay, adByDay, sessionsByDay, missingCogsByDay, byCountryMaps] =
     await Promise.all([
-      aggregateDailyOrders(wsId, [storeOid], slice, storeTz, cogsMode),
+      aggregateDailyOrders(
+        wsId,
+        [storeOid],
+        slice,
+        storeTz,
+        cogsMode,
+        cogsDayOpts,
+      ),
       aggregateDailyAdSpend([storeOid], slice, storeTz),
       loadDailySessionCountsForSlice(
         storeOid,
-        store.analyticsSessionCountry,
+        sessionCountryInput,
         slice,
         storeTz,
       ),
       cogsMode === "order" || cogsMode === "day"
         ? Promise.resolve(new Map<string, number>())
         : countMissingCogsByDay([storeOid], slice, storeTz),
+      sessionCountries.length > 1
+        ? loadDailySessionCountsByCountryForSlice(
+            storeOid,
+            sessionCountries,
+            slice,
+            storeTz,
+          )
+        : Promise.resolve(new Map()),
     ]);
 
   const o = orderByDay.get(dateKey) ?? {
@@ -3368,13 +3558,37 @@ export async function fetchStoreDayFinancials(
   };
   const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
   const profit = calcProfit(o, hasEntry ? ad : 0, operatingExpenses);
+  const fromKey = store.cogsDayFromKey ?? null;
+  const dayNeedsManual =
+    cogsMode === "day" && (!fromKey || dateKey >= fromKey);
   const missingCogs =
-    cogsMode === "day" && o.orders > 0 && o.cogs === 0
+    dayNeedsManual && o.orders > 0 && o.cogs === 0
       ? 1
       : cogsMode === "order"
         ? await countOrdersMissingManualCogs([storeOid], slice, storeTz)
         : missingCogsByDay.get(dateKey) ?? 0;
   const sess = sessionsByDay.get(dateKey);
+
+  const funnelByCountry: StoreDayFunnelByCountry[] | undefined =
+    sessionCountries.length > 1
+      ? sessionCountries.map((code) => {
+          const daySess = byCountryMaps.get(code)?.get(dateKey);
+          return {
+            code,
+            label: sessionCountryLabel(code),
+            sessions: daySess?.sessions ?? null,
+            atcPct: daySess
+              ? pctFromCounts(daySess.cart, daySess.sessions)
+              : null,
+            checkoutPct: daySess
+              ? pctFromCounts(daySess.checkout, daySess.sessions)
+              : null,
+            cvrPct: daySess
+              ? pctFromCounts(daySess.completed, daySess.sessions)
+              : null,
+          };
+        })
+      : undefined;
 
   return {
     revenue: o.revenue,
@@ -3390,6 +3604,7 @@ export async function fetchStoreDayFinancials(
     atcPct: sess ? pctFromCounts(sess.cart, sess.sessions) : null,
     checkoutPct: sess ? pctFromCounts(sess.checkout, sess.sessions) : null,
     cvrPct: sess ? pctFromCounts(sess.completed, sess.sessions) : null,
+    funnelByCountry,
   };
 }
 
@@ -3414,7 +3629,9 @@ export async function fetchStoreRangeFinancials(
     deletedAt: null,
     ...NON_ARCHIVED_STORE_FILTER,
   })
-    .select("ianaTimezone analyticsSessionCountry cogsMode")
+    .select(
+      "ianaTimezone analyticsSessionCountry analyticsSessionCountries cogsMode cogsDayFromKey cogsModePriorToDayForce",
+    )
     .lean();
   if (!store) return null;
 
@@ -3440,19 +3657,45 @@ export async function fetchStoreRangeFinancials(
     0,
   );
 
-  const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
+  const sessionCountries = sessionCountryKeysFromStore(store);
+  const sessionCountryInput =
+    sessionCountries.length > 0 ? sessionCountries : null;
+
+  const cogsDayOpts = {
+    cogsDayFromKey: store.cogsDayFromKey ?? null,
+    cogsModePriorToDayForce: isCogsMode(store.cogsModePriorToDayForce ?? "")
+      ? (store.cogsModePriorToDayForce as CogsMode)
+      : null,
+  };
+
+  const [orderByDay, adByDay, sessionsByDay, missingCogsByDay, byCountryMaps] =
     await Promise.all([
-      aggregateDailyOrders(wsId, [storeOid], slice, storeTz, cogsMode),
+      aggregateDailyOrders(
+        wsId,
+        [storeOid],
+        slice,
+        storeTz,
+        cogsMode,
+        cogsDayOpts,
+      ),
       aggregateDailyAdSpend([storeOid], slice, storeTz),
       loadDailySessionCountsForSlice(
         storeOid,
-        store.analyticsSessionCountry,
+        sessionCountryInput,
         slice,
         storeTz,
       ),
       cogsMode === "order" || cogsMode === "day"
         ? Promise.resolve(new Map<string, number>())
         : countMissingCogsByDay([storeOid], slice, storeTz),
+      sessionCountries.length > 1
+        ? loadDailySessionCountsByCountryForSlice(
+            storeOid,
+            sessionCountries,
+            slice,
+            storeTz,
+          )
+        : Promise.resolve(new Map()),
     ]);
 
   const totals: StoreAgg = {
@@ -3498,7 +3741,13 @@ export async function fetchStoreRangeFinancials(
   if (cogsMode === "order") {
     missingCogs = await countOrdersMissingManualCogs([storeOid], slice, storeTz);
   } else if (cogsMode === "day") {
-    missingCogs = totals.orders > 0 && totals.cogs === 0 ? 1 : 0;
+    const fromKey = store.cogsDayFromKey ?? null;
+    missingCogs = 0;
+    for (const key of sortedKeys) {
+      if (fromKey && key < fromKey) continue;
+      const o = orderByDay.get(key);
+      if (o && o.orders > 0 && o.cogs === 0) missingCogs += 1;
+    }
   }
 
   const profit = calcProfit(
@@ -3506,6 +3755,37 @@ export async function fetchStoreRangeFinancials(
     adSpendHasEntry ? adSpend : 0,
     operatingExpenses,
   );
+
+  const funnelByCountry: StoreDayFunnelByCountry[] | undefined =
+    sessionCountries.length > 1
+      ? sessionCountries.map((code) => {
+          const map = byCountryMaps.get(code);
+          let sessions = 0;
+          let cart = 0;
+          let checkout = 0;
+          let completed = 0;
+          let found = false;
+          if (map) {
+            for (const key of sortedKeys) {
+              const d = map.get(key);
+              if (!d) continue;
+              found = true;
+              sessions += d.sessions;
+              cart += d.cart;
+              checkout += d.checkout;
+              completed += d.completed;
+            }
+          }
+          return {
+            code,
+            label: sessionCountryLabel(code),
+            sessions: found ? sessions : null,
+            atcPct: found ? pctFromCounts(cart, sessions) : null,
+            checkoutPct: found ? pctFromCounts(checkout, sessions) : null,
+            cvrPct: found ? pctFromCounts(completed, sessions) : null,
+          };
+        })
+      : undefined;
 
   return {
     revenue: totals.revenue,
@@ -3525,6 +3805,7 @@ export async function fetchStoreRangeFinancials(
     cvrPct: hasSessions
       ? pctFromCounts(sessTotals.completed, sessTotals.sessions)
       : null,
+    funnelByCountry,
     startKey,
     endKey,
     dayCount: sortedKeys.length,

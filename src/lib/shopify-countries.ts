@@ -96,6 +96,61 @@ export function sessionCountryKey(code: string | null | undefined): string {
   return normalizeSessionCountry(code) ?? "";
 }
 
+/** Lista de códigos ISO únicos; ignora inválidos. Vazio = mundo. */
+export function normalizeSessionCountries(
+  values: readonly string[] | null | undefined,
+): string[] {
+  if (!values?.length) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of values) {
+    const code = normalizeSessionCountry(v);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push(code);
+  }
+  return out;
+}
+
+export function isValidSessionCountries(
+  values: readonly string[] | null | undefined,
+): boolean {
+  if (!values?.length) return true;
+  return values.every((v) => isValidSessionCountry(v?.trim() || null));
+}
+
+/**
+ * Países activos da loja. Preferir `analyticsSessionCountries`;
+ * fallback do escalar legado `analyticsSessionCountry`.
+ */
+export function sessionCountryKeysFromStore(store: {
+  analyticsSessionCountries?: string[] | null;
+  analyticsSessionCountry?: string | null;
+}): string[] {
+  const fromArr = normalizeSessionCountries(store.analyticsSessionCountries);
+  if (fromArr.length) return fromArr;
+  const single = normalizeSessionCountry(store.analyticsSessionCountry);
+  return single ? [single] : [];
+}
+
+/** Espelho escalar (1.º país ou null = mundo) para UE / legado. */
+export function mirrorSessionCountry(countries: string[]): string | null {
+  return countries[0] ?? null;
+}
+
+/** 2+ países + order noutro país de sessões ⇒ COGS day obrigatório. */
+export function requiresManualDayCogs(
+  countries: string[],
+  hasSecondaryMarketOrder = false,
+): boolean {
+  return countries.length > 1 && hasSecondaryMarketOrder;
+}
+
+export function sessionCountriesLabel(countries: string[]): string {
+  if (!countries.length) return sessionCountryLabel(null);
+  return countries.map((c) => sessionCountryLabel(c)).join(", ");
+}
+
 /** Lista completa para o seletor — todos os países ISO, ordenados A–Z em PT. */
 const SORTED_SESSION_COUNTRY_OPTIONS: SessionCountryOption[] = [
   ...ISO_COUNTRY_CODES,

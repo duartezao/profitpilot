@@ -9,12 +9,14 @@ export function CogsView({
   main,
   csvImport,
   variantTable,
+  manualStoreLinks,
 }: {
   mode: "order" | "day" | "variant" | null;
   missingCount: number;
   main: ReactNode;
   csvImport?: ReactNode;
   variantTable?: ReactNode;
+  manualStoreLinks?: ReactNode;
 }) {
   if (mode === "order" || mode === "day") {
     return <div className="space-y-5">{main}</div>;
@@ -22,11 +24,16 @@ export function CogsView({
 
   if (mode === null) {
     return (
-      <PageTabCard>
-        <p className="text-sm text-muted-foreground">
-          Selecciona uma loja no filtro para gerir COGS por dia ou por encomenda.
-        </p>
-      </PageTabCard>
+      <div className="space-y-5">
+        {manualStoreLinks ?? (
+          <PageTabCard>
+            <p className="text-sm text-muted-foreground">
+              Selecciona uma loja no filtro para gerir COGS por dia ou por
+              encomenda.
+            </p>
+          </PageTabCard>
+        )}
+      </div>
     );
   }
 
@@ -48,6 +55,7 @@ export function CogsView({
 
   return (
     <div className="space-y-5">
+      {manualStoreLinks}
       <PageTabs
         tabs={tabs}
         active={tab}

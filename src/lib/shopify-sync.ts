@@ -67,6 +67,7 @@ import {
   assimilatesCogsOnSync,
   syncsShopifyProductCosts,
 } from "@/lib/cogs-modes";
+import { enforceDayCogsIfSecondarySessionOrders } from "@/lib/session-cogs-policy";
 import { normalizeShippingCountryCode } from "@/lib/eu-customs-countries";
 import { purgeLegacyManualEuFeesForStore } from "@/lib/eu-category-fees";
 import { EU_CUSTOMS_FEE_EFFECTIVE_FROM } from "@/lib/eu-category-fees-types";
@@ -1663,6 +1664,8 @@ async function syncOrders(
     await purgeLegacyManualEuFeesForStore(store._id);
     await backfillOrderShippingCountriesForStore(store, domain, token);
   }
+
+  await enforceDayCogsIfSecondarySessionOrders(String(store._id));
 
   return count;
 }

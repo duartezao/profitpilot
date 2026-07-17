@@ -143,13 +143,28 @@ export async function fetchDailySessionMetricsFromShopify(
   store: StoreDoc,
   since: string,
   until: string,
+  countryCodeOverride?: string | null,
 ): Promise<DailySessionRow[]> {
-  const countryCode = normalizeSessionCountry(store.analyticsSessionCountry);
+  const countryCode =
+    countryCodeOverride !== undefined
+      ? normalizeSessionCountry(countryCodeOverride)
+      : normalizeSessionCountry(store.analyticsSessionCountry);
 
   if (!store.credentials || !store.shopDomain) {
     throw new Error("Loja sem credenciais Shopify.");
   }
-  if (store.analyticsSessionCountry?.trim() && !countryCode) {
+  if (
+    countryCodeOverride === undefined &&
+    store.analyticsSessionCountry?.trim() &&
+    !countryCode
+  ) {
+    throw new Error("País de sessões inválido.");
+  }
+  if (
+    countryCodeOverride !== undefined &&
+    countryCodeOverride?.trim() &&
+    !countryCode
+  ) {
     throw new Error("País de sessões inválido.");
   }
 

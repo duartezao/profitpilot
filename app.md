@@ -357,7 +357,7 @@ Net Profit =
 * Importar COGS via **CSV** (modos `shopify` / `variant`)
 * **COGS por encomenda** — `manualCogs` na order, convertido para moeda base; lucro usa este valor em vez da soma das linhas.
 * **COGS por dia** — coleção `manualCogsDays` (espelho do ad spend manual); um valor por dia com vendas.
-* **Taxa alfandegária UE (Win-Win)** — 3 € por encomenda paga em lojas com COGS `shopify` desde **2026-06-26**, soma ao COGS do dia (conta **logo** no report diário / coach). Se a encomenda for **cancelada ou reembolsada sem ter sido enviada**, o sync incremental **corrige** e a taxa deixa de contar; `voided`/`expired` saem da BD. Já enviadas (`fulfilled` / `partially_fulfilled`) mantêm a taxa mesmo com reembolso posterior. O mercado UE vem do **país das sessões** (Definições → «País das sessões»): se for país UE (ex. `BE`), **todas** as encomendas pagas elegíveis contam; se for fora UE, nenhuma; se estiver vazio (mundo), fallback por `shippingCountryCode` na encomenda. Lojas COGS manual (`variant` / `order` / `day`) **não** incluem esta taxa. Painel informativo na dashboard/Métricas/Notas. Botão «Atualizar países de envio» em Definições só aparece no fallback (país das sessões vazio).
+* **Taxa alfandegária UE (Win-Win)** — 3 € por encomenda paga em lojas com COGS `shopify` desde **2026-06-26**, soma ao COGS do dia (conta **logo** no report diário / coach). Se a encomenda for **cancelada ou reembolsada sem ter sido enviada**, o sync incremental **corrige** e a taxa deixa de contar; `voided`/`expired` saem da BD. Já enviadas (`fulfilled` / `partially_fulfilled`) mantêm a taxa mesmo com reembolso posterior. O mercado UE vem do **país das sessões** (Definições → «Países das sessões»): com **1 país** UE (ex. `BE`) → todas as encomendas pagas elegíveis; fora UE → nenhuma; vazio (mundo) → fallback por `shippingCountryCode`. Com **2+ países** o automático pode continuar até existir encomenda noutro país de sessões; aí `cogsMode` passa a `day` e a taxa automática **desliga-se** (COGS já gravados nas encomendas mantêm-se). Lojas COGS manual (`variant` / `order` / `day`) **não** incluem esta taxa. Painel informativo na dashboard/Métricas/Notas. Botão «Atualizar países de envio» em Definições só aparece no fallback (país das sessões vazio).
 * **COGS histórico** — coleção `cogsHistory` com versões por variante (`effectiveFrom` / `effectiveTo`). O lucro de cada encomenda usa o custo válido na **data da venda**; quando o fornecedor muda o preço, só se ajustam vendas a partir de `effectiveFrom` (não se reescreve o passado antes dessa data).
 * **COGS no dia + correcção no sync** — modos `shopify`, `variant` e `order`: o custo de produto **conta logo** no dia em que a encomenda é paga (report diário / coach), mesmo ainda por processar. Se depois for **cancelada ou reembolsada sem ter sido enviada**, o sync incremental (`cancelledAt` / `refunded` + ainda `unfulfilled`) **reverte o COGS** (zera linhas/`amountsBase` e limpa `manualCogs`). Encomendas `voided`/`expired` continuam a ser removidas da BD. A **taxa UE** (3 €) segue a mesma lógica. Modo `day` mantém a lógica própria.
 * **Fornecedor externo (ex. Primeflow → Shopify)** — custo/preço entra via `InventoryItem.unitCost` e `variant.price` na Shopify. Quando o fornecedor faz desconto, a app regista `effectiveFrom` com `inventoryItem.updatedAt` / `variant.updatedAt` (quando a Shopify actualizou), não a hora do nosso sync. Cada sync rever variantes **já vendidas** para apanhar alterações tardias; `assimilatePendingCogsForStore` corrige encomendas a partir dessa data.
@@ -366,7 +366,7 @@ Net Profit =
 * **Página COGS** — painel conforme o modo: variantes em falta, tabela de encomendas, dias desde importação, ou taxas EU por categoria (modos shopify/variant).
 * **Assimilação automática** — só nos modos `shopify` e `variant`; em `order`/`day` o utilizador preenche manualmente.
 * **Sync manual/cron** — só o modo `shopify` importa `InventoryItem.unitCost` da Shopify; em `day`/`order`/`variant` o sync salta essa fase (mais rápido).
-* **Aviso de COGS em falta** — variantes sem custo (modos shopify/variant), encomendas sem `manualCogs` (modo order), ou dias com vendas sem registo (modo day).
+* **Aviso de COGS em falta** (dashboard / «Gerir custos») — conforme o modo: variantes sem custo (`shopify`/`variant`), encomendas sem `manualCogs` (`order`), ou dias com vendas sem registo (`day`). A contagem respeita o **período seleccionado** (modo `day` já não soma desde a importação). Ao clicar, `/cogs` abre o painel do modo da loja com o que falta em primeiro.
 
 ## Visualizações de lucro
 
@@ -630,14 +630,14 @@ Principais dificuldades: 0
 | REFUNDS | Reembolsos do dia (informativo — já reflectidos na REV) |
 | ADSPEND | Valor **só** quando registado em Anúncios (`manualAdSpend`); dias por preencher mostram `—` e **não** entram no lucro |
 | PROFIT | Net Profit = REV − COGS − envio − taxas − ad spend (quando registado); aviso se faltar COGS em produtos vendidos nesse dia |
-| SESSÕES | ShopifyQL (`read_reports`), filtradas pelo **país configurado na loja** (`analyticsSessionCountry` em Definições; vazio = todos os países); lidas da BD (`session_metrics_months`) |
-| ATC % | `sessões com add to cart / sessões` — mesma origem e **mesmo filtro de país** que SESSÕES |
-| REACHED CHECKOUT % | `sessões que chegaram ao checkout / sessões` — mesma origem e **mesmo filtro de país** |
-| CVR % | `sessões que concluíram checkout / sessões` — mesma origem e **mesmo filtro de país** |
+| SESSÕES | ShopifyQL (`read_reports`), filtradas pelos **países das sessões** (`analyticsSessionCountries`; vazio = mundo); com 2+ países a dashboard **soma**; o report **separa** ATC/CVR por país |
+| ATC % | `sessões com add to cart / sessões` — mesma origem e **mesmo filtro de país(es)** que SESSÕES |
+| REACHED CHECKOUT % | `sessões que chegaram ao checkout / sessões` — mesma origem e **mesmo filtro de país(es)** |
+| CVR % | `sessões que concluíram checkout / sessões` — mesma origem e **mesmo filtro de país(es)** |
 | CPC, CTR, CPM | Métricas das contas de ads ligadas |
 | Produtos/Coleções testadas, próxima coleção, best-seller, OBS, dificuldades | **Campos da nota diária** (preenchidos por ti) |
 
-> **Funil (sessões, ATC %, checkout %, CVR %):** vêm da Shopify (ShopifyQL via Admin GraphQL **2025-10+**, scope `read_reports`), **filtradas pelo país escolhido uma vez por loja** em Definições → «País das sessões» (ex. Bélgica = `BE`; vazio = mundo inteiro). Query: `FROM sessions … WHERE session_country = 'Belgium' SINCE … UNTIL … TIMESERIES day` (ordem ShopifyQL obrigatória). Os dados ficam **guardados na BD** em blobs mensais gzip (`session_metrics_months`, chave `countryKey` ISO) — o relatório e a dashboard **só leem da BD**; dias históricos não voltam a ser pedidos à Shopify (sync automático de 2 em 2 h preenche dias em falta). Mudança de país em Definições apaga o cache desse país e dispara re-sync. `sessionMetricsQueryVersion` na loja força re-sync quando a query ShopifyQL muda. REV, REFUNDS, PROFIT e ADSPEND **não** usam este filtro — vêm das orders/ad spend da loja. CPC/CTR/CPM vêm das contas de ads.
+> **Funil (sessões, ATC %, checkout %, CVR %):** vêm da Shopify (ShopifyQL via Admin GraphQL **2025-10+**, scope `read_reports`), filtradas pelos **países das sessões** em Definições (lista ISO; vazio = mundo). Com **1 país** o report mantém `ATC %` / `CVR %` como antes; com **2+ países** o report **separa por país** (`ATC % BE: …`, `CVR % FR: …`). Os dados ficam na BD em blobs mensais gzip (`session_metrics_months`, chave `countryKey` ISO) — um sync por país. Dashboard / KPIs somam os países seleccionados (label «Sessões: Bélgica, França»). **2+ países:** o COGS automático continua até à **data da 1ª encomenda** noutro país da lista (`cogsDayFromKey`); **a partir desse dia** `cogsMode` = `day` (manual). Dias anteriores mantêm o COGS automático já nas orders. Mudança de países em Definições apaga o cache afectado e dispara re-sync. `sessionMetricsQueryVersion` na loja força re-sync quando a query ShopifyQL muda. REV, REFUNDS, PROFIT e ADSPEND **não** usam este filtro — vêm das orders/ad spend da loja. CPC/CTR/CPM vêm das contas de ads.
 
 ## Separação por plataforma (Google vs Facebook)
 
@@ -1300,7 +1300,10 @@ Lucro após taxas =
 * `startingBalance` (saldo inicial de caixa **desta loja**, na moeda base do workspace — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
 * `externalGatewayPayoutBusinessDays` (dias úteis até o payout cair na conta quando usas gateway externo — Multibanco, PayPal, etc.; null = só Shopify Payments na tesouraria)
-* `analyticsSessionCountry` (código ISO 3166-1 alpha-2, ex. `BE`; `null` = todos os países; definido em Definições → Lojas — lista completa ISO, nome em inglês enviado à Shopify no sync)
+* `analyticsSessionCountries` (lista ISO, ex. `["BE","FR"]`; vazio = mundo)
+* `analyticsSessionCountry` (espelho do 1.º país ou `null` — legado + scope taxa UE)
+* `cogsDayFromKey` (YYYY-MM-DD: a partir deste dia COGS é manual por dia; null = sem corte)
+* `cogsModePriorToDayForce` (modo antes do corte — para ler o histórico automático)
 * `ianaTimezone` (fuso IANA da loja, ex. `Europe/Lisbon` — define o dia civil de revenue/orders e **ads**; default `Europe/Lisbon`)
 * `timezoneSource` (`shopify` = sincronizado automaticamente da Shopify no sync; `manual` = override do utilizador em Definições → Lojas, **não é** sobrescrito pelo sync). Volta a `shopify` escolhendo «Automático (Shopify)».
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)

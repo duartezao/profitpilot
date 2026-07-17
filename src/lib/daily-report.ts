@@ -41,6 +41,58 @@ function pushIf(lines: string[], condition: boolean, line: string): void {
   if (condition) lines.push(line);
 }
 
+function pushFunnelReportLines(
+  lines: string[],
+  financials: {
+    atcPct: number | null;
+    checkoutPct: number | null;
+    cvrPct: number | null;
+    funnelByCountry?: Array<{
+      code: string;
+      atcPct: number | null;
+      checkoutPct: number | null;
+      cvrPct: number | null;
+    }>;
+  },
+): void {
+  const byCountry = financials.funnelByCountry;
+  if (byCountry && byCountry.length > 1) {
+    for (const c of byCountry) {
+      pushIf(
+        lines,
+        c.atcPct != null,
+        `ATC % ${c.code}: ${fmtReportPct(c.atcPct)}`,
+      );
+      pushIf(
+        lines,
+        c.checkoutPct != null,
+        `REACHED CHECKOUT % ${c.code}: ${fmtReportPct(c.checkoutPct)}`,
+      );
+      pushIf(
+        lines,
+        c.cvrPct != null,
+        `CVR % ${c.code}: ${fmtReportPct(c.cvrPct)}`,
+      );
+    }
+    return;
+  }
+  pushIf(
+    lines,
+    financials.atcPct != null,
+    `ATC %: ${fmtReportPct(financials.atcPct)}`,
+  );
+  pushIf(
+    lines,
+    financials.checkoutPct != null,
+    `REACHED CHECKOUT %: ${fmtReportPct(financials.checkoutPct)}`,
+  );
+  pushIf(
+    lines,
+    financials.cvrPct != null,
+    `CVR %: ${fmtReportPct(financials.cvrPct)}`,
+  );
+}
+
 function fmtAdMoney(n: number, currency: string): string {
   const c = currency.toUpperCase();
   if (c === "USD") return `$${fmtReportNumber(n)}`;
@@ -220,21 +272,7 @@ export async function buildDailyReportText(opts: {
     `PROFIT: ${profitLine}`,
   );
 
-  pushIf(
-    lines,
-    financials.atcPct != null,
-    `ATC %: ${fmtReportPct(financials.atcPct)}`,
-  );
-  pushIf(
-    lines,
-    financials.checkoutPct != null,
-    `REACHED CHECKOUT %: ${fmtReportPct(financials.checkoutPct)}`,
-  );
-  pushIf(
-    lines,
-    financials.cvrPct != null,
-    `CVR %: ${fmtReportPct(financials.cvrPct)}`,
-  );
+  pushFunnelReportLines(lines, financials);
 
   const apiSnap = storeNote?.apiSnapshot;
   const adKpis = await resolveReportAdKpis(opts.storeId, opts.dateKey, apiSnap);
@@ -466,21 +504,7 @@ export async function buildWeeklyReportText(opts: {
     `PROFIT: ${profitLine}`,
   );
 
-  pushIf(
-    lines,
-    financials.atcPct != null,
-    `ATC %: ${fmtReportPct(financials.atcPct)}`,
-  );
-  pushIf(
-    lines,
-    financials.checkoutPct != null,
-    `REACHED CHECKOUT %: ${fmtReportPct(financials.checkoutPct)}`,
-  );
-  pushIf(
-    lines,
-    financials.cvrPct != null,
-    `CVR %: ${fmtReportPct(financials.cvrPct)}`,
-  );
+  pushFunnelReportLines(lines, financials);
 
   const adMetrics = await loadStoreAdMetricsFromDb(opts.storeId, keys);
   const adInsights =
