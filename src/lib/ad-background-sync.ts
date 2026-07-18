@@ -17,7 +17,8 @@ export type AdBackgroundSyncResult = {
 
 /**
  * Sync contínuo de ads enquanto o processo Node está activo (instrumentation local).
- * Hoje: throttle 2 h por conta. Lacunas/parciais: até 14 dias por loja por ciclo.
+ * Hoje: throttle por conta (= `AD_SYNC_INTERVAL_MINUTES`, predefinição 30).
+ * Lacunas/parciais: até 14 dias por loja por ciclo.
  */
 export async function runDueAdSyncs(): Promise<AdBackgroundSyncResult> {
   if (running) {

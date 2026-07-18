@@ -62,9 +62,10 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * Tailwind CSS
 * Shadcn/UI
 * Recharts (ou Tremor para dashboards financeiros)
-* TanStack Query (cache servidor 60 s; cliente lê BD a cada **30 s**; sync ads API só **cron Vercel** de **2 em 2 h** ou botão «Actualizar»)
+* TanStack Query (cache servidor 60 s + **memória TTL** em processo; cliente lê BD a cada **60 s**; SSE actualiza quando há mudanças; `?fresh=1` só no pull-to-refresh; sync ads/Shopify API só **cron Vercel a cada 30 min** ou botão «Actualizar»)
 * Zustand (estado global leve)
-* **PWA**: `manifest.json` + service worker (ex.: Serwist / next-pwa) para instalar no telemóvel e funcionar offline
+* **PWA**: `manifest.json` + service worker (ex.: Serwist / next-pwa) para instalar no telemóvel e funcionar offline; **pull-to-refresh** mobile (puxar no topo e segurar) relê a BD sem sync de APIs externas
+* Persistência leve das queries live em `sessionStorage` (paint imediato ao reabrir / mudar de ecrã)
 
 ## Backend
 
@@ -140,7 +141,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * **Cache servidor** (`unstable_cache`, 60 s) em `/api/metrics/summary` — chave por workspace + loja + período; invalida após sync Shopify e alteração de ad spend manual (`revalidateTag`).
 * **Índices MongoDB** compostos em `orders`: `{ storeId, orderDate }` e `{ workspaceId, orderDate }` — agregações do dashboard mais rápidas.
 * **Sparklines consolidadas** — uma agregação batch (últimos 7 dias) em vez de N queries por loja.
-* **Cache cliente** (TanStack Query 60 s + `placeholderData`) e invalidação SSE targeted.
+* **Cache cliente** (TanStack Query 60 s + `placeholderData` + persistência `sessionStorage` das queries live) e invalidação SSE targeted (só RQ); pull-to-refresh mobile com `?fresh=1`.
 * **Skeletons** em vez de spinners; nada de ecrãs em branco.
 * Paginação e virtualização em tabelas grandes.
 * Sem animações desnecessárias; transições subtis e rápidas.
@@ -177,9 +178,9 @@ Futuro:
 
 ### Conexão e sincronização
 
-* **Webhooks** para eventos em tempo real (`orders/create`, `orders/updated`, `refunds/create`, `products/update`)
+* **Webhooks** para eventos em tempo real (`orders/create`, `orders/updated`, `refunds/create`) — `POST /api/webhooks/shopify` com **HMAC** (`Client Secret`) + idempotência (`X-Shopify-Webhook-Id`). Por evento: token + upsert GraphQL da encomenda (**COGS** do catálogo local) + **taxa real** via `Order.transactions.fees` (`feesSource: real`; fallback estimado se ainda não houver fees / gateway externo). Sem `syncStore`. Registo automático no sync (`webhookSubscriptionCreate`) quando `APP_URL` / `NEXT_PUBLIC_APP_URL` está definido. `products/update` fica para fase seguinte.
 * **Sincronização inicial histórica** ao adicionar uma loja — com opção de escolher o **dia de início** (importar tudo o disponível **ou** apenas a partir de uma data X, ex.: "só desde 01/01/2026")
-* **Sincronização incremental** agendada — **Vercel Cron de 2 em 2 horas** (`/api/cron/sync`, `0 */2 * * *`) sincroniza em lote todas as lojas ativas (intervalo mínimo **2 h** por loja, configurável via `GLOBAL_SYNC_INTERVAL_MINUTES`). **Depois da primeira sync**, cada execução só pede o **delta** à Shopify:
+* **Sincronização incremental** agendada — **Vercel Cron a cada 30 min** (`/api/cron/sync`, `*/30 * * * *`) sincroniza em lote todas as lojas ativas (intervalo mínimo **30 min** por loja, configurável via `GLOBAL_SYNC_INTERVAL_MINUTES`, mínimo 15). **Depois da primeira sync**, cada execução só pede o **delta** à Shopify:
   * **Encomendas**: `updated_at` desde `lastSyncAt` (−2 h de margem) — apanha vendas novas **e** refunds/alterações sem reimportar o histórico.
   * **Taxas**: balance transactions e encomendas afetadas só desde o mesmo delta (não percorre todas as orders da loja).
   * **Payouts**: 2 páginas (100 mais recentes) em vez de 6; **COGS Shopify** só para **variantes vendidas** (não o catálogo inteiro).
@@ -215,8 +216,9 @@ Futuro:
 
 * **Admin API GraphQL** para a maioria das queries (orders, products, `inventoryItem.unitCost`, payouts).
 * Header de autenticação: `X-Shopify-Access-Token: <token>`.
-* Respeitar **rate limits** (custo de query GraphQL) com filas e backoff.
-* O **Client Secret** é usado para validar a **assinatura HMAC** dos webhooks.
+* O **Client Secret** é usado para validar a **assinatura HMAC** dos webhooks (`POST /api/webhooks/shopify`).
+* Respeitar **rate limits** (custo de query GraphQL) com filas e backoff; webhooks usam **2 queries/evento** (encomenda + `transactions.fees`) — irrelevante face ao cron.
+* Callback público: `{APP_URL}/api/webhooks/shopify` (HTTPS em produção).
 
 **Segurança**
 
@@ -395,8 +397,8 @@ Net Profit =
 * Ligar uma **Ad Account**: **Meta (Facebook/Instagram)**, **Google Ads** e **TikTok Ads**.
 * A app vai buscar automaticamente o **valor gasto (spend)** por dia, por campanha e por conta.
 * Sincronização diária automática + opção de **refresh manual** a qualquer momento.
-* **Regra de sync**: em cada sync periódico, o gasto de **hoje** é **substituído** pelo valor fresco das APIs (inclui **fees** da conta API) — **nunca somado** em cima do que já está na BD; **ontem e dias anteriores só ficam fechados** quando foram gravados **após 00:00** no fuso da loja (1.º sync do dia seguinte com gasto + campanhas). Sync intraday no mesmo dia civil fica **Parcial** e é re-pedido automaticamente. Backfill **incremental** (`ad-metrics-cursor` + `ad-spend-complete`): só pede à Google/Meta dias em **lacuna**, **hoje**, ou **parciais**; dias API **fechados** não voltam à API (excepto refresh de conversões Google nos últimos 7 dias). Com **Google Ads** ligado, re-sincroniza **só conversões/ROAS** dos últimos **7 dias** (janela do kill). **Leitura da BD** a cada **30 s** na dashboard e em `/anuncios`. **Sync API automático** só via **cron Vercel** `/api/cron/ads-sync` (**de 2 em 2 h**, `0 */2 * * *`, paralelo ao cron Shopify) — **não** corre ao abrir a app nem no sync Shopify. Cada ciclo: **hoje** + **ontem** se incompleto + até **14 dias** parciais/em falta por loja; **gasto e campanhas** (`ad_campaign_days`) no mesmo pedido. Botão **«Actualizar»** em `/anuncios` força backfill completo (até 45 dias, parciais incluídos). Se quota esgotada, cron salta até o manual ter sucesso. O manual preenche dias em falta e plataformas **sem** conta API; **hoje**, plataformas com API ligada não se preenchem à mão.
-* **Ad spend manual** (`/anuncios`) — se não houver contas ligadas ou o sync falhar, preenches o gasto **por dia, loja e plataforma** (Meta, Google, TikTok) em USD, EUR ou GBP. Cada plataforma tem gasto em ads, fee fixa de agência e fee % sobre o gasto (varia por dia). Dias em falta contam **desde a `importStartDate` da loja** (escolhida no setup) até ontem. Converte automaticamente para a **moeda base** do workspace com a taxa do dia. A página **actualiza-se automaticamente** (leitura BD 30 s) — sync API só cron ou botão. Se **dois utilizadores guardarem o mesmo dia ao mesmo tempo**, prevalece o **primeiro** (optimistic locking com `updatedAt`); o segundo vê aviso e a lista actualiza-se.
+* **Regra de sync**: em cada sync periódico, o gasto de **hoje** é **substituído** pelo valor fresco das APIs (inclui **fees** da conta API) — **nunca somado** em cima do que já está na BD; **ontem e dias anteriores só ficam fechados** quando foram gravados **após 00:00** no fuso da loja (1.º sync do dia seguinte com gasto + campanhas). Sync intraday no mesmo dia civil fica **Parcial** e é re-pedido automaticamente. Backfill **incremental** (`ad-metrics-cursor` + `ad-spend-complete`): só pede à Google/Meta dias em **lacuna**, **hoje**, ou **parciais**; dias API **fechados** não voltam à API (excepto refresh de conversões Google nos últimos 7 dias). Com **Google Ads** ligado, re-sincroniza **só conversões/ROAS** dos últimos **7 dias** (janela do kill). **Leitura da BD** a cada **60 s** na dashboard e em `/anuncios` (SSE actualiza mais cedo se houver mudanças). **Sync API automático** só via **cron Vercel** `/api/cron/ads-sync` (**a cada 30 min**, `15,45 * * * *` — desfasado do Shopify; configurável `AD_SYNC_INTERVAL_MINUTES`, mín. 15) — **não** corre ao abrir a app nem no sync Shopify. Cada ciclo: **hoje** + **ontem** se incompleto + até **14 dias** parciais/em falta por loja; **gasto e campanhas** (`ad_campaign_days`) no mesmo pedido. Throttle por conta = mesmo intervalo (não re-pede Google/Meta se ainda não passou). Botão **«Actualizar»** em `/anuncios` força backfill completo (até 45 dias, parciais incluídos). Se quota esgotada, cron salta até o manual ter sucesso. O manual preenche dias em falta e plataformas **sem** conta API; **hoje**, plataformas com API ligada não se preenchem à mão.
+* **Ad spend manual** (`/anuncios`) — se não houver contas ligadas ou o sync falhar, preenches o gasto **por dia, loja e plataforma** (Meta, Google, TikTok) em USD, EUR ou GBP. Cada plataforma tem gasto em ads, fee fixa de agência e fee % sobre o gasto (varia por dia). Dias em falta contam **desde a `importStartDate` da loja** (escolhida no setup) até ontem. Converte automaticamente para a **moeda base** do workspace com a taxa do dia. A página **actualiza-se automaticamente** (leitura BD 60 s + SSE) — sync API só cron ou botão. Se **dois utilizadores guardarem o mesmo dia ao mesmo tempo**, prevalece o **primeiro** (optimistic locking com `updatedAt`); o segundo vê aviso e a lista actualiza-se.
 * **UI por loja** (`/anuncios?store=…`) — 4 KPIs no topo (dias em falta, ontem, contas API, moeda) + **tabs**: **Gasto manual** (formulário do dia), **Contas API** (lista ligada + Google/Meta/TikTok), **Campanhas** (KPIs + tabela — **mesmo período do selector do topo**; dias passados só BD, API só em «Hoje»), **Histórico** (calendário diário). Sem loja seleccionada: tabela resumo «dias em falta por loja».
 
 ## Ligação Meta Ads (Facebook/Instagram)
@@ -958,7 +960,7 @@ Lucro após taxas =
 | **Taxa Shopify por usar gateway externo** (0,5–2% do plano) | Não está hoje mapeada por encomenda na API de payouts; cobrada na faturação Shopify (relatórios Finance/Billing). | **Não** por transação nos payouts — é taxa de plataforma, distinta do processamento do PayPal/Stripe. |
 | **Taxa do próprio gateway** (ex. PayPal 2,9% + fixo) | Futuro: API do gateway (Stripe/PayPal) com ID da transação obtido da encomenda Shopify. | **Não** na Shopify — só no extrato/API do gateway. |
 
-* No sync actual: encomendas Shopify Payments → balance transactions (`associatedOrder`) → `order.fees` real; sem BT ligada → fallback `computeOrderFees()` (calendário em Definições).
+* No sync actual: encomendas Shopify Payments → balance transactions (`associatedOrder`) → `order.fees` real; sem BT ligada → fallback `computeOrderFees()` (calendário em Definições). Nos **webhooks**, taxa real via `Order.transactions.fees` (mesmo valor Shopify Payments, 1 query por encomenda).
 * `OrderTransaction.fees` na GraphQL Admin API existe mas Shopify documenta: **só para transações Shopify Payments** (não gateways externos).
 * Taxas reais (Shopify Payments) já incluem conversão de moeda e comissões — não se soma +2% manual em cima.
 * **Objectivo futuro** para externo: (1) taxa Shopify % do plano por encomenda (gateway ≠ `shopify_payments`); (2) opcionalmente ligar Stripe/PayPal para taxa real do processador. Até lá, calendário manual = `estimated`.
@@ -1309,8 +1311,9 @@ Lucro após taxas =
 * `timezoneSource` (`shopify` = sincronizado automaticamente da Shopify no sync; `manual` = override do utilizador em Definições → Lojas, **não é** sobrescrito pelo sync). Volta a `shopify` escolhendo «Automático (Shopify)».
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
 * `paymentsBalance` / `paymentsBalanceUpdatedAt` (saldo Shopify Payments ainda por pagar)
-* `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — sync automático **global de 2 em 2 horas** (Vercel Cron + `GLOBAL_SYNC_INTERVAL_MINUTES`, predefinição 120 min); `syncIntervalMinutes` legado na BD
+* `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — sync automático **global a cada 30 min** (Vercel Cron + `GLOBAL_SYNC_INTERVAL_MINUTES`, predefinição 30; mín. 15); `syncIntervalMinutes` legado na BD
 * `syncState` — progresso do sync manual em passos (`status`, `phase`, `progress`, `orderCursor`, contagens, `message`)
+* `webhooksRegisteredAt` — último registo/verificação de subscriptions Shopify (orders/refunds)
 * `createdAt`
 * `deletedAt`
 
@@ -1380,7 +1383,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 * `blob` (gzip de tuplas `[dia, sessões, cart, checkout, concluídas]`)
 * `updatedAt`
 
-> A dashboard **nunca** pede sessões à Shopify em tempo real. Só o sync (manual ou cron de 2 em 2 h) preenche dias em falta; dias históricos já guardados não são re-pedidos. COGS, orders e ad spend continuam a calcular-se em tempo real a partir da BD.
+> A dashboard **nunca** pede sessões à Shopify em tempo real. Só o sync (manual ou cron a cada 30 min) preenche dias em falta; dias históricos já guardados não são re-pedidos. COGS, orders e ad spend continuam a calcular-se em tempo real a partir da BD.
 
 ## orders
 
@@ -1570,10 +1573,13 @@ Pipeline operacional de dropshipping.
 
 > A app actualiza-se sem F5 nem reentrar no browser quando mudam dados do workspace.
 
-* **SSE** `GET /api/live/stream` — stream autenticado; poll interno ~10 s a `getWorkspaceRevision(workspaceId)` (`updatedAt` de stores, tarefas, coleções, `ManualAdSpend`, `AdCampaignDay` + assinatura de `operationStatus`/`operationKilledAt`).
-* **Cliente** `WorkspaceLiveSync` no layout `(app)` — `EventSource`; quando a revisão muda → `queryClient.invalidateQueries()` + `router.refresh()`.
-* Complementa o polling da BD (~30 s) e o registo do service worker (PWA). O SSE invalida queries de métricas/tesouraria/anúncios/campanhas (não invalida tudo). `placeholderData` mantém dados anteriores visíveis enquanto refresca.
+* **SSE** `GET /api/live/stream` — stream autenticado; poll interno ~15 s a `getWorkspaceRevision` (cache memória 2,5 s; inclui `updatedAt` de **orders**, stores, tarefas, coleções, `ManualAdSpend`, `AdCampaignDay` + assinatura de `operationStatus`/`operationKilledAt`).
+* **Cliente** `WorkspaceLiveSync` no layout `(app)` — `EventSource`; quando a revisão muda → **só** `refreshLiveQueries()` (React Query). `router.refresh()` apenas ao voltar à app (visibility/focus), para não re-fetch do layout RSC a cada encomenda.
+* Complementa o polling da BD (~60 s) e o registo do service worker (PWA). O SSE invalida queries de métricas/tesouraria/anúncios/campanhas (não invalida tudo). `placeholderData` mantém dados anteriores visíveis enquanto refresca.
+* **Navegação leve**: prefetch só de **rotas** Next (JS); sem prefetch de payloads pesados no hover. Feedback `active:scale` sóbrio; troca de workspace sem hard reload; skeletons no cold start.
+* **Cache métricas**: `unstable_cache` 60 s + **cache em memória TTL** (~45 s, hit sem Mongo; limpa no sync). Pedidos com `?fresh=1` saltam caches e recalculam a partir da BD (pull-to-refresh).
 * **Cache campanhas** (`unstable_cache` 45 s em `/api/anuncios/campaigns`) — leitura BD rápida; invalida após sync API.
+* **Pull-to-refresh (mobile, `< lg`)**: no topo do ecrã, puxar até ao limiar e **segurar ~450 ms** → invalida queries live com `fresh=1` (só BD; não dispara sync Shopify/ads). Componente `PullToRefresh` no layout `(app)`.
 
 ### Modo empresarial P&L (`/financas?mode=business`)
 
@@ -1718,6 +1724,18 @@ Pipeline operacional de dropshipping.
 * `startedAt`
 * `finishedAt`
 
+## webhookEvents
+
+> Idempotência de webhooks Shopify (`X-Shopify-Webhook-Id`). Unique `(storeId, webhookId)`.
+
+* `_id`
+* `workspaceId`
+* `storeId`
+* `webhookId`
+* `topic` (`orders/create` | `orders/updated` | `refunds/create`)
+* `processedAt`
+* `createdAt`
+
 ---
 
 # Segurança (prioridade máxima)
@@ -1727,7 +1745,7 @@ Pipeline operacional de dropshipping.
 ## Autenticação e acesso
 
 * Autenticação forte com **sessões seguras** (cookies `httpOnly`, `Secure`, `SameSite`).
-* **Middleware** (`src/middleware.ts`): todas as rotas da app e APIs exigem cookie de sessão; `/login` e `/registo` são públicos; `/api/cron/*` usa segredo próprio.
+* **Middleware** (`src/middleware.ts`): todas as rotas da app e APIs exigem cookie de sessão; `/login` e `/registo` são públicos; `/api/cron/*` e `/api/webhooks/*` usam autenticação própria (CRON_SECRET / HMAC Shopify).
 * **Guards de API** (`src/lib/require-auth.ts`): `requireUser`, `requireWorkspaceStore` (loja ∈ workspace activo + `storeAccess`), `requireRole`.
 * Troca de workspace só via `switchWorkspace` — valida membership activa na BD (não confia no `workspaceId` do cliente).
 * **2FA obrigatório** (TOTP) para contas com acesso a dados financeiros — por fazer.

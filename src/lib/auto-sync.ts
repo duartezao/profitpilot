@@ -17,9 +17,9 @@ export type DueSyncResult = {
 
 /**
  * Sincroniza em lote todas as lojas com autoSync cuja última sync já passou
- * o intervalo **global** (predefinido: 2 h, `GLOBAL_SYNC_INTERVAL_MINUTES`).
+ * o intervalo **global** (predefinido: 30 min, `GLOBAL_SYNC_INTERVAL_MINUTES`).
  *
- * Em produção na Vercel: Vercel Cron (`vercel.json`) corre de 2 em 2 horas
+ * Em produção na Vercel: Vercel Cron (`vercel.json`) corre a cada 30 min
  * e sincroniza todas as lojas em falta — um único pedido para todos os workspaces.
  */
 export async function runDueSyncs(): Promise<DueSyncResult> {

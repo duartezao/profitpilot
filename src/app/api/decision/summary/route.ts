@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCachedDecisionSummary } from "@/lib/decision-summary-cache";
 import { parseAnalysisWindow } from "@/lib/decision-types";
+import { parseFreshParam } from "@/lib/request-fresh";
 import {
   authErrorResponse,
   requireUser,
@@ -27,6 +28,7 @@ export async function GET(req: Request) {
       },
       user.storeAccess,
       parseAnalysisWindow(params.get("window")),
+      { fresh: parseFreshParam(params) },
     );
     return NextResponse.json(data, {
       headers: { "Cache-Control": "no-store" },

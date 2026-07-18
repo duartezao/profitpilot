@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCachedWorkspaceSummary } from "@/lib/metrics-summary-cache";
+import { parseFreshParam } from "@/lib/request-fresh";
 import {
   authErrorResponse,
   requireUser,
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
         dates: params.get("dates"),
       },
       user.storeAccess,
+      { fresh: parseFreshParam(params) },
     );
 
     return NextResponse.json(summary, {

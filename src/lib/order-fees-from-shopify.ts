@@ -28,12 +28,17 @@ import { Workspace } from "@/models/Workspace";
 import {
   aggregateOrderFeesFromBalanceTx,
   shouldIncludeBalanceTxForOrderFees,
+  sumSuccessfulTransactionFees,
   type BalanceTxFeeNode,
 } from "@/lib/order-fees-aggregate";
 
 export type OrderFeesSource = "real" | "estimated";
 export type { BalanceTxFeeNode };
-export { aggregateOrderFeesFromBalanceTx, shouldIncludeBalanceTxForOrderFees };
+export {
+  aggregateOrderFeesFromBalanceTx,
+  shouldIncludeBalanceTxForOrderFees,
+  sumSuccessfulTransactionFees,
+};
 
 function num(v: unknown): number {
   const n = Number(v);
@@ -190,6 +195,142 @@ export type ApplyOrderFeesOptions = {
   /** Sync incremental: só BTs e encomendas desde esta data. */
   since?: Date | null;
 };
+
+/**
+ * Taxa real de uma encomenda via `Order.transactions.fees` (1 query).
+ * Fallback estimado se ainda não houver fees (gateway externo / captura pendente).
+ * Pensado para webhooks — sem varrer balance transactions.
+ */
+export async function applyOrderFeesFromTransactions(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+  shopifyOrderGid: string,
+): Promise<{ fees: number; feesSource: OrderFeesSource } | null> {
+  await connectToDatabase();
+
+  const query = `query($id: ID!) {
+    order(id: $id) {
+      id
+      transactions {
+        status
+        fees { amount { amount currencyCode } }
+      }
+    }
+  }`;
+
+  type TxResp = {
+    order: {
+      id: string;
+      transactions: Array<{
+        status: string | null;
+        fees: Array<{
+          amount: { amount: string; currencyCode?: string } | null;
+        } | null> | null;
+      }> | null;
+    } | null;
+  };
+
+  let orderNode: TxResp["order"];
+  try {
+    const data = await shopifyGraphQL<TxResp>(domain, token, query, {
+      id: shopifyOrderGid,
+    });
+    orderNode = data.order;
+  } catch {
+    return null;
+  }
+  if (!orderNode) return null;
+
+  const workspace = await Workspace.findById(store.workspaceId)
+    .select("baseCurrency")
+    .lean();
+  const baseCurrency = workspace?.baseCurrency ?? "EUR";
+  const storeCurrency = (store.currency ?? "EUR").toUpperCase();
+  const tz = normalizeStoreTimezone(store.ianaTimezone);
+  const floorKey =
+    importDateKey(store.importStartDate, store.createdAt, tz) ??
+    dateKeyInTimezone(new Date(store.createdAt ?? Date.now()), tz);
+
+  const dbOrder = await Order.findOne({
+    storeId: store._id,
+    shopifyId: orderNode.id,
+  })
+    .select(
+      "orderDate totalPrice subtotal refunded shipping cogs manualCogs financialStatus",
+    )
+    .lean();
+  if (!dbOrder) return null;
+  if (!orderCountsTowardProfit(dbOrder.financialStatus)) return null;
+
+  const orderDate = new Date(dbOrder.orderDate);
+  const orderDateKey = dateKeyInTimezone(orderDate, tz);
+  const totalPrice = num(dbOrder.totalPrice);
+  const subtotal = num(dbOrder.subtotal);
+  const refunded = num(dbOrder.refunded);
+  const shipping = num(dbOrder.shipping);
+  const manualCogs = dbOrder.manualCogs ?? null;
+  const cogsForBase = manualCogs != null ? manualCogs : num(dbOrder.cogs);
+  const netRevenue = orderNetRevenue({ subtotal, totalPrice, refunded });
+
+  const summed = sumSuccessfulTransactionFees(orderNode.transactions);
+  let fees: number;
+  let feesSource: OrderFeesSource;
+
+  if (summed.hasFeeData) {
+    fees = await feeToStoreCurrency(
+      summed.amount,
+      summed.currency ?? storeCurrency,
+      storeCurrency,
+      baseCurrency,
+      orderDateKey,
+    );
+    fees = roundMoney(Math.max(0, fees));
+    feesSource = "real";
+  } else {
+    const feeSchedule = ensureFeeSchedule(
+      store.feeSchedule as FeeScheduleEntry[] | undefined,
+      store.feeConfig,
+      floorKey,
+    );
+    const feeConfig = resolveFeeConfigForDateKey(
+      feeSchedule,
+      store.feeConfig,
+      orderDateKey,
+      floorKey,
+    );
+    const conversionPercent = shopifyCurrencyConversionPercent(
+      storeCurrency,
+      baseCurrency,
+    );
+    fees = computeOrderFees(totalPrice, feeConfig, conversionPercent);
+    feesSource = "estimated";
+  }
+
+  const amountsBase = await buildOrderAmountsBase(
+    {
+      subtotal,
+      totalPrice,
+      refunded,
+      netRevenue,
+      cogs: cogsForBase,
+      shipping,
+      fees,
+    },
+    storeCurrency,
+    baseCurrency,
+    orderDate,
+    tz,
+    manualCogs,
+  );
+
+  await Order.updateOne(
+    { _id: dbOrder._id },
+    { $set: { fees, feesSource, amountsBase } },
+  );
+
+  return { fees, feesSource };
+}
 
 /**
  * Aplica taxas reais (balance transactions) ou estimadas (fallback) às

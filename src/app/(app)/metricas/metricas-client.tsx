@@ -17,6 +17,7 @@ import {
 } from "@/lib/period";
 import type { MetricPanelPreferences } from "@/lib/metric-panel";
 import type { DashboardSummary } from "@/lib/metrics";
+import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 import { hrefWithScopeAndStore } from "@/lib/scope-query";
 
 function summaryApiUrl(params: URLSearchParams): string {
@@ -28,7 +29,9 @@ function summaryApiUrl(params: URLSearchParams): string {
 }
 
 async function fetchSummary(params: URLSearchParams): Promise<DashboardSummary> {
-  const res = await fetch(summaryApiUrl(params), { cache: "no-store" });
+  const res = await fetch(withLiveFreshParam(summaryApiUrl(params)), {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error("Falha ao carregar os dados.");
   return res.json();
 }

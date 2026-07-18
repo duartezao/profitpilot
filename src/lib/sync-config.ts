@@ -1,15 +1,19 @@
-/** Intervalo global de sync automático (todas as lojas / todos os workspaces). */
-export const DEFAULT_GLOBAL_SYNC_INTERVAL_MINUTES = 120;
+/** Intervalo global de sync automático Shopify (todas as lojas). */
+export const DEFAULT_GLOBAL_SYNC_INTERVAL_MINUTES = 30;
+
+/** Mínimo seguro — sync incremental; evita martelar a API. */
+const MIN_INTERVAL_MINUTES = 15;
+const MAX_INTERVAL_MINUTES = 24 * 60;
 
 export function getGlobalSyncIntervalMinutes(): number {
   const raw = Number(
     process.env.GLOBAL_SYNC_INTERVAL_MINUTES ??
       DEFAULT_GLOBAL_SYNC_INTERVAL_MINUTES,
   );
-  if (!Number.isFinite(raw) || raw < 60) {
+  if (!Number.isFinite(raw) || raw < MIN_INTERVAL_MINUTES) {
     return DEFAULT_GLOBAL_SYNC_INTERVAL_MINUTES;
   }
-  return Math.min(raw, 24 * 60);
+  return Math.min(raw, MAX_INTERVAL_MINUTES);
 }
 
 export function formatGlobalSyncInterval(): string {

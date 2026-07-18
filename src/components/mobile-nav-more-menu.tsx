@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { hrefWithScope } from "@/lib/scope-query";
 import { useAppViewModeContext } from "@/components/app-view-mode-provider";
+import { TAP_PRESS } from "@/lib/ui-press";
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
@@ -32,6 +33,7 @@ function NavRow({
   const active = isActive(pathname, item.href);
   const Icon = item.icon;
   const href = hrefWithScope(item.href, searchParams);
+
   return (
     <li>
       <Link
@@ -40,7 +42,8 @@ function NavRow({
         scroll={false}
         onClick={onClose}
         className={cn(
-          "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium touch-manipulation",
+          TAP_PRESS,
+          "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium",
           active
             ? "bg-accent/10 text-accent dark:bg-muted"
             : "text-foreground hover:bg-muted",

@@ -73,7 +73,10 @@ import { purgeLegacyManualEuFeesForStore } from "@/lib/eu-category-fees";
 import { EU_CUSTOMS_FEE_EFFECTIVE_FROM } from "@/lib/eu-category-fees-types";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import { parseDateInput, startOfDay } from "@/lib/period";
-import { applyOrderFeesFromShopify } from "@/lib/order-fees-from-shopify";
+import {
+  applyOrderFeesFromShopify,
+  applyOrderFeesFromTransactions,
+} from "@/lib/order-fees-from-shopify";
 
 /** Campos da loja atualizados durante o sync — persistidos com updateOne (sem __v). */
 export type StoreSyncPersist = {
@@ -1201,7 +1204,7 @@ export async function syncOrdersPage(
   token: string,
   cursor: string | null,
   pageSize = 50,
-  opts?: { fullOrderResync?: boolean },
+  opts?: { fullOrderResync?: boolean; searchQueryOverride?: string },
 ): Promise<OrdersPageResult> {
   const resolveCost = await loadCostResolverForStore(store._id);
   const resolvePrice = await loadPriceResolverForStore(store._id);
@@ -1214,7 +1217,8 @@ export async function syncOrdersPage(
   const tz = normalizeStoreTimezone(store.ianaTimezone);
 
   // Desde quando importar: incremental (updated_at), primeira sync ou resync total (created_at).
-  const searchQuery = orderSyncSearchQuery(store, opts);
+  const searchQuery =
+    opts?.searchQueryOverride?.trim() || orderSyncSearchQuery(store, opts);
 
   const query = `query($cursor: String, $q: String, $first: Int!) {
     orders(first: $first, after: $cursor, query: $q, sortKey: CREATED_AT) {
@@ -1533,6 +1537,68 @@ export async function syncOrdersPage(
     newOrderVariantIds: [...newOrderVariantIds],
     nextCursor: conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null,
     hasMore: conn.pageInfo.hasNextPage,
+  };
+}
+
+/**
+ * Upsert leve de uma encomenda (webhooks) — token + query `id:N` + taxas reais
+ * via `Order.transactions.fees` (fallback estimado se ainda não houver fees).
+ * Sem syncStore / payouts / sessões (cron trata disso).
+ */
+export async function fetchAndUpsertOrderById(
+  storeId: string,
+  shopifyOrderId: string | number,
+): Promise<{
+  imported: number;
+  inserted: number;
+  updated: number;
+  feesSource?: "real" | "estimated" | null;
+}> {
+  const numeric = String(shopifyOrderId).replace(/\D/g, "");
+  if (!numeric) {
+    throw new Error("ID de encomenda Shopify inválido.");
+  }
+
+  await connectToDatabase();
+  const store = await Store.findById(storeId).lean();
+  if (!store) throw new Error("Loja não encontrada.");
+  if (store.platform !== "shopify") {
+    throw new Error("Só lojas Shopify são suportadas.");
+  }
+
+  const creds = getStoreCredentials(store);
+  const domain = normalizeShopDomain(store.shopDomain ?? "");
+  const { accessToken } = await getClientCredentialsToken(
+    domain,
+    creds.clientId,
+    creds.clientSecret,
+  );
+
+  const result = await syncOrdersPage(store, domain, accessToken, null, 1, {
+    searchQueryOverride: `id:${numeric}`,
+  });
+
+  const shopifyGid = `gid://shopify/Order/${numeric}`;
+  let feesSource: "real" | "estimated" | null = null;
+  try {
+    const fees = await applyOrderFeesFromTransactions(
+      store,
+      domain,
+      accessToken,
+      shopifyGid,
+    );
+    feesSource = fees?.feesSource ?? null;
+  } catch (e) {
+    console.error("[webhook] order fees", e);
+  }
+
+  invalidateWorkspaceMetricsCache(String(store.workspaceId));
+
+  return {
+    imported: result.imported,
+    inserted: result.inserted,
+    updated: result.updated,
+    feesSource,
   };
 }
 
@@ -1995,6 +2061,18 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
 /** Sincroniza uma loja: custos de produtos + orders. */
 export async function syncStore(storeId: string): Promise<SyncResult> {
   const { store, domain, accessToken } = await prepareShopifySyncContext(storeId);
+
+  try {
+    const { ensureShopifyWebhooksRegistered } = await import(
+      "@/lib/shopify-webhook-register"
+    );
+    await ensureShopifyWebhooksRegistered(storeId, domain, accessToken, {
+      webhooksRegisteredAt: store.webhooksRegisteredAt ?? null,
+    });
+  } catch (e) {
+    console.error("[sync] webhooks register", e);
+  }
+
   const incremental = isIncrementalOrderSync(store);
   const feeSince = store.lastSyncAt ? orderSyncSince(store) : null;
 

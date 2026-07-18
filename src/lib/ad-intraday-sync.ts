@@ -5,13 +5,11 @@ import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
 import { isStoreAdApiQuotaPaused } from "@/lib/ad-api-quota";
 import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import { yesterdayDateKey } from "@/lib/ad-spend-complete";
+import { getAdCronSyncIntervalMs } from "@/lib/ad-sync-constants";
 import {
   dateKeyInTimezone,
   normalizeStoreTimezone,
 } from "@/lib/store-timezone";
-
-/** Intervalo mínimo entre syncs automáticos de ads (cron Vercel, de 2 em 2 h). */
-import { AD_CRON_SYNC_INTERVAL_MS } from "@/lib/ad-sync-constants";
 
 export type AdIntradaySyncResult = {
   synced: boolean;
@@ -51,7 +49,7 @@ export async function syncAdSpendIfDue(
       const t = a.lastSyncAt?.getTime() ?? 0;
       return t > max ? t : max;
     }, 0);
-    if (lastSync > 0 && now - lastSync < AD_CRON_SYNC_INTERVAL_MS) {
+    if (lastSync > 0 && now - lastSync < getAdCronSyncIntervalMs()) {
       return { synced: false, skippedReason: "throttled" };
     }
   }

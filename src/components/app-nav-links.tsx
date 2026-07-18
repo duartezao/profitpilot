@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useLinkStatus } from "next/link";
 import { useEffect, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -12,9 +13,36 @@ import { cn } from "@/lib/utils";
 import { hrefWithScope } from "@/lib/scope-query";
 import { useAppViewModeContext } from "@/components/app-view-mode-provider";
 import { homePathForMode } from "@/lib/app-view-mode";
+import { TAP_PRESS } from "@/lib/ui-press";
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
+}
+
+function NavLinkInner({
+  item,
+  pending,
+}: {
+  item: NavItem;
+  pending: boolean;
+}) {
+  const Icon = item.icon;
+  return (
+    <>
+      <Icon
+        className={cn(
+          "h-4 w-4 shrink-0 transition-opacity duration-100",
+          pending && "opacity-40",
+        )}
+      />
+      <span className={cn(pending && "opacity-60")}>{item.label}</span>
+    </>
+  );
+}
+
+function NavLinkStatus({ item }: { item: NavItem }) {
+  const { pending } = useLinkStatus();
+  return <NavLinkInner item={item} pending={pending} />;
 }
 
 function NavLink({
@@ -29,13 +57,13 @@ function NavLink({
   compact?: boolean;
 }) {
   const active = isActive(pathname, item.href);
-  const Icon = item.icon;
   return (
     <Link
       href={href}
       prefetch
       scroll={false}
       className={cn(
+        TAP_PRESS,
         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
         compact ? "px-2.5 py-1.5" : "",
         active
@@ -43,8 +71,7 @@ function NavLink({
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >
-      <Icon className="h-4 w-4 shrink-0" />
-      {item.label}
+      <NavLinkStatus item={item} />
     </Link>
   );
 }

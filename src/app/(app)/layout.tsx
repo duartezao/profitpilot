@@ -18,6 +18,7 @@ import { AppViewModeShell } from "@/components/app-view-mode-shell";
 import { AppViewModePathSync } from "@/components/app-view-mode-path-sync";
 import { getAppViewModeForUser } from "@/lib/app-view-mode-prefs";
 import { WorkspaceLiveSync } from "@/components/workspace-live-sync";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 import type { StoreOption } from "@/components/store-selector";
 
 export default async function AppLayout({
@@ -82,7 +83,9 @@ export default async function AppLayout({
         <div className="flex min-w-0 flex-1 flex-col lg:overflow-y-auto">
           <Topbar user={user} stores={stores} workspaces={workspaces} />
           <PendingInvitesBanner count={pendingInviteCount} />
-          <main className="flex-1 p-4 pb-24 sm:p-5 lg:p-6 lg:pb-6">{children}</main>
+          <main className="flex-1 p-4 pb-24 sm:p-5 lg:p-6 lg:pb-6">
+            <PullToRefresh>{children}</PullToRefresh>
+          </main>
         </div>
         <BottomNav />
       </div>

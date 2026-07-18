@@ -89,6 +89,8 @@ OrderSchema.index({ storeId: 1, shopifyId: 1 }, { unique: true });
 // Agregações por loja + período (dashboard, gráficos, exports).
 OrderSchema.index({ storeId: 1, orderDate: 1 });
 OrderSchema.index({ workspaceId: 1, orderDate: 1 });
+// Revisão SSE / latestUpdatedAt por workspace.
+OrderSchema.index({ workspaceId: 1, updatedAt: -1 });
 
 export type OrderDoc = mongoose.InferSchemaType<typeof OrderSchema> & {
   _id: mongoose.Types.ObjectId;
