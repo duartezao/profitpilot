@@ -661,9 +661,10 @@ CPC: $0.31   CTR: 3.10%   CPM: US$ 9,80
 > Com várias campanhas ativas, podes escolher como ver as métricas.
 
 * **Total (full)** — recomendado: agrega tudo de forma correta (ponderada).
-  * `CPC = spend total / cliques totais`
-  * `CPM = spend total / impressões totais × 1000`
+  * `CPC = spend plataforma (sem fee) / cliques totais`
+  * `CPM = spend plataforma (sem fee) / impressões totais × 1000`
   * `CTR = cliques totais / impressões totais`
+  * Spend / ROAS no overview de campanhas usam **spend com fees** (custo real); CPC/CPM ficam alinhados à Meta/Google.
 * **Média por campanha** — média simples dos valores de cada campanha (útil para ver o "comportamento médio" de uma campanha).
 * **Toggle** no relatório para alternar entre os dois modos, e opção de **detalhar campanha a campanha** (lista com o valor de cada uma).
 
