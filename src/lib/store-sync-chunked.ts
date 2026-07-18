@@ -369,7 +369,20 @@ export async function startChunkedSync(storeId: string): Promise<ChunkedSyncStat
   });
 
   try {
-    await prepareShopifySyncContext(storeId);
+    const ctx = await prepareShopifySyncContext(storeId);
+    try {
+      const { ensureShopifyWebhooksRegistered } = await import(
+        "@/lib/shopify-webhook-register"
+      );
+      await ensureShopifyWebhooksRegistered(
+        storeId,
+        ctx.domain,
+        ctx.accessToken,
+        { webhooksRegisteredAt: ctx.store.webhooksRegisteredAt ?? null },
+      );
+    } catch (e) {
+      console.error("[sync] webhooks register", e);
+    }
     return getChunkedSyncStatus(storeId);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao iniciar sync.";
@@ -468,6 +481,16 @@ export async function runChunkedSyncStep(
   try {
     const { store: freshStore, domain, accessToken } =
       await prepareShopifySyncContext(storeId);
+    try {
+      const { ensureShopifyWebhooksRegistered } = await import(
+        "@/lib/shopify-webhook-register"
+      );
+      await ensureShopifyWebhooksRegistered(storeId, domain, accessToken, {
+        webhooksRegisteredAt: freshStore.webhooksRegisteredAt ?? null,
+      });
+    } catch (e) {
+      console.error("[sync] webhooks register", e);
+    }
     const ordersFullResync = Boolean(store.syncState?.fullOrderResync);
     const incremental = isIncrementalSync(freshStore) && !ordersFullResync;
 

@@ -3,6 +3,10 @@
 import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import {
+  hydrateLiveQueryCache,
+  subscribeLiveQueryPersistence,
+} from "@/lib/live-query-persist";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -20,6 +24,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    hydrateLiveQueryCache(queryClient);
+    return subscribeLiveQueryPersistence(queryClient);
+  }, [queryClient]);
+
+  useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {
         /* PWA opcional: ignorar falha de registo */
@@ -27,12 +36,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // React 19 / Next 16: next-themes injecta <script> no client e o React avisa.
-  // No SSR mantém o script normal (anti-FOUC); no client usa type que o React não executa.
-  const scriptProps =
-    typeof window === "undefined"
-      ? undefined
-      : ({ type: "application/json" } as const);
+  // Script props estáveis (evitar branch server/client no ThemeProvider).
+  const scriptProps = { type: "application/json" } as const;
 
   return (
     <ThemeProvider

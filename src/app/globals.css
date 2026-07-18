@@ -89,6 +89,18 @@ html[data-privacy="true"] textarea[data-sensitive] {
   user-select: none;
 }
 
+/* Feedback de toque — navegação responsiva sem glow */
+.tap-press {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tap-press:active {
+    transform: none !important;
+  }
+}
+
 @media print {
   body * {
     visibility: hidden;

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { ProfitChart } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
 import { CostBreakdownPanel } from "@/components/dashboard/cost-breakdown-panel";
@@ -28,8 +29,27 @@ import type { PortfolioSummary } from "@/lib/portfolio-metrics";
 import {
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
+import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 import { hrefWithScopeAndStore } from "@/lib/scope-query";
 import { LastSyncBadge } from "@/components/last-sync-badge";
+import { cn } from "@/lib/utils";
+
+function DashboardSkeleton() {
+  return (
+    <div className="mx-auto max-w-7xl animate-pulse space-y-4">
+      <div className="h-9 w-48 rounded-lg bg-muted" />
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="h-[88px] rounded-lg border border-border bg-muted/80"
+          />
+        ))}
+      </div>
+      <div className="h-52 rounded-lg border border-border bg-muted/60" />
+    </div>
+  );
+}
 
 function summaryApiUrl(params: URLSearchParams): string {
   const q = new URLSearchParams(periodQueryFromSearchParams(params));
@@ -47,7 +67,9 @@ function portfolioApiUrl(params: URLSearchParams): string {
 }
 
 async function fetchSummary(params: URLSearchParams): Promise<DashboardSummary> {
-  const res = await fetch(summaryApiUrl(params), { cache: "no-store" });
+  const res = await fetch(withLiveFreshParam(summaryApiUrl(params)), {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error("Falha ao carregar os dados.");
   return res.json();
 }
@@ -55,7 +77,9 @@ async function fetchSummary(params: URLSearchParams): Promise<DashboardSummary> 
 async function fetchPortfolio(
   params: URLSearchParams,
 ): Promise<PortfolioSummary> {
-  const res = await fetch(portfolioApiUrl(params), { cache: "no-store" });
+  const res = await fetch(withLiveFreshParam(portfolioApiUrl(params)), {
+    cache: "no-store",
+  });
   if (!res.ok) throw new Error("Falha ao carregar o portfolio.");
   return res.json();
 }
@@ -68,8 +92,14 @@ export function DashboardClient() {
   const isPortfolio = parsePortfolioParam(portfolioParam) !== null;
   const period = periodFromSearchParams(searchParams);
   const adsHref = hrefWithScopeAndStore("/anuncios", searchParams, workspaceId);
+  // Evita hydration mismatch: SSR e 1.º paint do cliente iguais (skeleton).
+  // Depois do mount, sessionStorage / RQ cache podem preencher os dados.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
-  const { data, isError, isFetching } = useQuery<
+  const { data, isError, isFetching, isPending } = useQuery<
     DashboardSummary | PortfolioSummary
   >({
     queryKey: isPortfolio
@@ -102,9 +132,16 @@ export function DashboardClient() {
     <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
   );
 
+  const fetchingDim =
+    Boolean(data) && isFetching ? "opacity-[0.92] transition-opacity duration-150" : "";
+
+  if (!mounted || (!data && (isPending || isFetching))) {
+    return <DashboardSkeleton />;
+  }
+
   if (isPortfolio) {
     return (
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className={cn("mx-auto max-w-7xl space-y-6", fetchingDim)}>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
@@ -185,7 +222,7 @@ export function DashboardClient() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <div className={cn("mx-auto max-w-7xl space-y-6", fetchingDim)}>
       {isStoreView && workspaceData ? (
         <>
           <StoreDashboardHeader

@@ -166,6 +166,8 @@ const StoreSchema = new Schema(
     },
     /** Progresso do sync manual em passos (evita timeout em imports grandes). */
     syncState: { type: SyncStateSchema, default: () => ({ status: "idle" }) },
+    /** Último registo/verificação de webhooks Shopify (orders/refunds). */
+    webhooksRegisteredAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true },

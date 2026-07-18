@@ -4,6 +4,10 @@ import { loadStoreCampaignsLive } from "@/lib/ad-campaign-live";
 import type { StoreCampaignsView } from "@/lib/ad-campaign-types";
 import type { PeriodInput } from "@/lib/period";
 import { safeRevalidateTag } from "@/lib/safe-revalidate";
+import {
+  clearRevisionMemoryCache,
+  withRevisionMemoryCache,
+} from "@/lib/revision-memory-cache";
 
 const CAMPAIGNS_TTL_SEC = 45;
 
@@ -22,16 +26,17 @@ export function adCampaignsCacheTag(storeId: string): string {
 
 export function invalidateAdCampaignsCache(storeId: string): void {
   safeRevalidateTag(adCampaignsCacheTag(storeId));
+  clearRevisionMemoryCache(`store:${storeId}:`);
 }
 
 /**
- * Campanhas a partir da BD com cache servidor (45 s).
+ * Campanhas a partir da BD com cache servidor (45 s) + memória por revisão.
  * Sync manual (`syncFirst`) ignora cache e vai à API.
  */
 export async function getCachedStoreCampaignsView(
   storeId: string,
   periodInput: PeriodInput | undefined,
-  options?: { syncFirst?: boolean },
+  options?: { syncFirst?: boolean; fresh?: boolean; workspaceId?: string },
 ): Promise<StoreCampaignsView> {
   if (options?.syncFirst) {
     return loadStoreCampaignsLive(storeId, {
@@ -41,13 +46,30 @@ export async function getCachedStoreCampaignsView(
   }
 
   const periodKey = periodCacheKey(periodInput);
+  const fresh = Boolean(options?.fresh);
+  const workspaceId = options?.workspaceId;
+  const memKey = `store:${storeId}:ad-campaigns:${periodKey}`;
 
-  return unstable_cache(
-    async () => loadStoreCampaignsLive(storeId, { periodInput }),
-    ["ad-campaigns-view", storeId, periodKey],
-    {
-      revalidate: CAMPAIGNS_TTL_SEC,
-      tags: [adCampaignsCacheTag(storeId)],
-    },
-  )();
+  const compute = async () => {
+    if (fresh) {
+      return loadStoreCampaignsLive(storeId, { periodInput });
+    }
+    return unstable_cache(
+      async () => loadStoreCampaignsLive(storeId, { periodInput }),
+      ["ad-campaigns-view", storeId, periodKey],
+      {
+        revalidate: CAMPAIGNS_TTL_SEC,
+        tags: [adCampaignsCacheTag(storeId)],
+      },
+    )();
+  };
+
+  if (!workspaceId) {
+    return compute();
+  }
+
+  return withRevisionMemoryCache(
+    { key: `ws:${workspaceId}:${memKey}`, workspaceId, fresh },
+    compute,
+  );
 }

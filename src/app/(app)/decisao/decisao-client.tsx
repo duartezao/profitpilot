@@ -16,6 +16,7 @@ import type {
   TodayAction,
 } from "@/lib/decision-types";
 import { cn } from "@/lib/utils";
+import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 
 function decisionApiUrl(params: URLSearchParams, windowDays: 5 | 7): string {
   const q = new URLSearchParams();
@@ -29,7 +30,10 @@ async function fetchDecision(
   params: URLSearchParams,
   windowDays: 5 | 7,
 ): Promise<DecisionSummary> {
-  const res = await fetch(decisionApiUrl(params, windowDays), { cache: "no-store" });
+  const res = await fetch(
+    withLiveFreshParam(decisionApiUrl(params, windowDays)),
+    { cache: "no-store" },
+  );
   if (!res.ok) throw new Error("Falha ao carregar decisão.");
   return res.json();
 }
@@ -452,9 +456,10 @@ export function DecisaoClient() {
   const storeId = searchParams.get("store");
   const windowDays = searchParams.get("window") === "5" ? 5 : 7;
 
-  const { data, isError, isLoading } = useQuery<DecisionSummary>({
+  const { data, isError, isLoading, isFetching } = useQuery<DecisionSummary>({
     queryKey: ["decision-summary", workspaceId, storeId, windowDays],
     queryFn: () => fetchDecision(searchParams, windowDays),
+    placeholderData: (prev) => prev,
     refetchInterval: 120 * 1000,
   });
 
@@ -495,7 +500,7 @@ export function DecisaoClient() {
                 type="button"
                 onClick={() => setWindow(7)}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium",
+                  "rounded-md px-3 py-1.5 text-xs font-medium touch-manipulation transition-transform duration-100 active:scale-[0.97]",
                   windowDays === 7 ? "bg-muted text-foreground" : "text-muted-foreground",
                 )}
               >
@@ -505,7 +510,7 @@ export function DecisaoClient() {
                 type="button"
                 onClick={() => setWindow(5)}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium",
+                  "rounded-md px-3 py-1.5 text-xs font-medium touch-manipulation transition-transform duration-100 active:scale-[0.97]",
                   windowDays === 5 ? "bg-muted text-foreground" : "text-muted-foreground",
                 )}
               >
@@ -538,7 +543,7 @@ export function DecisaoClient() {
         </p>
       )}
 
-      {isLoading && storeId && (
+      {isLoading && !data && storeId && (
         <div className="space-y-4">
           <div className="h-24 animate-pulse rounded-lg border border-border bg-muted" />
           <div className="h-48 animate-pulse rounded-lg border border-border bg-muted" />
@@ -546,7 +551,11 @@ export function DecisaoClient() {
       )}
 
       {data && storeId && (
-        <>
+        <div
+          className={cn(
+            isFetching && "opacity-[0.92] transition-opacity duration-150",
+          )}
+        >
           {data.storeBerRoas && (
             <p className="text-sm text-muted-foreground">
               BER loja: <span className="font-medium tabular-nums">{data.storeBerRoas}x</span>
@@ -640,7 +649,7 @@ export function DecisaoClient() {
               </ul>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );

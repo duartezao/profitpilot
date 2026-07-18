@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { Briefcase, ChevronDown, Check, Plus, Loader2 } from "lucide-react";
 import {
   createWorkspaceAction,
@@ -14,6 +15,8 @@ import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import { clearPersistedStore } from "@/lib/scope-query";
 import { periodQueryFromSearchParams } from "@/lib/period";
+import { clearLiveQueryPersist } from "@/lib/live-query-persist";
+import { TAP_PRESS, TAP_PRESS_ROW } from "@/lib/ui-press";
 
 export function WorkspaceSelector({
   workspaces,
@@ -27,7 +30,9 @@ export function WorkspaceSelector({
   /** `top` abre o menu acima do botão (sidebar no fundo). */
   menuPlacement?: "top" | "bottom";
 }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -40,8 +45,10 @@ export function WorkspaceSelector({
   >(createWorkspaceAction, {});
 
   const current = workspaces.find((w) => w.id === currentId);
-  const itemCls =
-    "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted disabled:opacity-60";
+  const itemCls = cn(
+    TAP_PRESS_ROW,
+    "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted disabled:opacity-60",
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -80,11 +87,14 @@ export function WorkspaceSelector({
       }
       clearPersistedStore(currentId);
       clearPersistedStore(workspaceId);
+      clearLiveQueryPersist();
+      queryClient.clear();
       setOpen(false);
       const periodQs = periodQueryFromSearchParams(searchParams);
-      window.location.assign(
-        periodQs ? `/dashboard?${periodQs}` : "/dashboard",
-      );
+      const href = periodQs ? `/dashboard?${periodQs}` : "/dashboard";
+      router.replace(href);
+      router.refresh();
+      setSwitchingId(null);
     } catch {
       setSwitchError("Erro de rede. Tenta novamente.");
       setSwitchingId(null);
@@ -179,7 +189,10 @@ export function WorkspaceSelector({
           setOpen((o) => !o);
           setSwitchError(null);
         }}
-        className="flex w-full min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-foreground hover:bg-muted sm:gap-2 sm:px-3 sm:py-2"
+        className={cn(
+          TAP_PRESS,
+          "flex w-full min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-foreground hover:bg-muted sm:gap-2 sm:px-3 sm:py-2",
+        )}
       >
         <Briefcase className="h-4 w-4 shrink-0 text-muted-foreground" />
         <Sensitive className="min-w-0 flex-1 truncate text-left">

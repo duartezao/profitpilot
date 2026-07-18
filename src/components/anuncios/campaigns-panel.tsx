@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import {
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
+import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 import {
   periodFromSearchParams,
   periodIncludesToday,
@@ -161,9 +162,12 @@ async function fetchCampaigns(
   const q = new URLSearchParams(periodQs);
   q.set("store", storeId);
   if (sync) q.set("sync", "1");
-  const res = await fetch(`/api/anuncios/campaigns?${q.toString()}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    withLiveFreshParam(`/api/anuncios/campaigns?${q.toString()}`),
+    {
+      cache: "no-store",
+    },
+  );
   if (!res.ok) throw new Error("Falha ao carregar campanhas.");
   return res.json();
 }

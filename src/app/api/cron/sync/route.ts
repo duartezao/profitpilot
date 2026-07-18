@@ -6,7 +6,7 @@ export const maxDuration = 300;
 
 /**
  * Endpoint único de sync automático (Vercel Cron ou agendador externo).
- * Um pedido sincroniza todas as lojas em falta — intervalo global (2 h).
+ * Um pedido sincroniza todas as lojas em falta — intervalo global (30 min).
  *
  * Protegido por CRON_SECRET (header `Authorization: Bearer <CRON_SECRET>`).
  */

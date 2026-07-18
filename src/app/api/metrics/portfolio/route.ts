@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolvePortfolioWorkspaceIds } from "@/lib/portfolio-metrics";
 import { getCachedPortfolioSummary } from "@/lib/portfolio-summary-cache";
+import { parseFreshParam } from "@/lib/request-fresh";
 import {
   authErrorResponse,
   requireUser,
@@ -44,6 +45,7 @@ export async function GET(request: Request) {
       portfolio,
       periodInput,
       ids,
+      { fresh: parseFreshParam(params) },
     );
 
     if (!summary) {

@@ -14,6 +14,7 @@ import { MobileNavMoreMenu } from "@/components/mobile-nav-more-menu";
 import { useAppViewModeContext } from "@/components/app-view-mode-provider";
 import { cn } from "@/lib/utils";
 import { hrefWithScope } from "@/lib/scope-query";
+import { TAP_PRESS } from "@/lib/ui-press";
 
 function NavItemInner({
   label,
@@ -28,11 +29,13 @@ function NavItemInner({
     <>
       <Icon
         className={cn(
-          "h-5 w-5 transition-opacity",
+          "h-5 w-5 transition-opacity duration-100",
           pending && "opacity-40",
         )}
       />
-      <span className={cn(pending && "opacity-60")}>{label}</span>
+      <span className={cn("transition-opacity duration-100", pending && "opacity-60")}>
+        {label}
+      </span>
     </>
   );
 }
@@ -103,7 +106,8 @@ function BottomNavLinks() {
                 aria-expanded={moreOpen}
                 aria-haspopup="dialog"
                 className={cn(
-                  "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium touch-manipulation",
+                  TAP_PRESS,
+                  "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium",
                   moreOpen || moreActive
                     ? "text-accent"
                     : "text-muted-foreground",
@@ -125,7 +129,8 @@ function BottomNavLinks() {
               prefetch
               scroll={false}
               className={cn(
-                "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium touch-manipulation",
+                TAP_PRESS,
+                "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium",
                 active ? "text-accent" : "text-muted-foreground",
               )}
             >

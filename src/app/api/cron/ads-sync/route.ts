@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Sync automático de ads (cron Vercel, de 2 em 2 h).
- * Hoje + até 14 dias em falta/parciais por loja; throttle 2 h por conta.
+ * Sync automático de ads (cron Vercel, a cada 30 min, desfasado do Shopify).
+ * Hoje + até 14 dias em falta/parciais por loja; throttle = intervalo ads.
  *
  * Protegido por CRON_SECRET (header `Authorization: Bearer <CRON_SECRET>`).
  */

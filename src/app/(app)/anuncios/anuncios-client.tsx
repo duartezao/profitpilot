@@ -12,12 +12,13 @@ import {
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
 import { LastSyncBadge } from "@/components/last-sync-badge";
+import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 
 async function fetchAdSpendView(storeId: string | null): Promise<AdSpendView> {
   const url = storeId
     ? `/api/anuncios/view?store=${encodeURIComponent(storeId)}`
     : "/api/anuncios/view";
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(withLiveFreshParam(url), { cache: "no-store" });
   if (!res.ok) throw new Error("Falha ao carregar ad spend.");
   return res.json();
 }

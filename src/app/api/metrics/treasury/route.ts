@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCachedWorkspaceTreasury } from "@/lib/treasury-cache";
+import { parseFreshParam } from "@/lib/request-fresh";
 import {
   authErrorResponse,
   requireUser,
@@ -11,13 +12,15 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const user = await requireUser();
-    const storeId = new URL(request.url).searchParams.get("store") ?? undefined;
+    const params = new URL(request.url).searchParams;
+    const storeId = params.get("store") ?? undefined;
     if (storeId) await requireWorkspaceStore(user, storeId, { activeOnly: true });
 
     const treasury = await getCachedWorkspaceTreasury(
       user.workspaceId,
       storeId,
       user.storeAccess,
+      { fresh: parseFreshParam(params) },
     );
 
     return NextResponse.json(treasury, {

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Wallet, Settings, AlertTriangle } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import { ScopeLink } from "@/components/scope-link";
@@ -9,12 +10,14 @@ import type { IncomingDayLine, WorkspaceTreasury } from "@/lib/treasury";
 import { useWorkspace } from "@/components/workspace-context";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { LastSyncBadge } from "@/components/last-sync-badge";
+import { withLiveFreshParam } from "@/lib/refresh-live-queries";
+import { cn } from "@/lib/utils";
 
 async function fetchTreasury(storeId: string | null): Promise<WorkspaceTreasury> {
   const url = storeId
     ? `/api/metrics/treasury?store=${encodeURIComponent(storeId)}`
     : "/api/metrics/treasury";
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(withLiveFreshParam(url), { cache: "no-store" });
   if (!res.ok) throw new Error("Falha ao carregar tesouraria.");
   return res.json();
 }
@@ -57,7 +60,12 @@ function IncomingTimeline({
 export function TreasuryClient() {
   const { workspaceId } = useWorkspace();
   const storeId = useSearchParams().get("store");
-  const { data, isError, isFetching } = useQuery({
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const { data, isError, isFetching, isPending } = useQuery({
     queryKey: ["treasury", workspaceId, storeId],
     queryFn: () => fetchTreasury(storeId),
     placeholderData: (prev) => prev,
@@ -133,7 +141,12 @@ export function TreasuryClient() {
     : (data?.receivedByDay ?? []);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div
+      className={cn(
+        "mx-auto max-w-5xl space-y-6",
+        Boolean(data) && isFetching && "opacity-[0.92] transition-opacity duration-150",
+      )}
+    >
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -201,7 +214,19 @@ export function TreasuryClient() {
         </div>
       )}
 
-      {!data || data.stores.length === 0 ? (
+      {!mounted || (!data && (isPending || isFetching)) ? (
+        <div className="animate-pulse space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-[88px] rounded-lg border border-border bg-muted/80"
+              />
+            ))}
+          </div>
+          <div className="h-40 rounded-lg border border-border bg-muted/60" />
+        </div>
+      ) : !data || data.stores.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface p-12 text-center">
           <Wallet className="h-8 w-8 text-muted-foreground" />
           <p className="mt-3 text-sm font-medium">Sem lojas ligadas.</p>

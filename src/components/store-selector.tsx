@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { storeActiveInFinancialPeriod } from "@/lib/operation-filters";
 import { periodFromSearchParams } from "@/lib/period";
 import type { StoreOperationStatus } from "@/lib/operations-pipeline";
+import { TAP_PRESS, TAP_PRESS_ROW } from "@/lib/ui-press";
 
 export type StoreOption = {
   id: string;
@@ -168,12 +169,18 @@ export function StoreSelector({
     setOpen(false);
   }
 
-  const itemCls =
-    "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted";
+  const itemCls = cn(
+    TAP_PRESS_ROW,
+    "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted",
+  );
 
   const menuBody = (
     <>
-      <button type="button" className={itemCls} onClick={() => select(null)}>
+      <button
+        type="button"
+        className={itemCls}
+        onClick={() => select(null)}
+      >
         <span>Todas as lojas</span>
         {!validStore && <Check className="h-4 w-4 text-accent" />}
       </button>
@@ -205,7 +212,10 @@ export function StoreSelector({
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={`Loja: ${currentName}`}
-        className="flex w-full min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-foreground hover:bg-muted sm:gap-2 sm:px-3"
+        className={cn(
+          TAP_PRESS,
+          "flex w-full min-w-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-foreground hover:bg-muted sm:gap-2 sm:px-3",
+        )}
       >
         <StoreIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <Sensitive className="min-w-0 flex-1 truncate text-left">

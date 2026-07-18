@@ -4,13 +4,14 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/components/workspace-context";
-import { isLiveQueryKey } from "@/lib/live-query-keys";
+import { refreshLiveQueries } from "@/lib/refresh-live-queries";
 
 const MIN_VISIBILITY_REFRESH_MS = 2_000;
 const SSE_RECONNECT_MS = 4_000;
 
 /**
  * SSE + refresh ao voltar à app (PWA, telemóvel, mudança de janela no desktop).
+ * SSE só invalida React Query (leve). `router.refresh()` só ao voltar à app.
  */
 export function WorkspaceLiveSync() {
   const queryClient = useQueryClient();
@@ -30,9 +31,7 @@ export function WorkspaceLiveSync() {
       if (now - lastVisibilityRefresh.current < MIN_VISIBILITY_REFRESH_MS) return;
       lastVisibilityRefresh.current = now;
 
-      void queryClient.invalidateQueries({
-        predicate: (q) => isLiveQueryKey(q.queryKey),
-      });
+      void refreshLiveQueries(queryClient);
       router.refresh();
     };
 
@@ -46,10 +45,8 @@ export function WorkspaceLiveSync() {
           const { rev } = JSON.parse(event.data) as { rev?: string };
           if (!rev) return;
           if (lastRev.current !== null && rev !== lastRev.current) {
-            void queryClient.invalidateQueries({
-              predicate: (q) => isLiveQueryKey(q.queryKey),
-            });
-            router.refresh();
+            // Só RQ — sem router.refresh (evita re-fetch RSC do layout).
+            void refreshLiveQueries(queryClient);
           }
           lastRev.current = rev;
         } catch {
