@@ -29,6 +29,7 @@ import {
   COGS_INPUT_CURRENCIES,
   isCogsInputCurrency,
   isCogsMode,
+  type CogsMode,
 } from "@/lib/cogs-modes";
 import { resolveCogsModeForStoreSessionCountries } from "@/lib/session-cogs-policy";
 import { parseLocaleNumberOrZero } from "@/lib/parse-number";
@@ -172,9 +173,8 @@ export async function updateStoreSettingsAction(
   const analyticsSessionCountry = mirrorSessionCountry(
     analyticsSessionCountries,
   );
-  const requestedCogsMode = isCogsMode(d.cogsMode ?? "")
-    ? d.cogsMode
-    : undefined;
+  const requestedCogsMode: CogsMode | undefined =
+    d.cogsMode && isCogsMode(d.cogsMode) ? d.cogsMode : undefined;
   const cogsInputCurrency = isCogsInputCurrency(d.cogsInputCurrency ?? "")
     ? d.cogsInputCurrency
     : undefined;
@@ -190,11 +190,16 @@ export async function updateStoreSettingsAction(
   );
   if (!store) return { error: "Loja não encontrada ou sem acesso." };
 
+  const storeCogsMode: CogsMode | undefined =
+    typeof store.cogsMode === "string" && isCogsMode(store.cogsMode)
+      ? store.cogsMode
+      : undefined;
+
   const { mode: cogsMode, forceDay, cogsDayFromKey } =
     await resolveCogsModeForStoreSessionCountries(
       d.storeId,
       analyticsSessionCountries,
-      requestedCogsMode ?? (store.cogsMode as typeof requestedCogsMode),
+      requestedCogsMode ?? storeCogsMode,
     );
 
   const previousKeys = sessionCountryKeysFromStore(store);
