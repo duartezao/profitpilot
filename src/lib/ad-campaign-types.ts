@@ -84,11 +84,16 @@ export function aggregateCampaignPeriodTotals(
   currency: string,
 ): CampaignPeriodTotals {
   const spend = campaigns.reduce((s, c) => s + c.spend, 0);
+  const spendPlatform = campaigns.reduce(
+    (s, c) => s + (c.spendPlatform ?? c.spend),
+    0,
+  );
   const clicks = campaigns.reduce((s, c) => s + c.clicks, 0);
   const impressions = campaigns.reduce((s, c) => s + c.impressions, 0);
   const conversions = campaigns.reduce((s, c) => s + c.conversions, 0);
   const conversionValue = campaigns.reduce((s, c) => s + c.conversionValue, 0);
-  const m = metricsFromCampaignTotals(spend, impressions, clicks);
+  // CPC/CPM sem fee (plataforma); spend/ROAS no total incluem fee.
+  const m = metricsFromCampaignTotals(spendPlatform, impressions, clicks);
   return {
     spend,
     clicks,

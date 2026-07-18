@@ -363,15 +363,22 @@ function applyFeesAndAggregateCampaignRows(
   return [...agg.values()]
     .map(({ latestDateKey: _d, ...r }) => {
       const spend = Math.round(r.spend * 100) / 100;
+      const spendPlatform = Math.round(r.spendPlatform * 100) / 100;
       const conversionValue = Math.round(r.conversionValue * 100) / 100;
       const conversions = Math.round(r.conversions * 100) / 100;
       return {
         ...r,
         spend,
+        spendPlatform,
         conversions,
         conversionValue,
+        // ROAS / spend: com fees (custo real). CPC/CPM: só plataforma (comparável à Meta/Google).
         roas: roasFromCampaign(spend, conversionValue),
-        ...metricsFromCampaignTotals(spend, r.impressions, r.clicks),
+        ...metricsFromCampaignTotals(
+          spendPlatform,
+          r.impressions,
+          r.clicks,
+        ),
       };
     })
     .sort((a, b) => b.spend - a.spend);
@@ -414,7 +421,11 @@ async function convertCampaignRowsToBase(
         spendPlatformInput,
         currency: base,
         roas: roasFromCampaign(spendInput, conversionValueInput),
-        ...metricsFromCampaignTotals(spendInput, r.impressions, r.clicks),
+        ...metricsFromCampaignTotals(
+          spendPlatformInput ?? spendInput,
+          r.impressions,
+          r.clicks,
+        ),
       });
       continue;
     }
@@ -439,7 +450,11 @@ async function convertCampaignRowsToBase(
       spendPlatform,
       conversionValue,
       roas: roasFromCampaign(spend, conversionValue),
-      ...metricsFromCampaignTotals(spend, r.impressions, r.clicks),
+      ...metricsFromCampaignTotals(
+        spendPlatform ?? spend,
+        r.impressions,
+        r.clicks,
+      ),
     });
   }
   return out;
