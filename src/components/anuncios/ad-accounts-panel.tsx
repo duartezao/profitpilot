@@ -6,13 +6,14 @@ import { useSearchParams } from "next/navigation";
 import type { AdAccountRow } from "@/lib/ad-accounts";
 import {
   addAdAccountAction,
-  consumeMetaOAuthTokenAction,
   discoverAdAccountsAction,
+  discoverMetaFromOAuthAction,
   type AdAccountActionState,
   type AdAccountsDiscoverState,
 } from "@/app/(app)/anuncios/ad-account-actions";
 import { AD_PLATFORM_LABELS, type AdPlatform } from "@/lib/ad-spend-platforms";
 import { hrefOAuthStart } from "@/lib/scope-query";
+import { useActionOkOnce } from "@/lib/use-action-ok-once";
 
 const API_PLATFORMS = ["meta", "tiktok"] as const satisfies readonly AdPlatform[];
 
@@ -66,6 +67,7 @@ export function AdAccountsPanel({
   >(addAdAccountAction, {});
   const [platform, setPlatform] = useState<AdPlatform>("meta");
   const [token, setToken] = useState("");
+  const [metaOAuthPending, setMetaOAuthPending] = useState(false);
   const [discovered, setDiscovered] = useState<DiscoveredAccount[]>([]);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
@@ -80,9 +82,11 @@ export function AdAccountsPanel({
     searchParams,
   );
 
-  useEffect(() => {
-    if (addState.ok) onChanged?.();
-  }, [addState.ok, onChanged]);
+  useActionOkOnce(addState.ok, () => {
+    setMetaOAuthPending(false);
+    setToken("");
+    onChanged?.();
+  });
 
   useEffect(() => {
     const err = searchParams.get("oauth_error");
@@ -91,17 +95,26 @@ export function AdAccountsPanel({
       return;
     }
     if (searchParams.get("oauth") === "meta" && canEdit) {
-      void consumeMetaOAuthTokenAction(storeId).then((pending) => {
-        if (pending) {
-          setPlatform("meta");
-          setToken(pending.token);
-          setLinkedLoginEmail(pending.loginEmail ?? "");
-          setOauthMsg(
-            pending.loginEmail
-              ? `Meta: ${pending.loginEmail} — procura contas abaixo.`
-              : "Token Meta recebido — procura contas abaixo.",
-          );
+      startDiscover(async () => {
+        const res = await discoverMetaFromOAuthAction(storeId);
+        if (res.error) {
+          setDiscoverError(res.error);
+          setOauthMsg(null);
+          return;
         }
+        setPlatform("meta");
+        setMetaOAuthPending(true);
+        setToken("");
+        setLinkedLoginEmail(res.loginEmail ?? "");
+        const list = mapDiscovered(res);
+        setDiscovered(list);
+        setDiscoverError(null);
+        if (list.length === 1) setSelectedId(list[0].id);
+        setOauthMsg(
+          res.loginEmail
+            ? `Meta: ${res.loginEmail} — escolhe a conta abaixo.`
+            : `${list.length} conta${list.length === 1 ? "" : "s"} Meta encontrada${list.length === 1 ? "" : "s"}.`,
+        );
       });
     }
   }, [searchParams, canEdit, storeId]);
@@ -112,6 +125,7 @@ export function AdAccountsPanel({
     setDiscoverError(null);
     setDiscovered([]);
     setSelectedId("");
+    setMetaOAuthPending(false);
     startDiscover(async () => {
       const res = await discoverAdAccountsAction(platform, activeToken);
       if (res.error) {
@@ -151,6 +165,7 @@ export function AdAccountsPanel({
               setSelectedId("");
               setDiscoverError(null);
               setOauthMsg(null);
+              setMetaOAuthPending(false);
             }}
             className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
               platform === p
@@ -187,43 +202,49 @@ export function AdAccountsPanel({
         </p>
       )}
 
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          {platform === "meta" ? "Access token" : "Token TikTok"}
-        </label>
-        <input
-          type="password"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          autoComplete="off"
-          className={inputCls}
-          placeholder={platform === "meta" ? "EAA… ou OAuth acima" : "Token TikTok"}
-        />
-        <button
-          type="button"
-          disabled={discovering || token.trim().length < 10}
-          onClick={runDiscover}
-          className="mt-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
-        >
-          {discovering ? "A procurar…" : "Procurar contas"}
-        </button>
-        {discoverError && (
-          <p className="mt-2 text-sm text-negative">{discoverError}</p>
-        )}
-        {!discoverError && discovered.length === 0 && token.trim().length >= 10 && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Conta partilhada não aparece? Confirma que o token é do utilizador que
-            aceitou o convite no Business Manager e que tens permissão ads_read.
-          </p>
-        )}
-      </div>
+      {!metaOAuthPending && (
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            {platform === "meta" ? "Access token (manual)" : "Token TikTok"}
+          </label>
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            autoComplete="off"
+            className={inputCls}
+            placeholder={
+              platform === "meta" ? "EAA… (opcional se usares OAuth)" : "Token TikTok"
+            }
+          />
+          <button
+            type="button"
+            disabled={discovering || token.trim().length < 10}
+            onClick={runDiscover}
+            className="mt-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          >
+            {discovering ? "A procurar…" : "Procurar contas"}
+          </button>
+          {discoverError && (
+            <p className="mt-2 text-sm text-negative">{discoverError}</p>
+          )}
+        </div>
+      )}
+
+      {discoverError && metaOAuthPending && (
+        <p className="text-sm text-negative">{discoverError}</p>
+      )}
 
       {discovered.length > 0 && (
         <form action={addAction} className="space-y-3 rounded-lg border border-border p-4">
           <input type="hidden" name="storeId" value={storeId} />
           <input type="hidden" name="platform" value={platform} />
           <input type="hidden" name="linkedLoginEmail" value={linkedLoginEmail} />
-          <input type="hidden" name="accessToken" value={token} />
+          {metaOAuthPending ? (
+            <input type="hidden" name="metaOAuthPending" value="1" />
+          ) : (
+            <input type="hidden" name="accessToken" value={token} />
+          )}
 
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">

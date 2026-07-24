@@ -1,11 +1,12 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import { Trash2 } from "lucide-react";
 import {
   deleteAdAccountAction,
   type AdAccountActionState,
 } from "@/app/(app)/anuncios/ad-account-actions";
+import { useActionOkOnce } from "@/lib/use-action-ok-once";
 
 export function DeleteAdAccountButton({
   accountId,
@@ -16,14 +17,12 @@ export function DeleteAdAccountButton({
   label?: string;
   onDeleted?: () => void;
 }) {
-  const [state, action, pending] = useActionState<AdAccountActionState, FormData>(
-    deleteAdAccountAction,
-    {},
-  );
+  const [state, action, pending] = useActionState<
+    AdAccountActionState,
+    FormData
+  >(deleteAdAccountAction, {});
 
-  useEffect(() => {
-    if (state.ok) onDeleted?.();
-  }, [state.ok, onDeleted]);
+  useActionOkOnce(state.ok, onDeleted);
 
   return (
     <form

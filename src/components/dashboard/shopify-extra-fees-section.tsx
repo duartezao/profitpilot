@@ -1,7 +1,5 @@
 import { getCurrentUser } from "@/lib/auth";
-import { connectToDatabase } from "@/lib/db";
-import { Store } from "@/models/Store";
-import { canAccessStore } from "@/lib/store-access";
+import { findStoreForUser } from "@/lib/store-scope";
 import {
   appliesAutoEuCustomsFees,
   buildEuCustomsFeeAutoSummary,
@@ -17,12 +15,14 @@ export async function ShopifyExtraFeesSection({
   storeId: string;
 }) {
   const user = await getCurrentUser();
-  if (!user || !canAccessStore(user.storeAccess, storeId)) return null;
+  if (!user?.workspaceId) return null;
 
-  await connectToDatabase();
-  const store = await Store.findById(storeId)
-    .select("name cogsMode workspaceId ianaTimezone importStartDate createdAt analyticsSessionCountry")
-    .lean();
+  const store = await findStoreForUser(
+    user,
+    storeId,
+    "name cogsMode workspaceId ianaTimezone importStartDate createdAt analyticsSessionCountry",
+    { activeOnly: true },
+  );
   if (!store) return null;
 
   const mode = (store.cogsMode ?? "shopify") as CogsMode;
@@ -33,7 +33,5 @@ export async function ShopifyExtraFeesSection({
   const baseCurrency = await getBaseCurrency(store.workspaceId);
   const summary = await buildEuCustomsFeeAutoSummary(store, baseCurrency);
 
-  return (
-    <EuCustomsFeeAutoPanel storeId={storeId} summary={summary} />
-  );
+  return <EuCustomsFeeAutoPanel storeId={storeId} summary={summary} />;
 }

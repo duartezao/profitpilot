@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runDueSyncs } from "@/lib/auto-sync";
+import { timingSafeStringEqual } from "@/lib/timing-safe";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const provided = auth?.replace(/^Bearer\s+/i, "") ?? "";
 
-  if (!provided || provided !== secret) {
+  if (!provided || !timingSafeStringEqual(provided, secret)) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 

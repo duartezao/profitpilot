@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   addAdAccountAction,
@@ -9,6 +9,7 @@ import {
 } from "@/app/(app)/anuncios/ad-account-actions";
 import { DeleteAdAccountButton } from "@/components/anuncios/delete-ad-account-button";
 import type { AdAccountRow } from "@/lib/ad-accounts";
+import { useActionOkOnce } from "@/lib/use-action-ok-once";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
@@ -53,18 +54,30 @@ export function GoogleAdsStoreLink({
     {},
   );
 
-  useEffect(() => {
-    if (state.ok) onChanged?.();
-  }, [state.ok, onChanged]);
+  useActionOkOnce(state.ok, onChanged);
+
+  const loginsSignature = useMemo(
+    () => workspaceGoogleLogins.map((l) => l.id).join(","),
+    [workspaceGoogleLogins],
+  );
 
   useEffect(() => {
     const first = workspaceGoogleLogins[0]?.id ?? "";
-    setCredentialId(first);
+    setCredentialId((prev) =>
+      prev && workspaceGoogleLogins.some((l) => l.id === prev) ? prev : first,
+    );
+  }, [workspaceGoogleLogins, loginsSignature]);
+
+  useEffect(() => {
+    setManualMode((prev) => (googleAdsApiReady ? prev : true));
+  }, [googleAdsApiReady]);
+
+  // Só limpa descoberta quando muda a lista de Gmails (não a cada refetch).
+  useEffect(() => {
     setDiscovered([]);
     setSelectedId("");
     setDiscoverError("");
-    setManualMode(!googleAdsApiReady);
-  }, [workspaceGoogleLogins, googleAdsApiReady]);
+  }, [loginsSignature]);
 
   if (!canEdit) return null;
 
@@ -150,9 +163,9 @@ export function GoogleAdsStoreLink({
         <h3 className="text-sm font-semibold">Google Ads — esta loja</h3>
       )}
       {!embedded && (
-      <p className="mt-1 text-xs text-muted-foreground">
-        Escolhe o Gmail que aceitou o convite e o Customer ID (ou procura contas).
-      </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Escolhe o Gmail que aceitou o convite e o Customer ID (ou procura contas).
+        </p>
       )}
 
       {workspaceGoogleLogins.length === 0 ? (

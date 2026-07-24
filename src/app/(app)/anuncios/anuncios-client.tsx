@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -8,9 +8,7 @@ import { useWorkspace } from "@/components/workspace-context";
 import { scopeQueryFromInput } from "@/lib/scope-query";
 import type { AdSpendView } from "@/lib/ad-spend-view";
 import { AnunciosStoreView } from "@/components/anuncios/anuncios-store-view";
-import {
-  LIVE_DATA_POLL_MS,
-} from "@/lib/ad-sync-constants";
+import { LIVE_DATA_POLL_MS } from "@/lib/ad-sync-constants";
 import { LastSyncBadge } from "@/components/last-sync-badge";
 import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 
@@ -31,22 +29,19 @@ export function AnunciosClient() {
   const { data, isError, isFetching } = useQuery({
     queryKey: ["ad-spend-view", workspaceId, storeId],
     queryFn: () => fetchAdSpendView(storeId),
-    // Se já houve visita a esta loja (ou ao overview), mostra instantâneo da cache
-    // e refaz fetch em background.
     initialData: () =>
       queryClient.getQueryData<AdSpendView>([
         "ad-spend-view",
         workspaceId,
         storeId,
       ]),
+    placeholderData: (prev) => prev,
     staleTime: LIVE_DATA_POLL_MS - 10_000,
     refetchInterval: LIVE_DATA_POLL_MS,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
 
-  // Prefetch do detalhe por loja quando estamos no overview, para a troca ser instantânea.
-  // Limitado para não abrir demasiadas ligações.
   useEffect(() => {
     if (!data || data.mode !== "overview") return;
     const ids = data.overview.summaries.map((s) => s.storeId).slice(0, 6);
@@ -59,7 +54,7 @@ export function AnunciosClient() {
     }
   }, [data, queryClient, workspaceId]);
 
-  function onDataChanged() {
+  const onDataChanged = useCallback(() => {
     void queryClient.invalidateQueries({
       queryKey: ["ad-spend-view", workspaceId, storeId],
     });
@@ -67,7 +62,7 @@ export function AnunciosClient() {
     void queryClient.invalidateQueries({ queryKey: ["treasury"] });
     void queryClient.invalidateQueries({ queryKey: ["ad-campaigns"] });
     void queryClient.invalidateQueries({ queryKey: ["decision-summary"] });
-  }
+  }, [queryClient, workspaceId, storeId]);
 
   if (isError) {
     return (
@@ -94,9 +89,9 @@ export function AnunciosClient() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Anúncios</h1>
             <p className="text-sm text-muted-foreground">
-            Ad spend manual por loja e plataforma — selecciona uma loja no topo
-            para preencher.
-          </p>
+              Ad spend manual por loja e plataforma — selecciona uma loja no topo
+              para preencher.
+            </p>
           </div>
           <LastSyncBadge
             lastSyncedAt={data.lastSyncedAt}
@@ -165,11 +160,9 @@ export function AnunciosClient() {
     );
   }
 
-  const s = data.store;
-
   return (
     <AnunciosStoreView
-      store={s}
+      store={data.store}
       lastSyncedAt={data.lastSyncedAt}
       isFetching={isFetching}
       onDataChanged={onDataChanged}

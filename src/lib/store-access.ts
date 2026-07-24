@@ -2,19 +2,24 @@ import mongoose from "mongoose";
 
 export type StoreAccess = "all" | string[];
 
+/**
+ * Normaliza storeAccess. Valores desconhecidos → `[]` (fail-closed),
+ * nunca `"all"` (evita privilégio acidental se a BD estiver corrupta).
+ */
 export function normalizeStoreAccess(value: unknown): StoreAccess {
   if (value === "all") return "all";
   if (Array.isArray(value)) {
     const ids = value.map(String).filter((id) => mongoose.isValidObjectId(id));
-    return ids.length ? ids : [];
+    return ids;
   }
-  return "all";
+  return [];
 }
 
 export function canAccessStore(
   storeAccess: StoreAccess,
   storeId: string,
 ): boolean {
+  if (!mongoose.isValidObjectId(storeId)) return false;
   if (storeAccess === "all") return true;
   return storeAccess.includes(storeId);
 }
