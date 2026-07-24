@@ -19,6 +19,24 @@ function applySecurityHeaders(response: NextResponse): NextResponse {
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=()",
   );
+  // CSP base — Next precisa de inline scripts/styles; restringe origens e frames.
+  response.headers.set(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self' https:",
+      "worker-src 'self'",
+      "manifest-src 'self'",
+    ].join("; "),
+  );
   if (process.env.NODE_ENV === "production") {
     response.headers.set(
       "Strict-Transport-Security",

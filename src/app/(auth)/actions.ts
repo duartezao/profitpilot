@@ -55,6 +55,9 @@ export async function registerAction(
   if (!password) {
     return { error: "Preenche a password." };
   }
+  const { validatePasswordStrength } = await import("@/lib/password-policy");
+  const pwdErr = validatePasswordStrength(password);
+  if (pwdErr) return { error: pwdErr };
 
   const contact = parseRegistrationContact(username, email);
   if (!contact.ok) {

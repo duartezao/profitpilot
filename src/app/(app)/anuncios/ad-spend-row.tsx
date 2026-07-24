@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import type { AdSpendDayRow } from "@/lib/ad-spend";
 import { platformDefaultsFromLines } from "@/lib/ad-spend-platforms";
@@ -21,6 +21,22 @@ function fmt(v: number, currency: string) {
   } catch {
     return v.toFixed(2);
   }
+}
+
+function useSpendActionNotify(
+  flag: boolean | undefined,
+  onChanged: (() => void) | undefined,
+) {
+  const seen = useRef(false);
+  useEffect(() => {
+    if (!flag) {
+      seen.current = false;
+      return;
+    }
+    if (seen.current) return;
+    seen.current = true;
+    onChanged?.();
+  }, [flag, onChanged]);
 }
 
 export function AdSpendRow({
@@ -44,18 +60,12 @@ export function AdSpendRow({
     {},
   );
 
-  useEffect(() => {
-    if (saveState.ok || saveState.conflict) {
-      onChanged?.();
-      if (saveState.ok) setOpen(false);
-    }
-  }, [saveState.ok, saveState.conflict, onChanged]);
+  useSpendActionNotify(Boolean(saveState.ok || saveState.conflict), onChanged);
+  useSpendActionNotify(Boolean(deleteState.ok || deleteState.conflict), onChanged);
 
   useEffect(() => {
-    if (deleteState.ok || deleteState.conflict) {
-      onChanged?.();
-    }
-  }, [deleteState.ok, deleteState.conflict, onChanged]);
+    if (saveState.ok) setOpen(false);
+  }, [saveState.ok]);
 
   const missing = row.amount === null;
   const isZero = row.amount === 0;

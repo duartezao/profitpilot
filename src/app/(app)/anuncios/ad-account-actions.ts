@@ -73,6 +73,8 @@ const addSchema = z
     linkedLoginEmail: z.string().trim().max(200).optional(),
     googleCredentialId: z.string().trim().optional(),
     googleLoginCustomerId: z.string().trim().max(32).optional(),
+    /** Token Meta só no cookie httpOnly — nunca no browser. */
+    metaOAuthPending: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.platform === "google") {
@@ -87,6 +89,8 @@ const addSchema = z
           path: ["refreshToken"],
         });
       }
+    } else if (data.platform === "meta" && data.metaOAuthPending) {
+      /* token lido do cookie no servidor */
     } else if (!data.accessToken || data.accessToken.length < 10) {
       ctx.addIssue({
         code: "custom",
@@ -184,6 +188,7 @@ export async function addAdAccountAction(
     linkedLoginEmail: formData.get("linkedLoginEmail") || undefined,
     googleCredentialId: formData.get("googleCredentialId") || undefined,
     googleLoginCustomerId: formData.get("googleLoginCustomerId") || undefined,
+    metaOAuthPending: formData.get("metaOAuthPending") === "1",
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
@@ -205,10 +210,21 @@ export async function addAdAccountAction(
     linkedLoginEmail,
     googleCredentialId,
     googleLoginCustomerId,
+    metaOAuthPending,
   } = parsed.data;
 
   let refreshTokenResolved = refreshToken?.trim() ?? "";
   let linkedEmailResolved = linkedLoginEmail ?? "";
+  let accessTokenResolved = accessToken?.trim() ?? "";
+
+  if (platform === "meta" && metaOAuthPending) {
+    const pending = await peekOAuthToken("meta", storeId);
+    if (!pending?.token) {
+      return { error: "Sessão OAuth Meta expirada — autoriza outra vez." };
+    }
+    accessTokenResolved = pending.token;
+    if (pending.loginEmail) linkedEmailResolved = pending.loginEmail;
+  }
 
   if (platform === "google" && googleCredentialId) {
     const cred = await getWorkspaceGoogleRefreshToken(
@@ -229,7 +245,7 @@ export async function addAdAccountAction(
     const verified = await verifyPlatformAccount(
       platform,
       externalAccountId,
-      accessToken,
+      accessTokenResolved || undefined,
       platform === "google" ? refreshTokenResolved : refreshToken,
       googleLoginCustomerId,
     );
@@ -243,7 +259,7 @@ export async function addAdAccountAction(
               ? { loginCustomerId: verified.loginCustomerId }
               : {}),
           }
-        : { accessToken: accessToken!.trim() };
+        : { accessToken: accessTokenResolved };
 
     await createAdAccount({
       workspaceId: new mongoose.Types.ObjectId(user.workspaceId),
@@ -258,11 +274,11 @@ export async function addAdAccountAction(
       linkedLoginEmail: linkedEmailResolved,
       replaceOtherOnPlatform: replaceOther,
     });
-    try {
-      await syncAdAccountsSpendForStore(storeId);
-    } catch {
-      /* sync opcional após ligar */
+    if (platform === "meta" && metaOAuthPending) {
+      await clearOAuthToken("meta", storeId);
     }
+    // Sync em background — não bloquear a UI a «assumir» a conta.
+    void syncAdAccountsSpendForStore(storeId).catch(() => {});
     revalidatePath("/anuncios");
     revalidatePath("/definicoes");
     return { ok: true };
@@ -458,7 +474,8 @@ export async function syncAdAccountsNowAction(
 ): Promise<AdAccountActionState> {
   const user = await getCurrentUser();
   if (!user?.workspaceId) return { error: "Sessão inválida." };
-  assertStoreAccess(user.storeAccess, storeId);
+  const store = await findStoreForUser(user, storeId, "_id");
+  if (!store) return { error: "Loja não encontrada ou sem acesso." };
   try {
     const { syncMissingAdMetricsForStore } = await import(
       "@/lib/ad-metrics-backfill"
@@ -477,6 +494,80 @@ export async function syncAdAccountsNowAction(
 const META_OAUTH_COOKIE = legacyOAuthTokenCookie("meta");
 const GOOGLE_OAUTH_COOKIE = legacyOAuthTokenCookie("google");
 
+/** Lê token OAuth do cookie httpOnly (não devolve ao cliente). */
+async function peekOAuthToken(
+  platform: "meta" | "google",
+  storeId: string,
+): Promise<{ token: string; loginEmail?: string } | null> {
+  if (!mongoose.isValidObjectId(storeId)) return null;
+  const jar = await cookies();
+  const scopedCookie = adOAuthTokenCookie(platform, storeId);
+  let token = jar.get(scopedCookie)?.value ?? null;
+  if (!token) {
+    const legacy =
+      platform === "meta" ? META_OAUTH_COOKIE : GOOGLE_OAUTH_COOKIE;
+    token = jar.get(legacy)?.value ?? null;
+  }
+  if (!token) return null;
+  const emailCookie = adOAuthLoginEmailCookie(platform, storeId);
+  const loginEmail = jar.get(emailCookie)?.value?.trim() || undefined;
+  return { token, loginEmail };
+}
+
+async function clearOAuthToken(
+  platform: "meta" | "google",
+  storeId: string,
+): Promise<void> {
+  const jar = await cookies();
+  jar.delete(adOAuthTokenCookie(platform, storeId));
+  jar.delete(adOAuthLoginEmailCookie(platform, storeId));
+  jar.delete(
+    platform === "meta" ? META_OAUTH_COOKIE : GOOGLE_OAUTH_COOKIE,
+  );
+}
+
+/**
+ * Lista contas Meta com o token OAuth pendente (cookie httpOnly).
+ * O access token nunca é enviado ao browser.
+ */
+export async function discoverMetaFromOAuthAction(
+  storeId: string,
+): Promise<AdAccountsDiscoverState & { loginEmail?: string }> {
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) return { error: "Sessão inválida." };
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão." };
+  }
+  if (!mongoose.isValidObjectId(storeId)) {
+    return { error: "Loja inválida." };
+  }
+  const store = await findStoreForUser(user, storeId, "_id");
+  if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
+  const pending = await peekOAuthToken("meta", storeId);
+  if (!pending?.token) {
+    return { error: "Sem token OAuth Meta — autoriza outra vez." };
+  }
+
+  try {
+    const meta = await listMetaAdAccounts(pending.token);
+    return {
+      platform: "meta",
+      meta,
+      loginEmail: pending.loginEmail,
+    };
+  } catch (e) {
+    return {
+      error:
+        e instanceof MetaApiError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : "Falha ao listar contas Meta.",
+    };
+  }
+}
+
 async function consumeOAuthPending(
   platform: "meta" | "google",
   storeId: string,
@@ -485,41 +576,40 @@ async function consumeOAuthPending(
 
   const user = await getCurrentUser();
   if (!user?.workspaceId) return null;
-  assertStoreAccess(user.storeAccess, storeId);
+  const store = await findStoreForUser(user, storeId, "_id");
+  if (!store) return null;
 
-  const jar = await cookies();
-  const scopedCookie = adOAuthTokenCookie(platform, storeId);
-  let token = jar.get(scopedCookie)?.value ?? null;
-  if (token) {
-    jar.delete(scopedCookie);
-  } else {
-    const legacy =
-      platform === "meta" ? META_OAUTH_COOKIE : GOOGLE_OAUTH_COOKIE;
-    token = jar.get(legacy)?.value ?? null;
-    if (token) jar.delete(legacy);
-  }
-  if (!token) return null;
+  const pending = await peekOAuthToken(platform, storeId);
+  if (!pending?.token) return null;
 
-  const emailCookie = adOAuthLoginEmailCookie(platform, storeId);
-  const loginEmail = jar.get(emailCookie)?.value?.trim() || undefined;
-  jar.delete(emailCookie);
-
-  if (platform === "google" && token && loginEmail) {
+  if (platform === "google" && pending.loginEmail) {
     try {
-      await upsertWorkspaceGoogleCredential(user.workspaceId, loginEmail, token);
+      await upsertWorkspaceGoogleCredential(
+        user.workspaceId,
+        pending.loginEmail,
+        pending.token,
+      );
     } catch {
-      /* ignorar — cookie ainda serve nesta sessão */
+      /* cookie ainda serve nesta sessão */
     }
   }
 
-  return { token, loginEmail };
+  // Meta: não devolver o token ao cliente — usar discoverMetaFromOAuthAction.
+  if (platform === "meta") {
+    return { token: "", loginEmail: pending.loginEmail };
+  }
+
+  await clearOAuthToken(platform, storeId);
+  return { token: pending.token, loginEmail: pending.loginEmail };
 }
 
-/** Lê token Meta guardado após OAuth desta loja (consumido uma vez). */
+/** @deprecated Preferir discoverMetaFromOAuthAction (token não sai do servidor). */
 export async function consumeMetaOAuthTokenAction(
   storeId: string,
 ): Promise<AdOAuthPending | null> {
-  return consumeOAuthPending("meta", storeId);
+  const pending = await peekOAuthToken("meta", storeId);
+  if (!pending) return null;
+  return { token: "", loginEmail: pending.loginEmail };
 }
 
 /** Lê refresh token Google guardado após OAuth desta loja (consumido uma vez). */

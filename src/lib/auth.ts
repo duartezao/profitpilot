@@ -308,6 +308,11 @@ export async function registerUser(input: {
   password: string;
   workspaceName?: string;
 }) {
+  const { assertAuthRateLimit } = await import("@/lib/auth-rate-limit");
+  assertAuthRateLimit(
+    `register:${(input.email ?? input.username ?? input.name).trim().toLowerCase()}`,
+  );
+
   await connectToDatabase();
 
   const parsed = parseRegistrationContact(
@@ -322,6 +327,9 @@ export async function registerUser(input: {
   if (!input.password) {
     throw new Error("Preenche a password.");
   }
+  const { validatePasswordStrength } = await import("@/lib/password-policy");
+  const pwdErr = validatePasswordStrength(input.password);
+  if (pwdErr) throw new Error(pwdErr);
 
   if (email) {
     const existingEmail = await User.findOne({ email }).lean();
@@ -366,6 +374,12 @@ export async function loginUser(input: {
   identifier: string;
   password: string;
 }) {
+  const { assertAuthRateLimit, clearAuthRateLimit } = await import(
+    "@/lib/auth-rate-limit"
+  );
+  const rateKey = `login:${input.identifier.trim().toLowerCase()}`;
+  assertAuthRateLimit(rateKey);
+
   await connectToDatabase();
   const user = await findUserByLoginIdentifier(input.identifier);
   if (!user) {
@@ -376,6 +390,7 @@ export async function loginUser(input: {
     throw new Error("Utilizador ou password incorretos.");
   }
 
+  clearAuthRateLimit(rateKey);
   await ensureUsername(user._id, user.email ?? null);
 
   const membership = await Membership.findOne({

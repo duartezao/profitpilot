@@ -1745,7 +1745,10 @@ Pipeline operacional de dropshipping.
 ## Autenticação e acesso
 
 * Autenticação forte com **sessões seguras** (cookies `httpOnly`, `Secure`, `SameSite`).
-* **Middleware** (`src/middleware.ts`): todas as rotas da app e APIs exigem cookie de sessão; `/login` e `/registo` são públicos; `/api/cron/*` e `/api/webhooks/*` usam autenticação própria (CRON_SECRET / HMAC Shopify).
+* **Middleware** (`src/middleware.ts`): todas as rotas da app e APIs exigem cookie de sessão; `/login` e `/registo` são públicos; `/api/cron/*` e `/api/webhooks/*` usam autenticação própria (CRON_SECRET / HMAC Shopify). Headers: XFO, nosniff, Referrer-Policy, Permissions-Policy, HSTS (prod), **CSP** base.
+* Lojas: acesso sempre com `findStoreForUser` / `requireWorkspaceStore` (**workspaceId** + `storeAccess`); `normalizeStoreAccess` é **fail-closed** (valor inválido → nenhuma loja).
+* Tokens Meta OAuth ficam só em cookie **httpOnly**; descoberta/ligação no servidor (não no browser).
+* Login: rate limit por identificador; registo com política de password (mín. 8, letras + números).
 * **Guards de API** (`src/lib/require-auth.ts`): `requireUser`, `requireWorkspaceStore` (loja ∈ workspace activo + `storeAccess`), `requireRole`.
 * Troca de workspace só via `switchWorkspace` — valida membership activa na BD (não confia no `workspaceId` do cliente).
 * **2FA obrigatório** (TOTP) para contas com acesso a dados financeiros — por fazer.
