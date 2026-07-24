@@ -16,9 +16,24 @@ function prune(now: number) {
 
 /**
  * Rate limit simples em memória (por instância).
- * Bloqueia brute-force de login/registo na mesma instância serverless.
+ * Conta só falhas — sucesso limpa o bucket.
  */
 export function assertAuthRateLimit(key: string): void {
+  const now = Date.now();
+  prune(now);
+  const existing = buckets.get(key);
+  if (!existing || existing.resetAt <= now) {
+    return;
+  }
+  if (existing.count >= MAX_ATTEMPTS) {
+    throw new Error(
+      "Demasiadas tentativas. Espera alguns minutos e tenta outra vez.",
+    );
+  }
+}
+
+/** Regista uma falha de login/registo. */
+export function recordAuthRateLimitFailure(key: string): void {
   const now = Date.now();
   prune(now);
   const existing = buckets.get(key);
@@ -27,11 +42,6 @@ export function assertAuthRateLimit(key: string): void {
     return;
   }
   existing.count += 1;
-  if (existing.count > MAX_ATTEMPTS) {
-    throw new Error(
-      "Demasiadas tentativas. Espera alguns minutos e tenta outra vez.",
-    );
-  }
 }
 
 export function clearAuthRateLimit(key: string): void {

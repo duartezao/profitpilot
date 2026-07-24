@@ -240,7 +240,10 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     tokenHash: hashToken(token),
     expiresAt: { $gt: new Date() },
   });
-  if (!session) return null;
+  if (!session) {
+    cookieStore.delete(SESSION_COOKIE);
+    return null;
+  }
 
   // Sliding expiration: prolonga a sessão enquanto o utilizador a usa.
   if (
@@ -253,7 +256,11 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   }
 
   const user = await User.findById(session.userId);
-  if (!user) return null;
+  if (!user) {
+    await Session.deleteOne({ _id: session._id });
+    cookieStore.delete(SESSION_COOKIE);
+    return null;
+  }
 
   const membership = await resolveMembership(
     user._id,
@@ -273,7 +280,12 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     ? await Workspace.findById(membership.workspaceId)
     : null;
 
-  if (!membership || !workspace) return null;
+  // Sessão órfã (sem membership/workspace) — apaga cookie para não loop login↔dashboard.
+  if (!membership || !workspace) {
+    await Session.deleteOne({ _id: session._id });
+    cookieStore.delete(SESSION_COOKIE);
+    return null;
+  }
 
   const ownsWorkspace = String(workspace.ownerId) === String(user._id);
   const role = effectiveWorkspaceRole(membership.role ?? "viewer", ownsWorkspace);
@@ -308,10 +320,11 @@ export async function registerUser(input: {
   password: string;
   workspaceName?: string;
 }) {
-  const { assertAuthRateLimit } = await import("@/lib/auth-rate-limit");
-  assertAuthRateLimit(
-    `register:${(input.email ?? input.username ?? input.name).trim().toLowerCase()}`,
+  const { assertAuthRateLimit, recordAuthRateLimitFailure } = await import(
+    "@/lib/auth-rate-limit"
   );
+  const rateKey = `register:${(input.email ?? input.username ?? input.name).trim().toLowerCase()}`;
+  assertAuthRateLimit(rateKey);
 
   await connectToDatabase();
 
@@ -320,20 +333,26 @@ export async function registerUser(input: {
     input.email ?? "",
   );
   if (!parsed.ok) {
+    recordAuthRateLimitFailure(rateKey);
     throw new Error(parsed.error);
   }
   const { username, email } = parsed.contact;
 
   if (!input.password) {
+    recordAuthRateLimitFailure(rateKey);
     throw new Error("Preenche a password.");
   }
   const { validatePasswordStrength } = await import("@/lib/password-policy");
   const pwdErr = validatePasswordStrength(input.password);
-  if (pwdErr) throw new Error(pwdErr);
+  if (pwdErr) {
+    recordAuthRateLimitFailure(rateKey);
+    throw new Error(pwdErr);
+  }
 
   if (email) {
     const existingEmail = await User.findOne({ email }).lean();
     if (existingEmail) {
+      recordAuthRateLimitFailure(rateKey);
       throw new Error("Já existe uma conta com este email.");
     }
   }
@@ -341,6 +360,7 @@ export async function registerUser(input: {
   if (username) {
     const existingUsername = await User.findOne({ username }).lean();
     if (existingUsername) {
+      recordAuthRateLimitFailure(rateKey);
       throw new Error("Este utilizador já está em uso. Escolhe outro.");
     }
   }
@@ -374,19 +394,20 @@ export async function loginUser(input: {
   identifier: string;
   password: string;
 }) {
-  const { assertAuthRateLimit, clearAuthRateLimit } = await import(
-    "@/lib/auth-rate-limit"
-  );
+  const { assertAuthRateLimit, clearAuthRateLimit, recordAuthRateLimitFailure } =
+    await import("@/lib/auth-rate-limit");
   const rateKey = `login:${input.identifier.trim().toLowerCase()}`;
   assertAuthRateLimit(rateKey);
 
   await connectToDatabase();
   const user = await findUserByLoginIdentifier(input.identifier);
   if (!user) {
+    recordAuthRateLimitFailure(rateKey);
     throw new Error("Utilizador ou password incorretos.");
   }
   const ok = await verifyPassword(user.passwordHash, input.password);
   if (!ok) {
+    recordAuthRateLimitFailure(rateKey);
     throw new Error("Utilizador ou password incorretos.");
   }
 
@@ -398,9 +419,21 @@ export async function loginUser(input: {
     status: "active",
   }).sort({ createdAt: 1 });
 
-  await createSession(
-    String(user._id),
-    membership ? String(membership.workspaceId) : undefined,
-  );
+  if (!membership) {
+    throw new Error(
+      "Esta conta não tem workspace activo. Pede um convite ou cria uma conta nova.",
+    );
+  }
+
+  const workspace = await Workspace.findById(membership.workspaceId)
+    .select("_id")
+    .lean();
+  if (!workspace) {
+    throw new Error(
+      "O workspace desta conta já não existe. Pede um convite ou cria uma conta nova.",
+    );
+  }
+
+  await createSession(String(user._id), String(membership.workspaceId));
   return { userId: String(user._id) };
 }
