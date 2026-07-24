@@ -68,12 +68,9 @@ export function middleware(request: NextRequest) {
 
   const authed = hasSession(request);
 
+  // /login e /registo: NÃO redirecionar só porque existe cookie.
+  // Cookie inválido/órfão (sem membership) causava loop infinito login↔dashboard.
   if (AUTH_PATHS.has(pathname)) {
-    if (authed) {
-      return applySecurityHeaders(
-        NextResponse.redirect(new URL("/dashboard", request.url)),
-      );
-    }
     return applySecurityHeaders(NextResponse.next());
   }
 
