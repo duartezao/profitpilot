@@ -739,31 +739,35 @@ export async function syncSoldProductCostsPage(
 
   if (newIds.length) {
     variantIds = newIds;
-  } else if (incremental) {
-    return {
-      count: 0,
-      hasMore: false,
-      changedVariantIds: [],
-      nextRefreshOffset: refreshOffset,
-      mode: "none",
-    };
   } else {
-    variantIds = await listSoldVariantIdsByOffset(
-      store._id,
-      refreshOffset,
-      batchSize,
-    );
+    // Já cotados: rever custo/preço na Shopify (incremental = 1 lote; inicial = todos).
+    const soldTotal = await countDistinctSoldVariants(store._id);
+    if (soldTotal === 0) {
+      return {
+        count: 0,
+        hasMore: false,
+        changedVariantIds: [],
+        nextRefreshOffset: 0,
+        mode: "none",
+      };
+    }
+    let offset = refreshOffset;
+    if (offset >= soldTotal) offset = 0;
+    variantIds = await listSoldVariantIdsByOffset(store._id, offset, batchSize);
     mode = "refresh";
     if (!variantIds.length) {
       return {
         count: 0,
         hasMore: false,
         changedVariantIds: [],
-        nextRefreshOffset: refreshOffset,
+        nextRefreshOffset: 0,
         mode: "none",
       };
     }
-    nextRefreshOffset = refreshOffset + variantIds.length;
+    nextRefreshOffset = offset + variantIds.length;
+    if (incremental && nextRefreshOffset >= soldTotal) {
+      nextRefreshOffset = 0;
+    }
   }
 
   const query = `query($ids: [ID!]!) {
@@ -801,17 +805,16 @@ export async function syncSoldProductCostsPage(
         mode: "new",
       };
     }
-    if (!incremental) {
-      const soldTotal = await countDistinctSoldVariants(store._id);
-      if (soldTotal > 0) {
-        return {
-          count,
-          hasMore: true,
-          changedVariantIds,
-          nextRefreshOffset: 0,
-          mode: "new",
-        };
-      }
+    // Depois das novas: rever já cotadas (inicial = todas; incremental = 1 lote).
+    const soldTotal = await countDistinctSoldVariants(store._id);
+    if (soldTotal > 0) {
+      return {
+        count,
+        hasMore: true,
+        changedVariantIds,
+        nextRefreshOffset: refreshOffset,
+        mode: "new",
+      };
     }
     return {
       count,
@@ -827,7 +830,7 @@ export async function syncSoldProductCostsPage(
       count,
       hasMore: false,
       changedVariantIds,
-      nextRefreshOffset: refreshOffset,
+      nextRefreshOffset,
       mode: "refresh",
     };
   }
@@ -2096,7 +2099,9 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   const assimilated = assimilateCogs
     ? await assimilatePendingCogsForStore(
         store._id,
-        changedVariantIds.length ? { variantIds: changedVariantIds } : undefined,
+        changedVariantIds.length
+          ? { variantIds: changedVariantIds, reviseHistory: true }
+          : undefined,
       )
     : { ordersUpdated: 0, linesFilled: 0 };
   await assimilatePendingPricesForStore(store._id);

@@ -38,6 +38,11 @@ const SyncStateSchema = new Schema(
     pendingCostVariantIds: { type: [String], default: [] },
     /** Offset no lote de pendingCostVariantIds (sync incremental UI). */
     pendingCostVariantOffset: { type: Number, default: 0 },
+    /**
+     * Variantes cujo custo Shopify mudou nesta sync (assimilação diferida no fim
+     * da fase products, com reviseHistory).
+     */
+    changedCostVariantIds: { type: [String], default: [] },
     /** Variantes vendidas já processadas na fase de coleções (ProductCatalog). */
     catalogRefreshOffset: { type: Number, default: 0 },
     sessionRangeIndex: { type: Number, default: 0 },
