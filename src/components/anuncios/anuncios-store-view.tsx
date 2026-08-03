@@ -162,8 +162,16 @@ export function AnunciosStoreView({
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium">{a.platformLabel}</p>
-                      <p className="text-sm text-muted-foreground" data-sensitive>
-                        {a.accountName || a.externalAccountId}
+                      {a.accountName ? (
+                        <p className="text-sm text-muted-foreground" data-sensitive>
+                          {a.accountName}
+                        </p>
+                      ) : null}
+                      <p
+                        className="text-xs text-muted-foreground tabular-nums"
+                        data-sensitive
+                      >
+                        ID {a.externalAccountId}
                       </p>
                       {a.linkedLoginEmail && (
                         <p className="text-xs text-muted-foreground" data-sensitive>
