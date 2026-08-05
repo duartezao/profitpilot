@@ -1987,7 +1987,7 @@ Pipeline operacional de dropshipping.
 ## Fase 2 — Lucro Real
 * COGS automático da Shopify (cost per item) + manual + CSV + cogsHistory — **feito**
 * Ad spend manual (`/anuncios`) + integração em métricas — **feito**; ligação **Meta / Google / TikTok** API — **feito** (tokens + discover); OAuth Meta — **feito** (`/api/oauth/meta/*`); OAuth Google — **feito** (`/api/oauth/google/*`); fees extra por conta API — **feito**
-* Refunds no cálculo e páginas `/pedidos` + `/reembolsos` — **feito**; chargebacks — página `/chargebacks` + sync Shopify Payments disputes — **feito** (entrada no lucro via taxas Shopify; alertas por implementar)
+* Refunds no cálculo e páginas `/pedidos` + `/reembolsos` — **feito**; chargebacks — página `/chargebacks` + sync Shopify Payments disputes (cron + sync UI) — **feito**; montante entra no Net Profit (exceto WON; evita dupla contagem se a encomenda já tiver refund) — **feito**
 * Cálculo de Net Profit, margem, ROAS/MER, **BER** e **POAS** nos KPIs estendidos — **feito**
 * Aviso COGS em falta por período + lucro sempre visível + gráfico lucro consolidado + sparklines — **feito**
 * Dashboard consolidado multi-loja + tabela comparativa loja a loja (ordenável, coluna Ad Spend) — **feito**

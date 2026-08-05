@@ -43,6 +43,16 @@ describe("calcNetProfit", () => {
     );
     assert.equal(profit, 150);
   });
+
+  it("subtrai chargebacks do lucro líquido", () => {
+    const profit = calcNetProfit(
+      { revenue: 1000, cogs: 300, shipping: 0, fees: 0 },
+      100,
+      0,
+      90,
+    );
+    assert.equal(profit, 510);
+  });
 });
 
 describe("contributionMarginPct", () => {
