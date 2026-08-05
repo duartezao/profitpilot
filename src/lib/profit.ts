@@ -6,11 +6,12 @@ export type ProfitInputs = {
   fees: number;
 };
 
-/** Net Profit = REV − COGS − envio − taxas − ad spend − outros custos operacionais. */
+/** Net Profit = REV − COGS − envio − taxas − ad spend − opex − chargebacks. */
 export function calcNetProfit(
   input: ProfitInputs,
   adSpend = 0,
   operatingExpenses = 0,
+  chargebacks = 0,
 ): number {
   return (
     input.revenue -
@@ -18,7 +19,8 @@ export function calcNetProfit(
     input.shipping -
     input.fees -
     adSpend -
-    operatingExpenses
+    operatingExpenses -
+    chargebacks
   );
 }
 
@@ -64,11 +66,17 @@ export function formatProfitBreakdown(
   input: ProfitBreakdownInput,
   adSpend: number,
   fmtMoney: (v: number) => string,
-  opts?: { note?: string; adSpendKnown?: boolean; operatingExpenses?: number },
+  opts?: {
+    note?: string;
+    adSpendKnown?: boolean;
+    operatingExpenses?: number;
+    chargebacks?: number;
+  },
 ): string {
   const adSpendKnown = opts?.adSpendKnown !== false;
   const adForProfit = adSpendKnown ? adSpend : 0;
   const operatingExpenses = opts?.operatingExpenses ?? 0;
+  const chargebacks = opts?.chargebacks ?? 0;
   const profit = calcNetProfit(
     {
       revenue: input.revenue,
@@ -78,6 +86,7 @@ export function formatProfitBreakdown(
     },
     adForProfit,
     operatingExpenses,
+    chargebacks,
   );
   const parts = [`REV ${fmtMoney(input.revenue)}`, `COGS −${fmtMoney(input.cogs)}`];
   if ((input.fees ?? 0) > 0) parts.push(`taxas −${fmtMoney(input.fees ?? 0)}`);
@@ -87,6 +96,9 @@ export function formatProfitBreakdown(
   if (adSpendKnown && adSpend > 0) parts.push(`ads −${fmtMoney(adSpend)}`);
   if (operatingExpenses > 0) {
     parts.push(`despesas −${fmtMoney(operatingExpenses)}`);
+  }
+  if (chargebacks > 0) {
+    parts.push(`chargebacks −${fmtMoney(chargebacks)}`);
   }
   let note = opts?.note;
   if (!note && !adSpendKnown) {

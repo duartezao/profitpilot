@@ -835,6 +835,7 @@ export async function runChunkedSyncStep(
     if (phase === "payouts") {
       let payouts = 0;
       let balanceTransactions = 0;
+      let disputes = 0;
       let payoutsError: string | undefined;
 
       try {
@@ -848,6 +849,13 @@ export async function runChunkedSyncStep(
           domain,
           accessToken,
         );
+        try {
+          const { syncDisputes } = await import("@/lib/dispute-sync");
+          disputes = await syncDisputes(freshStore, domain, accessToken);
+        } catch (e) {
+          console.error("[sync] disputes", e);
+        }
+        void disputes;
         freshStore.payoutsError = null;
       } catch (e) {
         const raw = e instanceof Error ? e.message : "Falha a obter payouts.";

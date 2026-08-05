@@ -2,7 +2,6 @@ import "server-only";
 import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { DailyMetric } from "@/models/DailyMetric";
-import { Dispute } from "@/models/Dispute";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import { Order } from "@/models/Order";
 import { fetchStoreDayFinancials } from "@/lib/metrics";
@@ -65,7 +64,7 @@ async function buildDayMetricPayload(
   const dayStart = new Date(dateKey + "T00:00:00");
   const dayEnd = new Date(dateKey + "T23:59:59.999");
 
-  const [orders, chargebackAgg, adRow, expenseRows] = await Promise.all([
+  const [orders, adRow, expenseRows] = await Promise.all([
     Order.countDocuments(
       mergePaidOrderFilter({
         workspaceId: wsOid,
@@ -73,16 +72,6 @@ async function buildDayMetricPayload(
         orderDate: { $gte: dayStart, $lte: dayEnd },
       }),
     ),
-    Dispute.aggregate<{ total: number }>([
-      {
-        $match: {
-          workspaceId: wsOid,
-          storeId: storeOid,
-          initiatedAt: { $gte: dayStart, $lte: dayEnd },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]),
     ManualAdSpend.findOne({ storeId: storeOid, dateKey })
       .select("amount lines")
       .lean(),
@@ -109,7 +98,7 @@ async function buildDayMetricPayload(
     shippingCost: financials.shipping,
     feesTotal: financials.fees,
     refunds: financials.refunds,
-    chargebacks: chargebackAgg[0]?.total ?? 0,
+    chargebacks: financials.chargebacks,
     adSpend,
     adSpendMeta: lineSpend("meta"),
     adSpendGoogle: lineSpend("google"),
