@@ -82,6 +82,7 @@ import {
   periodDayCount,
   periodIsSingleDay,
   formatDateInput,
+  formatDateKeyLabel,
   parseDateInput,
   addDays,
   startOfDay,
@@ -1356,7 +1357,7 @@ async function buildConsolidatedDailyProfitSeries(
     return {
       storeId: sid,
       name: s.name,
-      color: colorByStoreId.get(sid) ?? "#2563EB",
+      color: colorByStoreId.get(sid) ?? "#7C6BC4",
       key: `s_${sid}`,
     };
   });
@@ -1421,17 +1422,8 @@ async function buildConsolidatedDailyProfitSeries(
     const workspaceOpEx = sumWorkspaceExpensesForDay(expenseRows, dateKey);
     totalProfit -= workspaceOpEx;
 
-    const d = parseDateInput(dateKey);
-    point.label = d
-      ? d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })
-      : dateKey;
-    point.dateLabel = d
-      ? d.toLocaleDateString("pt-PT", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        })
-      : dateKey;
+    point.label = formatDateKeyLabel(dateKey);
+    point.dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
     point.profit = totalProfit;
     point.profitFmt = fmtMoney(totalProfit);
     point.byStore = byStore.sort(
@@ -1549,17 +1541,8 @@ async function buildDailyProfitSeries(
     );
     const dayCb = chargebacksByDay.get(dateKey) ?? 0;
     const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx, dayCb);
-    const d = parseDateInput(dateKey);
-    const label = d
-      ? d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" })
-      : dateKey;
-    const dateLabel = d
-      ? d.toLocaleDateString("pt-PT", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        })
-      : dateKey;
+    const label = formatDateKeyLabel(dateKey);
+    const dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
     return { dateKey, label, dateLabel, profit, profitFmt: fmtMoney(profit) };
   });
 }
@@ -1664,14 +1647,7 @@ async function buildStoreDailyMetrics(
       dayNeedsManual && o.orders > 0 && o.cogs === 0
         ? 1
         : missingCogsByDay.get(dateKey) ?? 0;
-    const d = parseDateInput(dateKey);
-    const dateLabel = d
-      ? d.toLocaleDateString("pt-PT", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        })
-      : dateKey;
+    const dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
     const sess = sessionsByDay.get(dateKey);
     const sessions = sess?.sessions ?? null;
     let profitTitle = formatProfitBreakdown(o, ad, fmtMoney, {
@@ -2704,7 +2680,7 @@ export async function buildWorkspaceSummary(
       return {
         storeId: String(s._id),
         name: s.name,
-        color: storeColorMap.get(String(s._id)) ?? "#2563EB",
+        color: storeColorMap.get(String(s._id)) ?? "#7C6BC4",
         revenue: fmtMoney(a.revenue),
         profit: fmtMoney(profit),
         margin: fmtMargin(a.revenue, profit),

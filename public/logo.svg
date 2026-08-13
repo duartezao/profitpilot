@@ -1,9 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 148 32" fill="none" role="img" aria-label="ProfitPilot">
   <style>
     .profit { fill: #111827; }
-    .pilot { fill: #2563EB; }
+    .pilot { fill: #7C6BC4; }
     @media (prefers-color-scheme: dark) {
-      .profit { fill: #F1F5F9; }
+      .profit { fill: #FAFAFA; }
+      .pilot { fill: #A89AD9; }
     }
   </style>
   <text x="0" y="22.5" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="600" letter-spacing="-0.03em">

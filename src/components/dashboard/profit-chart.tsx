@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -16,6 +16,8 @@ import {
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import type { ProfitChartPoint, ProfitChartSeries } from "@/lib/metrics";
+
+type MultiStoreView = "stores" | "total";
 
 function compactAxisValue(v: number): string {
   const abs = Math.abs(v);
@@ -150,6 +152,49 @@ function ChartLegend({ series }: { series: ProfitChartSeries[] }) {
   );
 }
 
+function MultiStoreViewToggle({
+  view,
+  onChange,
+}: {
+  view: MultiStoreView;
+  onChange: (next: MultiStoreView) => void;
+}) {
+  return (
+    <div
+      className="inline-flex rounded-lg border border-border p-0.5"
+      role="group"
+      aria-label="Vista do gráfico de lucro"
+    >
+      <button
+        type="button"
+        aria-pressed={view === "stores"}
+        onClick={() => onChange("stores")}
+        className={cn(
+          "rounded-md px-3 py-1.5 text-sm font-medium",
+          view === "stores"
+            ? "bg-accent/10 text-accent"
+            : "text-muted-foreground hover:bg-muted",
+        )}
+      >
+        Por loja
+      </button>
+      <button
+        type="button"
+        aria-pressed={view === "total"}
+        onClick={() => onChange("total")}
+        className={cn(
+          "rounded-md px-3 py-1.5 text-sm font-medium",
+          view === "total"
+            ? "bg-accent/10 text-accent"
+            : "text-muted-foreground hover:bg-muted",
+        )}
+      >
+        Total
+      </button>
+    </div>
+  );
+}
+
 export function ProfitChart({
   data,
   series,
@@ -158,6 +203,8 @@ export function ProfitChart({
   series?: ProfitChartSeries[];
 }) {
   const multiStore = Boolean(series && series.length > 1);
+  const [multiView, setMultiView] = useState<MultiStoreView>("stores");
+  const showPerStore = multiStore && multiView === "stores";
 
   const tickInterval = useMemo(() => {
     if (data.length <= 10) return 0;
@@ -211,9 +258,14 @@ export function ProfitChart({
 
   return (
     <div className="mt-4 min-w-0" data-sensitive-chart>
+      {multiStore && (
+        <div className="mb-3 flex justify-end">
+          <MultiStoreViewToggle view={multiView} onChange={setMultiView} />
+        </div>
+      )}
       <div className="h-52 w-full min-w-0 sm:h-64">
         <ResponsiveContainer width="100%" height="100%">
-          {multiStore && series ? (
+          {showPerStore && series ? (
             <LineChart {...chartProps}>
               {axes}
               {series.map((s) => (
@@ -256,7 +308,7 @@ export function ProfitChart({
           )}
         </ResponsiveContainer>
       </div>
-      {multiStore && series && <ChartLegend series={series} />}
+      {showPerStore && series && <ChartLegend series={series} />}
       {data.some((p) => p.consolidated === false) && (
         <p className="mt-2 text-xs text-muted-foreground">
           Dias recentes = lucro provisório (reembolsos ainda podem entrar).

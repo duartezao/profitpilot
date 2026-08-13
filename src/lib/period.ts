@@ -39,6 +39,13 @@ export type ResolvedPeriod = {
   specificDates?: string[];
   /** Período anterior (mesmos dias −7) para comparação. */
   prevSpecificDates?: string[];
+  /**
+   * Dias civis YYYY-MM-DD do intervalo (quando resolvido com fuso da loja).
+   * Preferir estes a formatar `start`/`end` — instantes zoned à meia-noite
+   * deslocam o dia civil em UTC / outros fusos.
+   */
+  startDateKey?: string;
+  endDateKey?: string;
   /** Chave estável para queryKey / cache. */
   key: string;
 };
@@ -83,6 +90,38 @@ function formatDay(d: Date, withYear = false): string {
     month: "short",
     ...(withYear ? { year: "numeric" } : {}),
   });
+}
+
+/**
+ * Formata YYYY-MM-DD como dia civil, sem desvio de fuso do servidor.
+ * (Meio-dia UTC + timeZone UTC evita off-by-one com `zonedStartOfDay`.)
+ */
+export function formatDateKeyLabel(
+  dateKey: string,
+  opts?: { withYear?: boolean; month?: "numeric" | "short" | "long" },
+): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey.trim());
+  if (!m) return dateKey;
+  const utc = new Date(
+    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0),
+  );
+  return utc.toLocaleDateString("pt-PT", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: opts?.month ?? "short",
+    ...(opts?.withYear ? { year: "numeric" } : {}),
+  });
+}
+
+export function formatDateKeyRangeLabel(
+  startKey: string,
+  endKey: string,
+): string {
+  if (startKey === endKey) {
+    return formatDateKeyLabel(startKey, { withYear: true });
+  }
+  const crossYear = startKey.slice(0, 4) !== endKey.slice(0, 4);
+  return `${formatDateKeyLabel(startKey, { withYear: crossYear })} – ${formatDateKeyLabel(endKey, { withYear: true })}`;
 }
 
 export function formatRangeLabel(start: Date, end: Date): string {
@@ -283,8 +322,24 @@ export function orderDateMatch(
   return dateFieldMatch("orderDate", period);
 }
 
-export function periodDayCount(period: ResolvedPeriod): number {
+export function periodDayCount(
+  period: Pick<
+    ResolvedPeriod,
+    "start" | "end" | "specificDates" | "startDateKey" | "endDateKey"
+  >,
+): number {
   if (period.specificDates?.length) return period.specificDates.length;
+  if (period.startDateKey && period.endDateKey) {
+    const start = parseDateInput(period.startDateKey);
+    const end = parseDateInput(period.endDateKey);
+    if (start && end) {
+      return (
+        Math.floor(
+          (end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000),
+        ) + 1
+      );
+    }
+  }
   return (
     Math.floor(
       (period.end.getTime() - period.start.getTime()) / (24 * 60 * 60 * 1000),
@@ -292,8 +347,18 @@ export function periodDayCount(period: ResolvedPeriod): number {
   );
 }
 
-export function periodIsSingleDay(period: ResolvedPeriod): boolean {
-  if (period.specificDates?.length === 1) return true;
+export function periodIsSingleDay(
+  period: Pick<
+    ResolvedPeriod,
+    "start" | "end" | "specificDates" | "startDateKey" | "endDateKey"
+  >,
+): boolean {
+  if (period.specificDates) {
+    return period.specificDates.length === 1;
+  }
+  if (period.startDateKey && period.endDateKey) {
+    return period.startDateKey === period.endDateKey;
+  }
   return period.start.toDateString() === period.end.toDateString();
 }
 
@@ -308,6 +373,16 @@ export function dateKeysFromResolvedPeriod(
   let keys: string[];
   if (period.specificDates?.length) {
     keys = [...period.specificDates].sort();
+  } else if (period.startDateKey && period.endDateKey) {
+    keys = [];
+    let cur = parseDateInput(period.startDateKey);
+    const end = parseDateInput(period.endDateKey);
+    if (cur && end) {
+      while (cur <= end) {
+        keys.push(formatDateInput(cur));
+        cur = addDays(cur, 1);
+      }
+    }
   } else {
     keys = [];
     let cur = startOfDay(period.start);
@@ -438,12 +513,15 @@ export function appendPeriodToUrl(
 export function shortPeriodLabel(period: ResolvedPeriod): string {
   if (period.preset === "dates") {
     if (period.specificDates?.length === 1) {
-      return formatDay(parseDateInput(period.specificDates[0])!, true);
+      return formatDateKeyLabel(period.specificDates[0], { withYear: true });
     }
     return `${period.specificDates?.length ?? 0} dias`;
   }
   if (period.preset === "custom") {
     if (periodIsSingleDay(period)) {
+      const key =
+        period.specificDates?.[0] ?? period.startDateKey ?? null;
+      if (key) return formatDateKeyLabel(key, { withYear: true });
       return formatDay(period.start, true);
     }
     return `${periodDayCount(period)} dias`;

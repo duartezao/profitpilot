@@ -3,7 +3,7 @@
  * Usada no gráfico consolidado e sparklines da tabela de lojas.
  */
 export const STORE_CHART_COLORS = [
-  "#2563EB",
+  "#7C6BC4",
   "#6366F1",
   "#0891B2",
   "#7C3AED",

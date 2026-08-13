@@ -43,7 +43,6 @@ export const workspaceNavItems: NavItem[] = [
   { label: "Lojas", href: "/lojas", icon: Store },
   { label: "Lucro & Finanças", href: "/financas", icon: LineChart },
   { label: "Payouts", href: "/payouts", icon: Banknote },
-  { label: "Decisão", href: "/decisao", icon: Scale },
   { label: "Notas", href: "/notas", icon: NotebookPen },
   { label: "Anúncios", href: "/anuncios", icon: Megaphone },
   { label: "Definições", href: "/definicoes", icon: Settings },
@@ -91,6 +90,7 @@ export const storeRequiredPaths = new Set([
   "/reembolsos",
   "/chargebacks",
   "/alertas",
+  "/decisao",
 ]);
 
 export function navItemsForStoreScope(
@@ -199,7 +199,7 @@ export function mobilePrimaryNavItems(
   return [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { label: "Lojas", href: "/lojas", icon: Store },
-    { label: "Decisão", href: "/decisao", icon: Scale },
+    { label: "Finanças", href: "/financas", icon: LineChart },
     mobileMoreNavItem,
   ];
 }

@@ -123,9 +123,9 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 > Resumo abaixo. A **fonte completa e canónica** (cores hex, tipografia, componentes, Tailwind config e variáveis CSS) está em **`design-system.md`** — seguir esse ficheiro a 100%.
 
 * **Tipografia**: Inter (ou Geist). Números **tabulares** (`font-variant-numeric: tabular-nums`). Títulos semibold, corpo regular.
-* **Cores (light)**: fundo principal `#F8FAFC`, sidebar/cartões `#FFFFFF` com borda `#E2E8F0`, texto principal `#111827`, texto secundário `#64748B`.
-* **Cores (dark)**: fundo `#1C242C`, sidebar `#181F28`, cartão `#22282E`, borda `#2E3844`, texto `#E8EDF2`.
-* **Accent** (discreto): azul `#2563EB` (apenas para item ativo, links e seleção).
+* **Cores (light)**: fundo principal `#F7F7F9`, sidebar `#F4F3F8`, cartões `#FFFFFF` com borda `#E8E7EC`, texto principal `#111827`, texto secundário `#64748B`, muted `#F0EFF4`.
+* **Cores (dark)**: fundo quase preto `#09090B`, sidebar `#0C0C0E`, cartão `#141416`, borda `#27272A`, texto `#FAFAFA`, muted `#1A1820`. Accent lavanda `#A89AD9`.
+* **Accent** (discreto): lavanda `#7C6BC4` light / `#A89AD9` dark (item ativo, links, seleção, gráficos).
 * **Semânticas**: lucro/positivo verde `#16A34A`; prejuízo/negativo vermelho `#DC2626`; aviso âmbar `#D97706`. Usadas **só** em valores e estados, nunca como decoração.
 * **Cantos**: `rounded-lg` (~8px) em cartões e botões.
 * **Sombras**: nenhuma ou muito subtil (`shadow-sm`); preferir **borda** a sombra.
@@ -275,6 +275,7 @@ Organização orientada ao lucro (alinhada com o design system — sóbria, sem 
 
 1. **KPIs principais** (grelha responsiva, até 6 por linha): **Faturamento**, **Net Profit** (card destacado — borda accent, valor maior), **Custos totais**, **Margem %**, **Ad Spend**, **ROAS**.
 2. **Gráfico «Lucro líquido» + painel «Repartição de custos»** lado a lado (`lg:grid-cols-3` — gráfico ocupa 2/3, painel 1/3; empilham no telemóvel).
+   * Com **2+ lojas** no consolidado: toggle **Por loja** (uma linha por loja) / **Total** (uma só linha com o lucro diário de todas juntas). O tooltip mantém o detalhe por loja em ambos os modos.
    * O painel mostra Faturamento, cada custo real (custo de produto, envio, taxas, anúncios, despesas operacionais) com barra proporcional e % da receita, **Custos totais** e **Lucro líquido** em destaque. Reembolsos aparecem em rodapé como informativo (já estão na receita líquida).
 3. **Metas do mês** (se configuradas) e **tabela comparativa loja a loja**.
 4. **Ver mais métricas** (painel expansível): BER, Margem contrib. %, COGS, Envio, Taxas, Refunds, Encomendas, AOV, MER, POAS, etc.
@@ -374,7 +375,8 @@ Net Profit =
 
 * Net Profit ao longo do tempo (gráfico diário na dashboard consolidada)
 * **Waterfall do lucro**: Revenue → menos cada custo → Net Profit (mostra para onde vai o dinheiro)
-* **P&L em `/financas`** — demonstração de resultados com COGS, envio, taxas, ad spend e reembolsos; avisos de COGS/ad spend em falta.
+* **P&L em `/financas`** — demonstração de resultados com COGS, envio, taxas, ad spend e reembolsos; avisos de COGS/ad spend em falta. No **overview (todas as lojas)**: cartão **Saldo em conta (banca)** no Resumo + tab **Caixa** com soma e detalhe por loja (`cashOnHand` = inicial + entradas + capital − COGS − envio − ads − levantamentos). Entradas e saídas usam a **mesma data de início** (saldo inicial, ou importação/criação da loja).
+* **Gateway externo** (Stripe/PayPal/MB): com `externalGatewayPayoutBusinessDays` definido, entradas de caixa = estimativa por encomenda (total − reembolsos − taxas), **sem** somar payouts Shopify Payments (evita double-count). Continua a ser uma **projecção**, não o extrato Stripe.
 * Lucro por loja, por produto, por país, por canal de aquisição
 * **Profit por order** (margem média por encomenda)
 * Breakeven ROAS por produto (a partir de que ROAS o produto deixa de dar prejuízo) — coluna **BER** em `/produtos` e dashboard da loja; exportação CSV em `/produtos`.
@@ -1071,7 +1073,7 @@ Lucro após taxas =
 
 **O que defines à mão para ficar exato:**
 
-* **Saldo inicial (banca) por loja** — defines, **em cada loja**, quanto tens nessa data na **moeda base do workspace** (ex. EUR na conta de payout), não na moeda da loja Shopify; a app projeta a partir daí (entradas − saídas conhecidas dessa loja). Configura-se em Definições → Lojas → Tesouraria. **Gateway externo**: campo «Payout gateway externo (dias úteis)» — cada encomenda **paga** entra em «a receber» / «recebido» N dias úteis (seg–sex) após a data da venda (valor ≈ total − reembolsos − taxas). Deixa vazio se usas só Shopify Payments. **Retirar banca**: botão com confirmação zera o saldo inicial — tesouraria e finanças deixam de contar esse valor (histórico de vendas mantém-se).
+* **Saldo inicial (banca) por loja** — só quando injectaste capital **nesta** loja (moeda base do workspace). Ao **criar loja**: opção «Banca do workspace» (defeito, saldo 0 — usa caixa/lucro das outras) vs «Banca própria» (valor + data). Evita duplicar banca no consolidado. Também em Definições → Lojas → Tesouraria. **Gateway externo**: «Payout gateway externo (dias úteis)» — encomenda paga entra em a receber/recebido N dias úteis após a venda. **Retirar banca**: zera o saldo inicial sem apagar histórico.
 * **Injeções de capital** — em Definições → **Capital no negócio**: regista quando depositas ou levantas dinheiro da conta do negócio (com data, valor e confirmação), sem alterar o saldo inicial por engano.
 * **Contas a pagar a fornecedores** — quanto e quando pagas o produto (AliExpress/CJ/etc.), para a saída de caixa ser real. (Em dropshipping é o que mais mexe no caixa.)
 * **Reserva para impostos/IVA** — defines uma % a separar; a app guarda esse valor à parte e mostra o caixa "limpo".
@@ -1878,7 +1880,7 @@ Pipeline operacional de dropshipping.
 3. **Métricas** — funil + tabela dia a dia (requer loja seleccionada).
 4. **Lucro & Finanças** — lucro real, taxas, P&L, saúde financeira, tesouraria.
 5. **Payouts** — quanto e quando recebes.
-6. **Decisão** — "o que fazer hoje", kill/scale, recomendações.
+6. **Decisão** — "o que fazer hoje", kill/scale, recomendações (**só com loja seleccionada**; oculto no overview).
 7. **Notas** — diário, relatório diário automático, exportações.
 8. **Anúncios** — ad spend por plataforma/campanha.
 9. **Definições** — conta, workspaces, equipa, lojas, capital.
@@ -1948,7 +1950,7 @@ Pipeline operacional de dropshipping.
 
 * App em ecrã inteiro (sem barra do browser), instalada no telemóvel.
 * KPIs empilhados, gráfico compacto, lista de lojas como cartões.
-* **Navegação inferior** (`< lg`): consolidado — Dashboard, Lojas, Decisão, Mais; com loja — Dashboard, Anúncios, Decisão, Mais; modo operação — Hoje, Tarefas, Coleções, Mais. Menu «Mais» agrupado por secção.
+* **Navegação inferior** (`< lg`): consolidado — Dashboard, Lojas, Finanças, Mais; com loja — Dashboard, Anúncios, Decisão, Mais; modo operação — Hoje, Tarefas, Coleções, Mais. Menu «Mais» agrupado por secção. **Decisão** só com loja seleccionada (não no overview).
 * Áreas de toque grandes, números tabulares legíveis.
 
 > Estes mockups são a base; podem ser refinados, mas a linguagem visual (sobriedade, flat, sem emojis/gradientes) é obrigatória.
@@ -2006,7 +2008,7 @@ Pipeline operacional de dropshipping.
 
 ## Fase 4 — Inteligência
 
-* **Tesouraria por loja** (`/financas` → Resumo com loja, `/tesouraria`) — saldo em conta desde início (inicial + payouts + injeções − COGS/envio/ads − levantamentos), payouts na BD — **feito**
+* **Tesouraria por loja** (`/financas` → Resumo com loja, `/tesouraria`) — saldo em conta desde início (inicial + payouts + injeções − COGS/envio/ads − despesas/mensalidades − levantamentos), payouts na BD — **feito**
 * **Injeções de capital** (Definições → Capital no negócio) — **feito**
 * **Apoio à decisão**: resumo "o que fazer hoje", semáforo kill/scale, recomendação de budget
 * IA para insights + resumo diário + chat sobre dados

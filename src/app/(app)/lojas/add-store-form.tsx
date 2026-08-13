@@ -78,6 +78,9 @@ export function AddStoreForm({
     addStoreAction,
     {},
   );
+  const [bankrollMode, setBankrollMode] = useState<"workspace" | "own">(
+    "workspace",
+  );
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
@@ -233,6 +236,74 @@ export function AddStoreForm({
               </p>
             </div>
           </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/30 p-4">
+          <p className="text-sm font-medium">Banca inicial</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Se esta loja arranca com lucro de outras lojas (sem depositar €
+            novos), escolhe a banca do workspace — evita duplicar saldo no
+            consolidado.
+          </p>
+          <input type="hidden" name="bankrollMode" value={bankrollMode} />
+          <div className="mt-3 inline-flex rounded-lg border border-border p-0.5">
+            <button
+              type="button"
+              aria-pressed={bankrollMode === "workspace"}
+              onClick={() => setBankrollMode("workspace")}
+              className={
+                bankrollMode === "workspace"
+                  ? "rounded-md bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent"
+                  : "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted"
+              }
+            >
+              Banca do workspace
+            </button>
+            <button
+              type="button"
+              aria-pressed={bankrollMode === "own"}
+              onClick={() => setBankrollMode("own")}
+              className={
+                bankrollMode === "own"
+                  ? "rounded-md bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent"
+                  : "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted"
+              }
+            >
+              Banca própria
+            </button>
+          </div>
+          {bankrollMode === "workspace" ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Saldo inicial = 0 €. A tesouraria conta só payouts − custos desta
+              loja a partir da data de importação.
+            </p>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className={labelCls}>Saldo inicial (€)</label>
+                <DecimalInput
+                  name="startingBalance"
+                  defaultValue={0}
+                  className={inputCls}
+                  required
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Data do saldo</label>
+                <input
+                  name="startingBalanceDate"
+                  type="date"
+                  required
+                  max={new Date().toISOString().slice(0, 10)}
+                  className={inputCls}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-2">
+                Só se depositaste dinheiro novo nesta loja (moeda base do
+                workspace).
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

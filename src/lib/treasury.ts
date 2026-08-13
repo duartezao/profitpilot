@@ -30,6 +30,11 @@ import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import { sumManualCashByStores } from "@/lib/cash-entries";
 import { resolveLastSyncedAtForStoreIds } from "@/lib/last-sync-at";
 import { buildExternalGatewayTreasury } from "@/lib/external-gateway-treasury";
+import {
+  loadWorkspaceExpensesLean,
+  sumLoadedExpenses,
+  sumLoadedWorkspaceExpenses,
+} from "@/lib/expenses";
 
 const INCOMING_PAYOUT_STATUSES = new Set([
   "pending",
@@ -74,6 +79,9 @@ export type StoreTreasuryLine = {
   outflowsShippingFmt: string;
   outflowsAdSpend: number;
   outflowsAdSpendFmt: string;
+  /** Apps / mensalidades / despesas manuais (Finanças) desde `sinceDate`. */
+  outflowsOpEx: number;
+  outflowsOpExFmt: string;
   outflowsTotal: number;
   outflowsTotalFmt: string;
   /** Capital injectado manualmente desde `sinceDate`. */
@@ -118,6 +126,8 @@ export type WorkspaceTreasury = {
     receivedFmt: string;
     outflowsTotal: number;
     outflowsTotalFmt: string;
+    outflowsOpEx: number;
+    outflowsOpExFmt: string;
     manualIn: number;
     manualInFmt: string;
     manualOut: number;
@@ -387,6 +397,8 @@ export async function buildWorkspaceTreasury(
       receivedFmt: formatCurrency(0, "EUR"),
       outflowsTotal: 0,
       outflowsTotalFmt: formatCurrency(0, "EUR"),
+      outflowsOpEx: 0,
+      outflowsOpExFmt: formatCurrency(0, "EUR"),
       manualIn: 0,
       manualInFmt: formatCurrency(0, "EUR"),
       manualOut: 0,
@@ -449,6 +461,8 @@ export async function buildWorkspaceTreasury(
         receivedFmt: fmt(0),
         outflowsTotal: 0,
         outflowsTotalFmt: fmt(0),
+        outflowsOpEx: 0,
+        outflowsOpExFmt: fmt(0),
         manualIn: 0,
         manualInFmt: fmt(0),
         manualOut: 0,
@@ -525,6 +539,7 @@ export async function buildWorkspaceTreasury(
     currency,
     storeCurrencyByStore,
   );
+  const expenseRows = await loadWorkspaceExpensesLean(wsId);
 
   const todayKey = new Date().toISOString().slice(0, 10);
   const fmtBase = (v: number) => fmt(v, currency);
@@ -578,7 +593,9 @@ export async function buildWorkspaceTreasury(
 
     let received = 0;
     for (const p of storePayouts) {
-      if (!countsTowardReceived(p, startDate, since90)) continue;
+      // Mesma janela que as saídas (`since`), não só 90 dias — senão o saldo
+      // fica artificialmente negativo quando há COGS/ads antigos sem payouts.
+      if (!countsTowardReceived(p, startDate, since)) continue;
       received += await payoutToBase(p);
     }
 
@@ -601,7 +618,7 @@ export async function buildWorkspaceTreasury(
     const receivedByDay = await buildReceivedByDay(
       storePayouts,
       startDate,
-      since90,
+      since,
       fmtBase,
       payoutToBase,
     );
@@ -616,23 +633,34 @@ export async function buildWorkspaceTreasury(
       fmtBase,
     );
 
+    /**
+     * Com gateway externo (Stripe/PayPal/MB): as entradas de caixa vêm da
+     * estimativa por encomenda — não somar payouts Shopify Payments em cima
+     * (double-count) nem misturar saldo Shopify no «a receber».
+     */
+    let incomingByDayFinal = incomingByDay;
+    let receivedByDayFinal = receivedByDay;
     if (externalGateway) {
-      incoming += externalGateway.incoming;
-      received += externalGateway.received;
+      received = externalGateway.received;
+      incoming = externalGateway.incoming;
+      incomingByDayFinal = externalGateway.incomingByDay;
+      receivedByDayFinal = externalGateway.receivedByDay;
     }
 
-    const mergedIncomingByDay = [
-      ...incomingByDay,
-      ...(externalGateway?.incomingByDay ?? []),
-    ];
-    const mergedReceivedByDay = [
-      ...receivedByDay,
-      ...(externalGateway?.receivedByDay ?? []),
-    ];
-
-    const outflowsTotal = out.cogs + out.shipping + out.adSpend;
+    const outflowsOps = out.cogs + out.shipping + out.adSpend;
+    const expenseSlice = { start: since, end: endOfDay(new Date()) };
+    const storeOpEx = sumLoadedExpenses(expenseRows, expenseSlice, sid);
+    /** Numa loja isolada, contas partilhadas do workspace também saem da banca. */
+    const wsOpExForStore =
+      stores.length === 1
+        ? sumLoadedWorkspaceExpenses(expenseRows, expenseSlice)
+        : 0;
+    const outflowsOpEx = storeOpEx + wsOpExForStore;
+    const outflowsTotal = outflowsOps + outflowsOpEx;
     const manual = manualCashMap.get(sid) ?? { manualIn: 0, manualOut: 0 };
-    const shopifyPending = available + incoming;
+    const shopifyPending = externalGateway
+      ? incoming
+      : available + incoming;
     const cashOnHand =
       startingBalance +
       received +
@@ -665,6 +693,8 @@ export async function buildWorkspaceTreasury(
       outflowsShippingFmt: fmtBase(out.shipping),
       outflowsAdSpend: out.adSpend,
       outflowsAdSpendFmt: fmtBase(out.adSpend),
+      outflowsOpEx,
+      outflowsOpExFmt: fmtBase(outflowsOpEx),
       outflowsTotal,
       outflowsTotalFmt: fmtBase(outflowsTotal),
       manualIn: manual.manualIn,
@@ -674,6 +704,7 @@ export async function buildWorkspaceTreasury(
       shopifyPending,
       shopifyPendingFmt: fmtBase(shopifyPending),
       shopifyPendingTitle: fmtBase(shopifyPending),
+      externalGatewayPayoutBusinessDays: externalDays,
       cashOnHand,
       cashOnHandFmt: formatCurrencyCompact(cashOnHand, currency),
       cashOnHandTitle: fmtBase(cashOnHand),
@@ -683,13 +714,28 @@ export async function buildWorkspaceTreasury(
       projected,
       projectedFmt: formatCurrencyCompact(projected, currency),
       projectedTitle: fmtBase(projected),
-      incomingByDay: mergedIncomingByDay,
-      receivedByDay: mergedReceivedByDay,
+      incomingByDay: incomingByDayFinal,
+      receivedByDay: receivedByDayFinal,
       payoutsError: s.payoutsError ?? null,
-      externalGatewayPayoutBusinessDays: externalDays,
     };
   }),
   );
+
+  /** Despesas workspace uma vez no consolidado (não repartidas por loja). */
+  let workspaceOpExTotal = 0;
+  if (stores.length > 1 && lines.length > 0) {
+    const sinceKeys = lines
+      .map((l) => l.sinceDate)
+      .filter((k): k is string => Boolean(k))
+      .sort();
+    if (sinceKeys[0]) {
+      const wsSlice = {
+        start: new Date(`${sinceKeys[0]}T00:00:00.000Z`),
+        end: endOfDay(new Date()),
+      };
+      workspaceOpExTotal = sumLoadedWorkspaceExpenses(expenseRows, wsSlice);
+    }
+  }
 
   const sum = (key: keyof StoreTreasuryLine) =>
     lines.reduce((a, l) => a + (l[key] as number), 0);
@@ -708,12 +754,13 @@ export async function buildWorkspaceTreasury(
     kindLabel: "Recebido",
   }));
 
-  const projectedTotal = sum("projectedCash");
-  const cashOnHandTotal = sum("cashOnHand");
-  const outflowsTotal = sum("outflowsTotal");
+  const cashOnHandTotal = sum("cashOnHand") - workspaceOpExTotal;
+  const outflowsOpExTotal = sum("outflowsOpEx") + workspaceOpExTotal;
+  const outflowsTotal = sum("outflowsTotal") + workspaceOpExTotal;
+  const shopifyPendingTotal = sum("shopifyPending");
+  const projectedTotal = cashOnHandTotal + shopifyPendingTotal;
   const manualInTotal = sum("manualIn");
   const manualOutTotal = sum("manualOut");
-  const shopifyPendingTotal = sum("shopifyPending");
   const lastSyncedAt = await resolveLastSyncedAtForStoreIds(
     stores.map((s) => String(s._id)),
   );
@@ -730,6 +777,8 @@ export async function buildWorkspaceTreasury(
       receivedFmt: fmt(sum("received")),
       outflowsTotal,
       outflowsTotalFmt: fmt(outflowsTotal),
+      outflowsOpEx: outflowsOpExTotal,
+      outflowsOpExFmt: fmt(outflowsOpExTotal),
       manualIn: manualInTotal,
       manualInFmt: fmt(manualInTotal),
       manualOut: manualOutTotal,

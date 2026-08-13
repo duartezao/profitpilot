@@ -27,11 +27,11 @@
 
 | Token | Hex | Uso |
 |---|---|---|
-| `background` | `#F8FAFC` | Fundo da área principal |
-| `sidebar` | `#FFFFFF` | Sidebar (branco sobre fundo cinza) |
+| `background` | `#F7F7F9` | Fundo da área principal |
+| `sidebar` | `#F4F3F8` | Sidebar (lavanda muito suave sobre o fundo) |
 | `surface` / card | `#FFFFFF` | Cartões (distinguidos por borda) |
-| `muted` | `#F1F5F9` | Fundos subtis, hover de linha, item ativo |
-| `border` | `#E2E8F0` | Bordas de cartões, tabelas, inputs |
+| `muted` | `#F0EFF4` | Fundos subtis, hover de linha, item ativo |
+| `border` | `#E8E7EC` | Bordas de cartões, tabelas, inputs |
 | `foreground` | `#111827` | Texto principal |
 | `muted-foreground` | `#64748B` | Texto secundário, labels |
 
@@ -39,20 +39,20 @@
 
 | Token | Hex | Uso |
 |---|---|---|
-| `background` | `#1C242C` | Fundo da área principal |
-| `sidebar` | `#181F28` | Sidebar (ligeiramente mais escura) |
-| `surface` / card | `#22282E` | Cartões |
-| `muted` | `#283448` | Fundos subtis, item ativo (tom azulado) |
-| `border` | `#2E3844` | Bordas |
-| `foreground` | `#E8EDF2` | Texto principal |
-| `muted-foreground` | `#8898A8` | Texto secundário |
+| `background` | `#09090B` | Fundo quase preto (neutro, sem azul) |
+| `sidebar` | `#0C0C0E` | Sidebar ligeiramente elevada |
+| `surface` / card | `#141416` | Cartões |
+| `muted` | `#1A1820` | Fundos subtis, item ativo (tom lavanda muito suave) |
+| `border` | `#27272A` | Bordas |
+| `foreground` | `#FAFAFA` | Texto principal |
+| `muted-foreground` | `#A1A1AA` | Texto secundário |
 
-### Accent e semânticas (iguais em light/dark)
+### Accent e semânticas
 
 | Token | Hex | Uso |
 |---|---|---|
-| `accent` (azul) | `#2563EB` | Item ativo, links, seleção, foco |
-| `accent-foreground` | `#FFFFFF` | Texto sobre accent |
+| `accent` (lavanda) | `#7C6BC4` light / `#A89AD9` dark | Item ativo, links, seleção, foco, gráficos |
+| `accent-foreground` | `#FFFFFF` light / `#0A0A0B` dark | Texto sobre accent |
 | `positive` (verde) | `#16A34A` | Lucro, crescimento, status "Scale" |
 | `negative` (vermelho) | `#DC2626` | Prejuízo, queda, status "Kill" |
 | `warning` (âmbar) | `#D97706` | Avisos, status intermédio |
@@ -107,7 +107,7 @@
 * **Ghost**: sem fundo, texto `foreground`, hover `muted`.
 
 ### Navegação
-* **Desktop**: sidebar fixa à esquerda, ~240px, fundo `sidebar`, item ativo com fundo `accent/10` (light) ou `muted` (dark) + texto `accent`.
+* **Desktop**: sidebar fixa à esquerda, ~240–256px, fundo `sidebar` (lavanda suave no light). Espaçamento generoso entre grupos (`space-y-6`) e itens (`py-2.5`). Secções em uppercase discreto. Item ativo com fundo `accent/10` (light) ou `muted` (dark) + texto `accent`. Sem borda sob o logo.
 * **Mobile**: barra inferior com 4 itens (ícone + label 11–12px), item ativo a `accent`.
 * Top bar: seletor de loja, seletor de período, avatar.
 
@@ -115,7 +115,7 @@
 
 ## 6. Gráficos (Recharts / Tremor)
 
-* Linhas/áreas: cor `accent` (`#2563EB`); área com opacidade baixa, sem gradiente forte.
+* Linhas/áreas: cor `accent` (`#7C6BC4`); área com opacidade baixa, sem gradiente forte.
 * Waterfall: barras neutras a `chart-neutral` e barra final de lucro a `chart-positive`; passos negativos com tom neutro mais claro.
 * Eixos e grelha: cinza muito subtil; sem fundos coloridos.
 * Sparklines: 1px, sem pontos, sem eixos.
@@ -131,14 +131,15 @@
 
 ```css
 :root {
-  --background: #F8FAFC;
-  --sidebar: #FFFFFF;
+  --background: #F7F7F9;
+  --sidebar: #F4F3F8;
   --surface: #FFFFFF;
-  --muted: #F1F5F9;
-  --border: #E2E8F0;
+  --muted: #F0EFF4;
+  --border: #E8E7EC;
   --foreground: #111827;
   --muted-foreground: #64748B;
-  --accent: #2563EB;
+  --accent: #7C6BC4;
+  --accent-foreground: #FFFFFF;
   --positive: #16A34A;
   --negative: #DC2626;
   --warning: #D97706;
@@ -148,15 +149,17 @@
 }
 
 .dark {
-  --background: #1C242C;
-  --sidebar: #181F28;
-  --surface: #22282E;
-  --muted: #283448;
-  --border: #2E3844;
-  --foreground: #E8EDF2;
-  --muted-foreground: #8898A8;
-  --chart-positive: #609060;
-  --chart-neutral: #8898A8;
+  --background: #09090B;
+  --sidebar: #0C0C0E;
+  --surface: #141416;
+  --muted: #1A1820;
+  --border: #27272A;
+  --foreground: #FAFAFA;
+  --muted-foreground: #A1A1AA;
+  --accent: #A89AD9;
+  --accent-foreground: #0A0A0B;
+  --chart-positive: #6B9B6B;
+  --chart-neutral: #71717A;
 }
 ```
 

@@ -153,6 +153,14 @@ export function sumLoadedExpenses(
   return sumExpensesForScope(expenses, period, storeId);
 }
 
+/** Só despesas de workspace (sem `storeId`) no período. */
+export function sumLoadedWorkspaceExpenses(
+  expenses: ExpenseLean[],
+  period: PeriodSlice,
+): number {
+  return sumExpensesForScope(expenses, period, undefined, true);
+}
+
 export function sumLoadedExpensesForDay(
   expenses: ExpenseLean[],
   dateKey: string,
