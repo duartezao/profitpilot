@@ -10,11 +10,12 @@ import { canAccessStore } from "@/lib/store-access";
 import { buildWorkspacePnl } from "@/lib/metrics";
 import { buildWorkspaceTreasury } from "@/lib/treasury";
 import { scopeQueryFromInput } from "@/lib/scope-query";
-import { formatCurrency, formatPercent } from "@/lib/utils";
+import { formatCurrency, formatPercent, cn } from "@/lib/utils";
 import { formatProfitBreakdown } from "@/lib/profit";
 import { DataWarnings } from "@/components/dashboard/data-warnings";
 import { FinancasView } from "@/components/financas/financas-view";
 import { StoreCashFlowSection } from "@/components/financas/store-cash-flow";
+import { ConsolidatedCashSection } from "@/components/financas/consolidated-cash-section";
 import { ExpensesPanel } from "@/components/financas/expenses-panel";
 import { BusinessPnlPanel } from "@/components/financas/business-pnl-panel";
 import { FinancasModeToggle } from "@/components/financas/financas-mode-toggle";
@@ -51,10 +52,14 @@ export default async function FinancasPage({
     storeId,
     user.storeAccess,
   );
-  const treasury = storeId
-    ? await buildWorkspaceTreasury(user.workspaceId, storeId, user.storeAccess)
-    : null;
-  const storeCash = treasury?.stores[0] ?? null;
+  const treasury = await buildWorkspaceTreasury(
+    user.workspaceId,
+    storeId,
+    user.storeAccess,
+  );
+  const storeCash = storeId ? (treasury.stores[0] ?? null) : null;
+  const consolidatedCash =
+    !storeId && treasury.stores.length > 0 ? treasury : null;
   const { totals, stores, currency } = pnl;
   const scopeName =
     storeId && stores.length > 0 ? stores[0].name : null;
@@ -166,6 +171,50 @@ export default async function FinancasPage({
           </p>
         </div>
       </div>
+
+      {consolidatedCash && (
+        <div className="mt-4 rounded-lg border border-border bg-background p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">
+                Saldo em conta (banca)
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-2xl font-semibold tabular-nums",
+                  consolidatedCash.totals.cashOnHand >= 0
+                    ? "text-positive"
+                    : "text-negative",
+                )}
+                title={consolidatedCash.totals.cashOnHandTitle}
+                data-sensitive
+              >
+                {consolidatedCash.totals.cashOnHandFmt}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Soma de todas as lojas · projecção (não é o saldo real do banco).
+                Inclui a soma dos saldos iniciais de cada loja.
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs font-medium text-muted-foreground">
+                Com a receber
+              </p>
+              <p
+                className="mt-1 text-lg font-semibold tabular-nums"
+                title={consolidatedCash.totals.projectedCashTitle}
+                data-sensitive
+              >
+                {consolidatedCash.totals.projectedCashFmt}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Em conta + Shopify por pagar
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mt-5">
         <h2 className="text-lg font-semibold">Demonstração de resultados</h2>
         <p className="text-sm text-muted-foreground">
@@ -290,7 +339,7 @@ export default async function FinancasPage({
         <p className="text-sm text-muted-foreground">
           {scopeName
             ? `Caixa acumulada e P&L do período · ${pnl.periodLabel}.`
-            : `P&L real · ${pnl.periodLabel}.`}
+            : `P&L do período · ${pnl.periodLabel}. Banca projectada no Resumo e em Caixa.`}
         </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -336,13 +385,15 @@ export default async function FinancasPage({
 
       <FinancasView
         scopeName={scopeName}
-        hasStoreCash={Boolean(storeCash)}
+        hasStoreCash={Boolean(storeCash || consolidatedCash)}
         hasStoreTable={!scopeName && stores.length > 0}
         expenseCount={expenses.length}
         resumo={resumoPanel}
         storeCash={
           storeCash ? (
             <StoreCashFlowSection cash={storeCash} embedded />
+          ) : consolidatedCash ? (
+            <ConsolidatedCashSection treasury={consolidatedCash} />
           ) : undefined
         }
         storeTable={storeTablePanel}

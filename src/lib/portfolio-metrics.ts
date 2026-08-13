@@ -274,7 +274,7 @@ export async function buildPortfolioSummary(
         row: {
           workspaceId,
           name: meta.name,
-          color: colorMap.get(workspaceId) ?? "#2563EB",
+          color: colorMap.get(workspaceId) ?? "#7C6BC4",
           revenue: fmtMoney(converted.revenue),
           profit: fmtMoney(profit),
           margin: formatPercent(marginPct),

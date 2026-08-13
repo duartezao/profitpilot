@@ -68,6 +68,10 @@ const schema = z.object({
   workspaceId: z.string().trim().optional(),
   cogsMode: z.enum(COGS_MODES).optional(),
   cogsInputCurrency: z.enum(["EUR", "USD"]).optional(),
+  /** `workspace` = sem saldo inicial (usa lucro/caixa do workspace). `own` = banca própria. */
+  bankrollMode: z.enum(["workspace", "own"]).optional(),
+  startingBalance: zLocaleNumber(z.number().min(0)).optional(),
+  startingBalanceDate: z.string().trim().optional(),
 });
 
 export async function addStoreAction(
@@ -93,6 +97,9 @@ export async function addStoreAction(
     workspaceId: formData.get("workspaceId") ?? "",
     cogsMode: String(formData.get("cogsMode") ?? ""),
     cogsInputCurrency: String(formData.get("cogsInputCurrency") ?? ""),
+    bankrollMode: String(formData.get("bankrollMode") ?? "workspace"),
+    startingBalance: formData.get("startingBalance") ?? "0",
+    startingBalanceDate: String(formData.get("startingBalanceDate") ?? ""),
   });
 
   if (!parsed.success) {
@@ -187,6 +194,29 @@ export async function addStoreAction(
     { effectiveFromKey: floorKey, ...feeConfig },
   ];
 
+  const bankrollMode = parsed.data.bankrollMode === "own" ? "own" : "workspace";
+  let startingBalance = 0;
+  let startingBalanceDate: Date | null = null;
+  if (bankrollMode === "own") {
+    const bal = parsed.data.startingBalance ?? 0;
+    const dateRaw = parsed.data.startingBalanceDate?.trim() ?? "";
+    if (bal > 0 && !dateRaw) {
+      return {
+        error:
+          "Indica a data do saldo inicial, ou escolhe «Usar banca do workspace».",
+      };
+    }
+    if (dateRaw) {
+      const d = parseDateInput(dateRaw);
+      if (!d) return { error: "Data do saldo inicial inválida." };
+      startingBalanceDate = d;
+    }
+    startingBalance = bal;
+    if (startingBalance > 0 && !startingBalanceDate) {
+      return { error: "Indica a data do saldo inicial." };
+    }
+  }
+
   await Store.create({
     workspaceId: targetWorkspaceId,
     name,
@@ -202,6 +232,8 @@ export async function addStoreAction(
     ianaTimezone: shop.ianaTimezone || undefined,
     feeConfig,
     feeSchedule,
+    startingBalance,
+    startingBalanceDate,
     status: "active",
   });
 

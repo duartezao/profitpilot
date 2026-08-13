@@ -32,6 +32,15 @@ export function StoreCashFlowSection({
     { label: "COGS", value: `−${cash.outflowsCogsFmt}`, tone: "text-negative" },
     { label: "Envio", value: `−${cash.outflowsShippingFmt}`, tone: "text-negative" },
     { label: "Ad Spend", value: `−${cash.outflowsAdSpendFmt}`, tone: "text-negative" },
+    ...(cash.outflowsOpEx > 0
+      ? [
+          {
+            label: "Apps e mensalidades",
+            value: `−${cash.outflowsOpExFmt}`,
+            tone: "text-negative",
+          },
+        ]
+      : []),
     ...(cash.manualOut > 0
       ? [
           {
@@ -118,7 +127,8 @@ export function StoreCashFlowSection({
             {cash.cashOnHandFmt}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Inicial + recebido + capital − COGS − envio − ads − levantamentos
+            Inicial + recebido + capital − COGS − envio − ads − despesas −
+            levantamentos
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
@@ -154,7 +164,9 @@ export function StoreCashFlowSection({
           <p className="mt-1 text-2xl font-semibold tabular-nums text-negative" data-sensitive>
             {cash.outflowsTotalFmt}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">COGS, envio e ads</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            COGS, envio, ads e despesas
+          </p>
         </div>
       </div>
 

@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
       "Gestão e análise de lucro real de múltiplas lojas de dropshipping.",
     start_url: "/",
     display: "standalone",
-    background_color: "#181f28",
-    theme_color: "#2563eb",
+    background_color: "#09090b",
+    theme_color: "#7c6bc4",
     icons: [
       {
         src: "/icon.svg",

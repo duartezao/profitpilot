@@ -287,9 +287,9 @@ export function StoreSettingsForm({
           <span className="text-muted-foreground">(por loja)</span>
         </p>
         <p className="mb-2 text-xs text-muted-foreground">
-          Saldo conhecido numa data — ponto de partida para o “tenho € ou não?”
-          desta loja, na moeda base do workspace ({baseCur}). Para reforços de
-          caixa depois, usa{" "}
+          Só preenche se depositaste € novos nesta loja. Se arrancou com lucro
+          de outras lojas, deixa 0 — evita duplicar banca no consolidado. Moeda
+          base do workspace ({baseCur}). Reforços depois:{" "}
           <a href="#capital-negocio" className="font-medium text-accent hover:underline">
             Capital no negócio
           </a>

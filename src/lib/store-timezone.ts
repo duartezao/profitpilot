@@ -6,7 +6,7 @@ import {
   PERIOD_PRESETS,
   addDays,
   formatDateInput,
-  formatRangeLabel,
+  formatDateKeyRangeLabel,
   parseDateInput,
   rollingPrevious,
   type PeriodInput,
@@ -204,10 +204,12 @@ function presetRangeInTimezone(
     preset: id,
     start,
     end,
-    label: formatRangeLabel(start, end),
+    startDateKey: startKey,
+    endDateKey: endKey,
+    label: formatDateKeyRangeLabel(startKey, endKey),
     prevStart,
     prevEnd,
-    prevLabel: formatRangeLabel(prevStart, prevEnd),
+    prevLabel: formatDateKeyRangeLabel(prevStartKey, prevEndKey),
     key: `${id}@${timeZone}`,
   };
 }
@@ -233,15 +235,19 @@ function customRangeInTimezone(
   const start = zonedStartOfDay(from, timeZone);
   const end = zonedEndOfDay(to, timeZone);
   const { prevStart, prevEnd } = rollingPrevious(start, end);
+  const prevStartKey = dateKeyInTimezone(prevStart, timeZone);
+  const prevEndKey = dateKeyInTimezone(prevEnd, timeZone);
 
   return {
     preset: "custom",
     start,
     end,
-    label: formatRangeLabel(start, end),
+    startDateKey: from,
+    endDateKey: to,
+    label: formatDateKeyRangeLabel(from, to),
     prevStart,
     prevEnd,
-    prevLabel: formatRangeLabel(prevStart, prevEnd),
+    prevLabel: formatDateKeyRangeLabel(prevStartKey, prevEndKey),
     key: `custom:${from}:${to}@${timeZone}`,
   };
 }
@@ -275,6 +281,8 @@ function specificDatesRangeInTimezone(
     end,
     specificDates: dates,
     prevSpecificDates,
+    startDateKey: dates[0],
+    endDateKey: dates[dates.length - 1],
     label: `${dates.length} dias`,
     prevStart: zonedStartOfDay(prevSpecificDates[0], timeZone),
     prevEnd: zonedEndOfDay(

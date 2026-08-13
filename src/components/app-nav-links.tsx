@@ -64,11 +64,11 @@ function NavLink({
       scroll={false}
       className={cn(
         TAP_PRESS,
-        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium",
+        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium",
         compact ? "px-2.5 py-1.5" : "",
         active
           ? "bg-accent/10 text-accent dark:bg-muted"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
       )}
     >
       <NavLinkStatus item={item} />
@@ -125,7 +125,7 @@ export function AppNavLinks({
 
   if (!showGroups) {
     return (
-      <nav key={linkKey} className="space-y-1 p-3">
+      <nav key={linkKey} className="space-y-1">
         {flatNav.map((item) => (
           <NavLink
             key={item.href}
@@ -139,15 +139,15 @@ export function AppNavLinks({
   }
 
   return (
-    <nav key={linkKey} className="space-y-4 p-3">
+    <nav key={linkKey} className="space-y-6">
       {groups.map((group) => (
         <div key={group.label || "main"}>
           {group.label ? (
-            <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="mb-2.5 px-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
               {group.label}
             </p>
           ) : null}
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {group.items.map((item) => (
               <NavLink
                 key={item.href}
