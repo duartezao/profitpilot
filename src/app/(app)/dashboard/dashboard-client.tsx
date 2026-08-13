@@ -318,7 +318,9 @@ export function DashboardClient() {
               <div className="mb-4">
                 <h2 className="text-lg font-semibold">Lucro líquido</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
-                  Evolução em {periodLabel}.
+                  {(workspaceData?.profitChart?.length ?? 0) <= 1
+                    ? `Lucro em ${periodLabel}.`
+                    : `Evolução em ${periodLabel}.`}
                 </p>
                 {workspaceData?.profitWindowStatus !== "consolidated" && (
                   <p className="mt-1 text-xs text-muted-foreground">
