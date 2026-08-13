@@ -19,6 +19,16 @@ export function hrefWithScope(path: string, params: URLSearchParams): string {
   return `${path}${sep}${qs}`;
 }
 
+/** Dashboard de uma loja, mantendo o período actual (sem portfolio). */
+export function hrefDashboardStore(
+  storeId: string,
+  params: URLSearchParams,
+): string {
+  const q = new URLSearchParams(periodQueryFromSearchParams(params));
+  q.set("store", storeId);
+  return `/dashboard?${q.toString()}`;
+}
+
 /**
  * Como hrefWithScope, mas inclui a loja persistida (sessionStorage) quando o URL
  * não traz ?store= — útil para links «Gerir custos» a partir da vista consolidada.

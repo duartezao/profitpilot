@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ProfitChart } from "@/components/dashboard/profit-chart";
+import { ProfitChart, ProfitChartSkeleton } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
 import { CostBreakdownPanel } from "@/components/dashboard/cost-breakdown-panel";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
@@ -34,19 +34,34 @@ import { hrefWithScopeAndStore } from "@/lib/scope-query";
 import { LastSyncBadge } from "@/components/last-sync-badge";
 import { cn } from "@/lib/utils";
 
-function DashboardSkeleton() {
+function DashboardSkeleton({ multiStoreChart = true }: { multiStoreChart?: boolean }) {
   return (
-    <div className="mx-auto max-w-7xl animate-pulse space-y-4">
-      <div className="h-9 w-48 rounded-lg bg-muted" />
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
+    <div className="mx-auto max-w-7xl animate-pulse space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-2">
+          <div className="h-8 w-40 rounded-lg bg-muted" />
+          <div className="h-4 w-56 rounded bg-muted/80" />
+        </div>
+        <div className="h-5 w-28 rounded bg-muted/70" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
           <div
             key={i}
             className="h-[88px] rounded-lg border border-border bg-muted/80"
           />
         ))}
       </div>
-      <div className="h-52 rounded-lg border border-border bg-muted/60" />
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
+          <div className="mb-4 space-y-2">
+            <div className="h-6 w-28 rounded bg-muted" />
+            <div className="h-4 w-44 rounded bg-muted/70" />
+          </div>
+          <ProfitChartSkeleton multiStore={multiStoreChart} />
+        </div>
+        <div className="h-64 rounded-lg border border-border bg-muted/50" />
+      </div>
     </div>
   );
 }
@@ -99,7 +114,7 @@ export function DashboardClient() {
     setMounted(true);
   }, []);
 
-  const { data, isError, isFetching, isPending } = useQuery<
+  const { data, isError, isFetching, isPending, isPlaceholderData } = useQuery<
     DashboardSummary | PortfolioSummary
   >({
     queryKey: isPortfolio
@@ -113,6 +128,8 @@ export function DashboardClient() {
     staleTime: LIVE_DATA_POLL_MS - 10_000,
     refetchInterval: LIVE_DATA_POLL_MS,
   });
+
+  const chartLoading = isPlaceholderData && isFetching;
 
   const portfolioData =
     data && "portfolioMode" in data ? (data as PortfolioSummary) : null;
@@ -193,20 +210,24 @@ export function DashboardClient() {
         />
 
         <div className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold">Lucro líquido</h2>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Total agregado em {periodLabel}.
-              </p>
-              {portfolioData?.profitWindowStatus !== "consolidated" && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {portfolioData?.profitWindowNote}
+            <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold">Lucro líquido</h2>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Total agregado em {periodLabel}.
                 </p>
+                {portfolioData?.profitWindowStatus !== "consolidated" && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {portfolioData?.profitWindowNote}
+                  </p>
+                )}
+              </div>
+              {chartLoading ? (
+                <ProfitChartSkeleton />
+              ) : (
+                <ProfitChart data={portfolioData?.profitChart ?? []} />
               )}
             </div>
-            <ProfitChart data={portfolioData?.profitChart ?? []} />
-          </div>
 
           {portfolioData?.costBreakdown && (
             <CostBreakdownPanel data={portfolioData.costBreakdown} />
@@ -328,10 +349,14 @@ export function DashboardClient() {
                   </p>
                 )}
               </div>
-              <ProfitChart
-                data={workspaceData?.profitChart ?? []}
-                series={workspaceData?.profitChartSeries}
-              />
+              {chartLoading ? (
+                <ProfitChartSkeleton multiStore />
+              ) : (
+                <ProfitChart
+                  data={workspaceData?.profitChart ?? []}
+                  series={workspaceData?.profitChartSeries}
+                />
+              )}
             </div>
 
             {workspaceData?.costBreakdown && (

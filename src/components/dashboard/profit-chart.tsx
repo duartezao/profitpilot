@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Area,
   AreaChart,
@@ -15,6 +16,11 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
+import { useWorkspace } from "@/components/workspace-context";
+import {
+  hrefDashboardStore,
+  persistActiveStore,
+} from "@/lib/scope-query";
 import type {
   ProfitChartPoint,
   ProfitChartSeries,
@@ -30,17 +36,58 @@ function compactAxisValue(v: number): string {
   return String(Math.round(v));
 }
 
-/** Um dia só: barras por loja (CSS, sem Recharts) ou valor em destaque. */
+function useOpenStoreDashboard() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { workspaceId } = useWorkspace();
+
+  return useCallback(
+    (storeId: string) => {
+      if (workspaceId) persistActiveStore(workspaceId, storeId);
+      router.push(hrefDashboardStore(storeId, searchParams));
+    },
+    [router, searchParams, workspaceId],
+  );
+}
+
+/** Placeholder com a mesma altura do gráfico (evita salto de layout). */
+export function ProfitChartSkeleton({
+  multiStore = false,
+}: {
+  multiStore?: boolean;
+}) {
+  return (
+    <div className="mt-4 min-w-0 animate-pulse" aria-hidden>
+      {multiStore && (
+        <div className="mb-3 flex justify-end">
+          <div className="h-9 w-40 rounded-lg bg-muted" />
+        </div>
+      )}
+      <div className="h-52 w-full rounded-lg bg-muted/70 sm:h-64" />
+      {multiStore && (
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-3 w-16 rounded bg-muted" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Um dia só: barras por loja (CSS) ou valor em destaque. */
 function SingleDayProfitView({
   point,
   series,
   multiStore,
   showPerStore,
+  onStoreClick,
 }: {
   point: ProfitChartPoint;
   series?: ProfitChartSeries[];
   multiStore: boolean;
   showPerStore: boolean;
+  onStoreClick?: (storeId: string) => void;
 }) {
   const bars = useMemo(() => {
     if (point.byStore?.length) return point.byStore;
@@ -65,12 +112,9 @@ function SingleDayProfitView({
         {bars.map((b) => {
           const heightPct = Math.max(4, (Math.abs(b.profit) / maxAbs) * 100);
           const negative = b.profit < 0;
-          return (
-            <div
-              key={b.storeId}
-              className="flex min-w-[3.25rem] flex-1 flex-col items-center justify-end gap-2"
-              title={`${b.name}: ${b.profitFmt}`}
-            >
+          const clickable = Boolean(onStoreClick);
+          const inner = (
+            <>
               <span
                 className={cn(
                   "text-[11px] tabular-nums font-medium",
@@ -81,7 +125,7 @@ function SingleDayProfitView({
               </span>
               <div className="flex h-36 w-full max-w-[3.5rem] items-end justify-center sm:h-44">
                 <div
-                  className="w-full max-w-[2.75rem] rounded-t-md"
+                  className="w-full max-w-[2.75rem] rounded-t-md transition-opacity"
                   style={{
                     height: `${heightPct}%`,
                     backgroundColor: b.color,
@@ -95,7 +139,29 @@ function SingleDayProfitView({
               >
                 {b.name}
               </Sensitive>
-            </div>
+            </>
+          );
+          if (!clickable) {
+            return (
+              <div
+                key={b.storeId}
+                className="flex min-w-[3.25rem] flex-1 flex-col items-center justify-end gap-2"
+                title={`${b.name}: ${b.profitFmt}`}
+              >
+                {inner}
+              </div>
+            );
+          }
+          return (
+            <button
+              key={b.storeId}
+              type="button"
+              onClick={() => onStoreClick?.(b.storeId)}
+              title={`Abrir ${b.name}`}
+              className="flex min-w-[3.25rem] flex-1 flex-col items-center justify-end gap-2 rounded-lg outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              {inner}
+            </button>
           );
         })}
       </div>
@@ -118,31 +184,51 @@ function SingleDayProfitView({
       </p>
       {multiStore && slices.length > 0 && (
         <ul className="mt-1 w-full max-w-sm space-y-1.5 border-t border-border pt-3">
-          {slices.map((s) => (
-            <li
-              key={s.storeId}
-              className="flex items-center justify-between gap-3 text-xs"
-            >
-              <span className="flex min-w-0 items-center gap-1.5">
+          {slices.map((s) => {
+            const row = (
+              <>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: s.color }}
+                    aria-hidden
+                  />
+                  <Sensitive as="span" className="truncate">
+                    {s.name}
+                  </Sensitive>
+                </span>
                 <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: s.color }}
-                  aria-hidden
-                />
-                <Sensitive as="span" className="truncate">
-                  {s.name}
-                </Sensitive>
-              </span>
-              <span
-                className={cn(
-                  "shrink-0 tabular-nums font-medium",
-                  s.profit >= 0 ? "text-foreground" : "text-negative",
-                )}
-              >
-                {s.profitFmt}
-              </span>
-            </li>
-          ))}
+                  className={cn(
+                    "shrink-0 tabular-nums font-medium",
+                    s.profit >= 0 ? "text-foreground" : "text-negative",
+                  )}
+                >
+                  {s.profitFmt}
+                </span>
+              </>
+            );
+            if (!onStoreClick) {
+              return (
+                <li
+                  key={s.storeId}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  {row}
+                </li>
+              );
+            }
+            return (
+              <li key={s.storeId}>
+                <button
+                  type="button"
+                  onClick={() => onStoreClick(s.storeId)}
+                  className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  {row}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -153,10 +239,12 @@ function ProfitTooltip({
   active,
   payload,
   multiStore,
+  onStoreClick,
 }: {
   active?: boolean;
   payload?: Array<{ payload: ProfitChartPoint }>;
   multiStore?: boolean;
+  onStoreClick?: (storeId: string) => void;
 }) {
   if (!active || !payload?.length) return null;
   const point = payload[0].payload as ProfitChartPoint;
@@ -181,31 +269,54 @@ function ProfitTooltip({
           </p>
           {slices.length > 0 && (
             <ul className="mt-2 space-y-1.5 border-t border-border pt-2">
-              {slices.map((s) => (
-                <li
-                  key={s.storeId}
-                  className="flex items-center justify-between gap-3 text-xs"
-                >
-                  <span className="flex min-w-0 items-center gap-1.5">
+              {slices.map((s) => {
+                const row = (
+                  <>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: s.color }}
+                        aria-hidden
+                      />
+                      <Sensitive as="span" className="truncate">
+                        {s.name}
+                      </Sensitive>
+                    </span>
                     <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: s.color }}
-                      aria-hidden
-                    />
-                    <Sensitive as="span" className="truncate">
-                      {s.name}
-                    </Sensitive>
-                  </span>
-                  <span
-                    className={cn(
-                      "shrink-0 tabular-nums font-medium",
-                      s.profit >= 0 ? "text-foreground" : "text-negative",
-                    )}
-                  >
-                    {s.profitFmt}
-                  </span>
-                </li>
-              ))}
+                      className={cn(
+                        "shrink-0 tabular-nums font-medium",
+                        s.profit >= 0 ? "text-foreground" : "text-negative",
+                      )}
+                    >
+                      {s.profitFmt}
+                    </span>
+                  </>
+                );
+                if (!onStoreClick) {
+                  return (
+                    <li
+                      key={s.storeId}
+                      className="flex items-center justify-between gap-3 text-xs"
+                    >
+                      {row}
+                    </li>
+                  );
+                }
+                return (
+                  <li key={s.storeId}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onStoreClick(s.storeId);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded-md text-left text-xs outline-none hover:bg-muted"
+                    >
+                      {row}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </>
@@ -255,22 +366,47 @@ function NoteDot(props: {
   );
 }
 
-function ChartLegend({ series }: { series: ProfitChartSeries[] }) {
+function ChartLegend({
+  series,
+  onStoreClick,
+}: {
+  series: ProfitChartSeries[];
+  onStoreClick?: (storeId: string) => void;
+}) {
   return (
     <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-      {series.map((s) => (
-        <div
-          key={s.storeId}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground"
-        >
-          <span
-            className="h-2 w-2 shrink-0 rounded-full"
-            style={{ backgroundColor: s.color }}
-            aria-hidden
-          />
-          <Sensitive>{s.name}</Sensitive>
-        </div>
-      ))}
+      {series.map((s) => {
+        const body = (
+          <>
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: s.color }}
+              aria-hidden
+            />
+            <Sensitive>{s.name}</Sensitive>
+          </>
+        );
+        if (!onStoreClick) {
+          return (
+            <div
+              key={s.storeId}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+            >
+              {body}
+            </div>
+          );
+        }
+        return (
+          <button
+            key={s.storeId}
+            type="button"
+            onClick={() => onStoreClick(s.storeId)}
+            className="flex items-center gap-1.5 rounded-md text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {body}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -328,6 +464,8 @@ export function ProfitChart({
   const multiStore = Boolean(series && series.length > 1);
   const [multiView, setMultiView] = useState<MultiStoreView>("stores");
   const showPerStore = multiStore && multiView === "stores";
+  const openStore = useOpenStoreDashboard();
+  const onStoreClick = multiStore ? openStore : undefined;
 
   const tickInterval = useMemo(() => {
     if (data.length <= 10) return 0;
@@ -338,7 +476,7 @@ export function ProfitChart({
 
   if (data.length === 0) {
     return (
-      <div className="mt-4 flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+      <div className="mt-4 flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-64">
         Sem dados no período selecionado.
       </div>
     );
@@ -349,7 +487,14 @@ export function ProfitChart({
   return (
     <div className="mt-4 min-w-0" data-sensitive-chart>
       {multiStore && (
-        <div className="mb-3 flex justify-end">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          {onStoreClick ? (
+            <p className="text-xs text-muted-foreground">
+              Clica numa loja para abrir a dashboard.
+            </p>
+          ) : (
+            <span />
+          )}
           <MultiStoreViewToggle view={multiView} onChange={setMultiView} />
         </div>
       )}
@@ -360,8 +505,11 @@ export function ProfitChart({
             series={series}
             multiStore={multiStore}
             showPerStore={showPerStore}
+            onStoreClick={onStoreClick}
           />
-          {showPerStore && series && <ChartLegend series={series} />}
+          {showPerStore && series && (
+            <ChartLegend series={series} onStoreClick={onStoreClick} />
+          )}
         </>
       ) : (
         <>
@@ -394,7 +542,12 @@ export function ProfitChart({
                   />
                   <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1} />
                   <Tooltip
-                    content={<ProfitTooltip multiStore={multiStore} />}
+                    content={
+                      <ProfitTooltip
+                        multiStore={multiStore}
+                        onStoreClick={onStoreClick}
+                      />
+                    }
                     cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
                   />
                   {series.map((s) => (
@@ -406,11 +559,17 @@ export function ProfitChart({
                       stroke={s.color}
                       strokeWidth={2}
                       dot={false}
+                      style={
+                        onStoreClick ? { cursor: "pointer" } : undefined
+                      }
+                      onClick={() => onStoreClick?.(s.storeId)}
                       activeDot={{
                         r: 4,
                         fill: s.color,
                         stroke: "var(--surface)",
                         strokeWidth: 2,
+                        cursor: onStoreClick ? "pointer" : undefined,
+                        onClick: () => onStoreClick?.(s.storeId),
                       }}
                     />
                   ))}
@@ -442,7 +601,12 @@ export function ProfitChart({
                   />
                   <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1} />
                   <Tooltip
-                    content={<ProfitTooltip multiStore={multiStore} />}
+                    content={
+                      <ProfitTooltip
+                        multiStore={multiStore}
+                        onStoreClick={onStoreClick}
+                      />
+                    }
                     cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
                   />
                   <Area
@@ -464,7 +628,9 @@ export function ProfitChart({
               )}
             </ResponsiveContainer>
           </div>
-          {showPerStore && series && <ChartLegend series={series} />}
+          {showPerStore && series && (
+            <ChartLegend series={series} onStoreClick={onStoreClick} />
+          )}
         </>
       )}
       {data.some((p) => p.consolidated === false) && (
