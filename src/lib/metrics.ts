@@ -246,14 +246,18 @@ export type ProfitChartStoreSlice = {
   color: string;
   profit: number;
   profitFmt: string;
+  revenue: number;
+  revenueFmt: string;
 };
 
 export type ProfitChartSeries = {
   storeId: string;
   name: string;
   color: string;
-  /** Chave numérica em cada ponto do gráfico (Recharts). */
+  /** Chave numérica de lucro em cada ponto (Recharts). */
   key: string;
+  /** Chave numérica de faturação em cada ponto (Recharts). */
+  revenueKey: string;
 };
 
 export type ProfitChartPoint = {
@@ -262,10 +266,12 @@ export type ProfitChartPoint = {
   dateLabel: string;
   profit: number;
   profitFmt: string;
+  revenue: number;
+  revenueFmt: string;
   hasNote?: boolean;
   notePreview?: string;
   didScale?: boolean;
-  /** Lucro por loja (vista consolidada). */
+  /** Lucro/faturação por loja (vista consolidada). */
   byStore?: ProfitChartStoreSlice[];
   /** true = dia fora da janela de refunds (consolidado). */
   consolidated?: boolean;
@@ -1359,6 +1365,7 @@ async function buildConsolidatedDailyProfitSeries(
       name: s.name,
       color: colorByStoreId.get(sid) ?? "#7C6BC4",
       key: `s_${sid}`,
+      revenueKey: `r_${sid}`,
     };
   });
 
@@ -1379,12 +1386,15 @@ async function buildConsolidatedDailyProfitSeries(
   const points = dayKeysInSlice(slice, storeTimeZone).map((dateKey) => {
     const byStore: ProfitChartStoreSlice[] = [];
     let totalProfit = 0;
+    let totalRevenue = 0;
     const point: ProfitChartPoint & Record<string, number | string> = {
       dateKey,
       label: "",
       dateLabel: "",
       profit: 0,
       profitFmt: "",
+      revenue: 0,
+      revenueFmt: "",
     };
 
     for (const meta of series) {
@@ -1408,15 +1418,20 @@ async function buildConsolidatedDailyProfitSeries(
         meta.storeId,
       );
       const profit = calcProfit(o, hasEntry ? ad : 0, storeOpEx);
+      const revenue = o.revenue;
       byStore.push({
         storeId: meta.storeId,
         name: meta.name,
         color: meta.color,
         profit,
         profitFmt: fmtMoney(profit),
+        revenue,
+        revenueFmt: fmtMoney(revenue),
       });
       point[meta.key] = profit;
+      point[meta.revenueKey] = revenue;
       totalProfit += profit;
+      totalRevenue += revenue;
     }
 
     const workspaceOpEx = sumWorkspaceExpensesForDay(expenseRows, dateKey);
@@ -1426,6 +1441,8 @@ async function buildConsolidatedDailyProfitSeries(
     point.dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
     point.profit = totalProfit;
     point.profitFmt = fmtMoney(totalProfit);
+    point.revenue = totalRevenue;
+    point.revenueFmt = fmtMoney(totalRevenue);
     point.byStore = byStore.sort(
       (a, b) => Math.abs(b.profit) - Math.abs(a.profit),
     );
@@ -1541,9 +1558,18 @@ async function buildDailyProfitSeries(
     );
     const dayCb = chargebacksByDay.get(dateKey) ?? 0;
     const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx, dayCb);
+    const revenue = o.revenue;
     const label = formatDateKeyLabel(dateKey);
     const dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
-    return { dateKey, label, dateLabel, profit, profitFmt: fmtMoney(profit) };
+    return {
+      dateKey,
+      label,
+      dateLabel,
+      profit,
+      profitFmt: fmtMoney(profit),
+      revenue,
+      revenueFmt: fmtMoney(revenue),
+    };
   });
 }
 

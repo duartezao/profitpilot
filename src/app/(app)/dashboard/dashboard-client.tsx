@@ -211,8 +211,8 @@ export function DashboardClient() {
 
         <div className="grid gap-4 lg:grid-cols-3">
             <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
-              <div className="mb-4">
-                <h2 className="text-lg font-semibold">Lucro líquido</h2>
+              <div className="mb-4 min-w-0">
+                <h2 className="text-lg font-semibold">Lucro / faturação</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   Total agregado em {periodLabel}.
                 </p>
@@ -336,11 +336,11 @@ export function DashboardClient() {
 
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
-              <div className="mb-4">
-                <h2 className="text-lg font-semibold">Lucro líquido</h2>
+              <div className="mb-4 min-w-0">
+                <h2 className="text-lg font-semibold">Lucro / faturação</h2>
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   {(workspaceData?.profitChart?.length ?? 0) <= 1
-                    ? `Lucro em ${periodLabel}.`
+                    ? `Valores em ${periodLabel}.`
                     : `Evolução em ${periodLabel}.`}
                 </p>
                 {workspaceData?.profitWindowStatus !== "consolidated" && (

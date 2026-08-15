@@ -163,15 +163,25 @@ async function mergePortfolioProfitChart(
           displayCurrency,
           point.dateKey || dateKey,
         );
+        const revenue = await convertMoney(
+          point.revenue ?? 0,
+          from,
+          displayCurrency,
+          point.dateKey || dateKey,
+        );
         const existing = byDate.get(point.dateKey);
         if (existing) {
           existing.profit += profit;
           existing.profitFmt = fmtMoney(existing.profit);
+          existing.revenue = (existing.revenue ?? 0) + revenue;
+          existing.revenueFmt = fmtMoney(existing.revenue);
         } else {
           byDate.set(point.dateKey, {
             ...point,
             profit,
             profitFmt: fmtMoney(profit),
+            revenue,
+            revenueFmt: fmtMoney(revenue),
             byStore: undefined,
           });
         }
