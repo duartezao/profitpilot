@@ -51,7 +51,7 @@ export function StoreMetricsView({
       {tab === "lucro" && (
         <PageTabCard>
           <div className="mb-4">
-            <h2 className="text-lg font-semibold">Lucro por dia</h2>
+            <h2 className="text-lg font-semibold">Lucro / faturação por dia</h2>
             <p className="text-sm text-muted-foreground">
               {dashboard?.periodLabel ?? "Período seleccionado"}
               {data.profitWindowStatus !== "consolidated" && (
