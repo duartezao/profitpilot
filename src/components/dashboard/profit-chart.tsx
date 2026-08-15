@@ -617,14 +617,61 @@ export function ProfitChart({
   const onStoreClick = multiStore ? openStore : undefined;
   const totalDataKey = metric === "revenue" ? "revenue" : "profit";
 
-  const tickInterval = useMemo(() => {
-    if (data.length <= 10) return 0;
-    if (data.length <= 21) return 1;
-    if (data.length <= 45) return 3;
-    return Math.floor(data.length / 8);
-  }, [data.length]);
+  /** Dados prontos para o Recharts: as chaves s_* levam lucro ou faturação conforme a métrica. */
+  const chartData = useMemo(() => {
+    return data.map((p) => {
+      const row = { ...p } as ProfitChartPoint & Record<string, unknown>;
+      const slices = p.byStore ?? [];
 
-  if (data.length === 0) {
+      let totalRevenue =
+        typeof p.revenue === "number"
+          ? p.revenue
+          : slices.reduce((sum, b) => sum + (b.revenue ?? 0), 0);
+
+      if (series?.length) {
+        let sumRev = 0;
+        let hasSliceRev = false;
+        for (const s of series) {
+          const slice = slices.find((b) => b.storeId === s.storeId);
+          const revKey = s.revenueKey || `r_${s.storeId}`;
+          const profitFromPoint = row[s.key];
+          const revFromPoint = row[revKey];
+
+          const profitVal =
+            slice?.profit ??
+            (typeof profitFromPoint === "number" ? profitFromPoint : 0);
+          const revVal =
+            slice?.revenue ??
+            (typeof revFromPoint === "number" ? revFromPoint : 0);
+
+          if (slice && typeof slice.revenue === "number") {
+            hasSliceRev = true;
+            sumRev += slice.revenue;
+          }
+
+          // Sempre escrever na chave s_* (a que o Line usa) o valor da métrica activa.
+          row[s.key] = metric === "revenue" ? revVal : profitVal;
+          row[revKey] = revVal;
+        }
+        if (typeof p.revenue !== "number" && hasSliceRev) {
+          totalRevenue = sumRev;
+        }
+      }
+
+      row.revenue = totalRevenue;
+      row.profit = typeof p.profit === "number" ? p.profit : 0;
+      return row as ProfitChartPoint & Record<string, number | string>;
+    });
+  }, [data, series, metric]);
+
+  const tickInterval = useMemo(() => {
+    if (chartData.length <= 10) return 0;
+    if (chartData.length <= 21) return 1;
+    if (chartData.length <= 45) return 3;
+    return Math.floor(chartData.length / 8);
+  }, [chartData.length]);
+
+  if (chartData.length === 0) {
     return (
       <div className="mt-4 flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-64">
         Sem dados no período selecionado.
@@ -632,7 +679,10 @@ export function ProfitChart({
     );
   }
 
-  const singleDay = data.length === 1;
+  const singleDay = chartData.length === 1;
+  const chartRemountKey = `${metric}-${multiView}`;
+  /** Com chartData já mapeado, as linhas usam sempre s.key (lucro ou rev). */
+  const lineDataKey = (s: ProfitChartSeries) => s.key;
 
   return (
     <div className="mt-4 min-w-0 overflow-hidden" data-sensitive-chart>
@@ -666,7 +716,7 @@ export function ProfitChart({
       {singleDay ? (
         <>
           <SingleDayProfitView
-            point={data[0]}
+            point={chartData[0]}
             series={series}
             multiStore={multiStore}
             showPerStore={showPerStore}
@@ -685,7 +735,8 @@ export function ProfitChart({
             <ResponsiveContainer width="100%" height="100%">
               {showPerStore && series ? (
                 <LineChart
-                  data={data}
+                  key={chartRemountKey}
+                  data={chartData}
                   margin={{ top: 8, right: 4, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid
@@ -725,11 +776,13 @@ export function ProfitChart({
                     <Line
                       key={`${s.storeId}-${metric}`}
                       type="monotone"
-                      dataKey={seriesDataKey(s, metric)}
+                      dataKey={lineDataKey(s)}
                       name={s.name}
                       stroke={s.color}
                       strokeWidth={2}
                       dot={false}
+                      isAnimationActive={false}
+                      connectNulls
                       style={
                         onStoreClick ? { cursor: "pointer" } : undefined
                       }
@@ -747,7 +800,8 @@ export function ProfitChart({
                 </LineChart>
               ) : (
                 <AreaChart
-                  data={data}
+                  key={chartRemountKey}
+                  data={chartData}
                   margin={{ top: 8, right: 4, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid
@@ -790,6 +844,8 @@ export function ProfitChart({
                     strokeWidth={2}
                     fill="var(--accent)"
                     fillOpacity={0.12}
+                    isAnimationActive={false}
+                    connectNulls
                     dot={metric === "profit" ? <NoteDot /> : false}
                     activeDot={{
                       r: 4,
@@ -808,7 +864,7 @@ export function ProfitChart({
         </>
       )}
       {metric === "profit" &&
-        data.some((p) => p.consolidated === false) && (
+        chartData.some((p) => p.consolidated === false) && (
           <p className="mt-2 text-xs text-muted-foreground">
             Dias recentes = lucro provisório (reembolsos ainda podem entrar).
           </p>
