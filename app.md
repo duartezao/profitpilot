@@ -824,6 +824,7 @@ Principais dificuldades: 0
 * **Log de auditoria** por membro (quem viu/alterou o quê e quando).
 * **Feed de atividade da equipa**: timeline do que cada membro fez (ligou loja, editou COGS, escreveu nota, exportou), para acompanhares o trabalho conjunto.
 * **Tarefas de operação**: atribuir `operationTasks` a qualquer membro activo do workspace (incluindo a ti); validação `isActiveWorkspaceMember` nas server actions.
+* **Cofre de acessos** (Definições → tab **Acessos**): palavras-passe partilhadas do workspace (Shopify, banco, ads, fornecedor, etc.) — **encriptadas** (AES-256-GCM) na BD; **todos os membros** do workspace podem consultar; **owner / admin / editor** podem adicionar, editar e remover. Campos: tipo, nome, utilizador, palavra-passe, URL, notas, loja opcional. Soft delete.
 * Nada de passwords partilhadas: cada pessoa tem as suas próprias credenciais.
 
 ---

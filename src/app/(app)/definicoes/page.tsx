@@ -59,6 +59,8 @@ import { InviteMemberForm } from "./invite-member-form";
 import { SentInvitations } from "./sent-invitations";
 import { listWorkspaceGoogleLogins } from "@/lib/ad-platform-credentials";
 import { GoogleWorkspaceLoginsPanel } from "@/components/settings/google-workspace-logins-panel";
+import { AccessVaultPanel } from "@/components/settings/access-vault-panel";
+import { listAccessVaultForWorkspace } from "@/lib/workspace-access-vault";
 
 export const metadata: Metadata = { title: "Definições" };
 
@@ -163,6 +165,12 @@ export default async function DefinicoesPage() {
     name: s.name,
   }));
 
+  const storeNameById = new Map(stores.map((s) => [String(s._id), s.name]));
+  const accessVaultEntries =
+    user?.workspaceId
+      ? await listAccessVaultForWorkspace(user.workspaceId, storeNameById)
+      : [];
+
   const cashStores = stores
     .filter((s) => canAccessStore(user?.storeAccess ?? "all", String(s._id)))
     .map((s) => ({
@@ -170,8 +178,6 @@ export default async function DefinicoesPage() {
       name: s.name,
       currency: s.currency ?? workspace?.baseCurrency ?? "EUR",
     }));
-
-  const storeNameById = new Map(stores.map((s) => [String(s._id), s.name]));
 
   const cashEntries =
     user?.workspaceId && cashStores.length > 0
@@ -228,6 +234,7 @@ export default async function DefinicoesPage() {
         }
         storeCount={stores.length}
         pendingInviteCount={pendingInvitations.length}
+        accessVaultCount={accessVaultEntries.length}
         panels={{
           conta: (
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -308,6 +315,13 @@ export default async function DefinicoesPage() {
                 </section>
               )}
             </>
+          ),
+          acessos: (
+            <AccessVaultPanel
+              entries={accessVaultEntries}
+              stores={inviteStores}
+              canEdit={canEditStores}
+            />
           ),
           equipa: (
             <div className="space-y-6">
