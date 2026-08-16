@@ -14,28 +14,43 @@ const HASH_TO_TAB: Record<string, string> = {
   lojas: "lojas",
   "google-ads": "integracoes",
   "capital-negocio": "integracoes",
+  acessos: "acessos",
+  "acessos-equipa": "acessos",
 };
 
 export function DefinicoesTabs({
   showEquipa,
   storeCount,
   pendingInviteCount,
+  accessVaultCount = 0,
   panels,
 }: {
   showEquipa: boolean;
   storeCount: number;
   pendingInviteCount: number;
+  accessVaultCount?: number;
   panels: {
     conta: ReactNode;
     workspace: ReactNode;
     equipa?: ReactNode;
     lojas: ReactNode;
+    acessos: ReactNode;
     integracoes: ReactNode;
   };
 }) {
   const tabs: PageTab[] = [
     { id: "conta", label: "Conta" },
     { id: "workspace", label: "Workspace" },
+    {
+      id: "acessos",
+      label: "Acessos",
+      badge:
+        accessVaultCount > 0 ? (
+          <span className="rounded-md border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+            {accessVaultCount}
+          </span>
+        ) : undefined,
+    },
     ...(showEquipa
       ? [
           {
@@ -96,6 +111,8 @@ export function DefinicoesTabs({
           <div className="space-y-8">{panels.workspace}</div>
         </PageTabCard>
       )}
+
+      {tab === "acessos" && <PageTabCard>{panels.acessos}</PageTabCard>}
 
       {tab === "equipa" && showEquipa && panels.equipa && (
         <PageTabCard>{panels.equipa}</PageTabCard>
