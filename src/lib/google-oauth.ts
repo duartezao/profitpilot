@@ -30,6 +30,25 @@ export function resolveGoogleOAuthRedirectUri(request?: Request): string | null 
   return null;
 }
 
+/** Redirect URI OAuth Google Sheets (Profit Sheet). */
+export function resolveGoogleSheetsOAuthRedirectUri(
+  request?: Request,
+): string | null {
+  const explicit = process.env.GOOGLE_SHEETS_OAUTH_REDIRECT_URI?.trim();
+  if (explicit) return explicit;
+
+  if (request) {
+    return `${resolveRequestOrigin(request)}/api/oauth/google-sheets/callback`;
+  }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (appUrl) {
+    return `${appUrl.replace(/\/$/, "")}/api/oauth/google-sheets/callback`;
+  }
+
+  return null;
+}
+
 export function isGoogleOAuthConfigured(request?: Request): boolean {
   return Boolean(
     process.env.GOOGLE_ADS_CLIENT_ID?.trim() &&
@@ -43,6 +62,14 @@ export const GOOGLE_ADS_OAUTH_SCOPES = [
   "openid",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/adwords",
+].join(" ");
+
+/** Scopes OAuth: Google Drive + Sheets (Profit Sheet — sem chave de conta de serviço). */
+export const GOOGLE_SHEETS_OAUTH_SCOPES = [
+  "openid",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/spreadsheets",
 ].join(" ");
 
 function emailFromIdToken(idToken: string): string {

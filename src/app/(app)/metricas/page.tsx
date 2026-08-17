@@ -6,6 +6,12 @@ import { ShopifyExtraFeesSection } from "@/components/dashboard/shopify-extra-fe
 import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
 import { getMetricPanelPreferencesForUser } from "@/lib/metric-panel-prefs";
+import {
+  canExportProfitSheet,
+  isProfitSheetTemplateConfigured,
+} from "@/lib/profit-sheet-google";
+import { isGoogleOAuthConfigured } from "@/lib/google-oauth";
+import { hasWorkspaceGoogleSheetsCredential } from "@/lib/ad-platform-credentials";
 
 export const metadata: Metadata = { title: "Métricas" };
 
@@ -43,6 +49,14 @@ export default async function MetricasPage({
     ? await getMetricPanelPreferencesForUser(user.id, user.workspaceId)
     : undefined;
 
+  const profitSheetTemplateReady = isProfitSheetTemplateConfigured();
+  const profitSheetGoogleConnected = user
+    ? await hasWorkspaceGoogleSheetsCredential(user.workspaceId)
+    : false;
+  const profitSheetCanExport = user
+    ? await canExportProfitSheet(user.workspaceId)
+    : false;
+
   return (
     <Suspense
       fallback={
@@ -61,7 +75,13 @@ export default async function MetricasPage({
     >
       <div className="mx-auto max-w-7xl space-y-6">
         {showReport && storeId && <OverviewSection storeId={storeId} />}
-        <MetricasClient initialPanelPrefs={initialPanelPrefs} />
+        <MetricasClient
+          initialPanelPrefs={initialPanelPrefs}
+          profitSheetTemplateReady={profitSheetTemplateReady}
+          profitSheetGoogleConnected={profitSheetGoogleConnected}
+          profitSheetCanExport={profitSheetCanExport}
+          profitSheetOAuthConfigured={isGoogleOAuthConfigured()}
+        />
       </div>
     </Suspense>
   );

@@ -4,6 +4,7 @@ import { AdCampaignDay } from "@/models/AdCampaignDay";
 import type { AdPlatform } from "@/lib/ad-spend-platforms";
 import { AD_PLATFORM_LABELS } from "@/lib/ad-spend-platforms";
 import {
+  aggregateCampaignPeriodTotals,
   metricsFromCampaignTotals,
   roasFromCampaign,
   shouldIncludeCampaignForDay,
@@ -11,6 +12,7 @@ import {
   type LiveCampaignRow,
 } from "@/lib/ad-campaign-types";
 import type { ApiAccountFees } from "@/lib/ad-api-fees";
+import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
 import { convertToBaseCurrency } from "@/lib/fx";
 import { formatDateInput, parseDateInput, startOfDay } from "@/lib/period";
 
@@ -768,4 +770,108 @@ export async function loadStoreCampaignsForDecision(
       if (bActive !== aActive) return bActive - aActive;
       return b.spend - a.spend;
     });
+}
+
+export type ReportPlatformAdKpis = {
+  platform: AdPlatform;
+  platformLabel: string;
+  /** Gasto plataforma (sem fees), moeda base. */
+  spendPlatform: number;
+  cpc: number | null;
+  ctr: number | null;
+  cpm: number | null;
+};
+
+export type ReportAdKpis = {
+  cpc: number | null;
+  ctr: number | null;
+  cpm: number | null;
+  currency: string;
+  /** Gasto plataforma (sem fees), moeda base. */
+  spendPlatform: number;
+  byPlatform: ReportPlatformAdKpis[];
+};
+
+/**
+ * CPC/CPM/CTR para relatórios: gasto plataforma (sem fees), convertido para moeda base.
+ */
+export async function loadReportAdKpisForPeriod(
+  storeId: string,
+  dateKeys: string[],
+  baseCurrency: string,
+): Promise<ReportAdKpis | null> {
+  if (!dateKeys.length) return null;
+
+  const storeOid = new mongoose.Types.ObjectId(storeId);
+  const accounts = await loadSyncAdAccountsForStore(storeOid);
+  if (!accounts.length) return null;
+
+  const fxDateKey = [...dateKeys].sort().at(-1)!;
+  const base = baseCurrency.toUpperCase();
+
+  const { campaigns } = await loadStoreCampaignsFromDb(
+    storeId,
+    dateKeys,
+    accounts.map((a) => ({
+      id: String(a._id),
+      platform: a.platform as AdPlatform,
+      accountName: a.accountName?.trim() || a.externalAccountId || a.platform,
+      externalAccountId: a.externalAccountId,
+      apiExtraFeeFixed: a.apiExtraFeeFixed ?? 0,
+      apiAgencyFeePercent: a.apiAgencyFeePercent ?? 0,
+    })),
+    { baseCurrency: base, fxDateKey },
+  );
+
+  const hasActivity = campaigns.some(
+    (c) =>
+      (c.spendPlatform ?? c.spend) > 0 ||
+      c.impressions > 0 ||
+      c.clicks > 0,
+  );
+  if (!hasActivity) return null;
+
+  const total = aggregateCampaignPeriodTotals(campaigns, base);
+  const spendPlatform = campaigns.reduce(
+    (s, c) => s + (c.spendPlatform ?? c.spend),
+    0,
+  );
+
+  const byPlatformMap = new Map<AdPlatform, LiveCampaignRow[]>();
+  for (const c of campaigns) {
+    const list = byPlatformMap.get(c.platform) ?? [];
+    list.push(c);
+    byPlatformMap.set(c.platform, list);
+  }
+
+  const byPlatform: ReportPlatformAdKpis[] = [...byPlatformMap.entries()]
+    .map(([platform, rows]) => {
+      const t = aggregateCampaignPeriodTotals(rows, base);
+      const platformSpend = rows.reduce(
+        (s, c) => s + (c.spendPlatform ?? c.spend),
+        0,
+      );
+      return {
+        platform,
+        platformLabel: AD_PLATFORM_LABELS[platform] ?? platform,
+        spendPlatform: platformSpend,
+        cpc: t.cpc,
+        ctr: t.ctr,
+        cpm: t.cpm,
+      };
+    })
+    .filter(
+      (p) =>
+        p.spendPlatform > 0 || p.cpc != null || p.ctr != null || p.cpm != null,
+    )
+    .sort((a, b) => b.spendPlatform - a.spendPlatform);
+
+  return {
+    cpc: total.cpc,
+    ctr: total.ctr,
+    cpm: total.cpm,
+    currency: base,
+    spendPlatform,
+    byPlatform,
+  };
 }

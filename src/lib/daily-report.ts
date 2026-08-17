@@ -8,7 +8,11 @@ import {
 } from "@/lib/metrics";
 import { fetchStoreDailyNoteForDay } from "@/lib/daily-notes";
 import { aggregateStoreAdInsightsForPeriod } from "@/lib/ad-insights";
-import { loadStoreAdMetricsFromDb, loadStoreAdMetricsForDay } from "@/lib/ad-campaign-metrics";
+import {
+  loadReportAdKpisForPeriod,
+  type ReportAdKpis,
+} from "@/lib/ad-campaign-metrics";
+import { convertToBaseCurrency } from "@/lib/fx";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { parseDateInput, formatDateInput, addDays, startOfDay } from "@/lib/period";
 import { buildCollectionReportBlock } from "@/lib/collection-operations";
@@ -107,11 +111,11 @@ function pushAdMetricsBlock(
   ctr: number | null,
   cpm: number | null,
   currency: string,
-  spend?: number,
+  spendPlatform?: number,
 ): void {
   const parts: string[] = [];
-  if (spend != null && spend > 0) {
-    parts.push(`Spend ${fmtAdMoney(spend, currency)}`);
+  if (spendPlatform != null && spendPlatform > 0) {
+    parts.push(`Spend ${fmtAdMoney(spendPlatform, currency)}`);
   }
   if (cpc != null) parts.push(`CPC ${fmtAdMoney(cpc, currency)}`);
   if (ctr != null) parts.push(`CTR ${fmtReportPct(ctr)}`);
@@ -121,52 +125,109 @@ function pushAdMetricsBlock(
   pushLine(lines, parts.join("   "));
 }
 
-function pushManualField(
-  lines: string[],
-  label: string,
-  value: string | undefined | null,
-): void {
-  const t = (value ?? "").trim();
-  if (t) lines.push(`${label}: ${t}`);
+async function convertAdMetricToBase(
+  value: number | null,
+  fromCurrency: string,
+  baseCurrency: string,
+  dateKey: string,
+): Promise<number | null> {
+  if (value == null) return null;
+  const from = fromCurrency.toUpperCase();
+  const base = baseCurrency.toUpperCase();
+  if (from === base) return value;
+  const fx = await convertToBaseCurrency(value, from, base, dateKey);
+  return fx.amountBase;
 }
-
-type ReportAdKpis = {
-  cpc: number | null;
-  ctr: number | null;
-  cpm: number | null;
-  currency: string;
-};
 
 async function resolveReportAdKpis(
   storeId: string,
   dateKey: string,
-  apiSnap: { cpc?: number | null; ctr?: number | null; cpm?: number | null; currency?: string } | null | undefined,
+  baseCurrency: string,
+  apiSnap:
+    | {
+        cpc?: number | null;
+        ctr?: number | null;
+        cpm?: number | null;
+        currency?: string;
+      }
+    | null
+    | undefined,
 ): Promise<ReportAdKpis | null> {
+  const fromDb = await loadReportAdKpisForPeriod(
+    storeId,
+    [dateKey],
+    baseCurrency,
+  );
+  if (fromDb) return fromDb;
+
   if (
     apiSnap &&
     (apiSnap.cpc != null || apiSnap.ctr != null || apiSnap.cpm != null)
   ) {
+    const fromCur = apiSnap.currency ?? "USD";
     return {
-      cpc: apiSnap.cpc ?? null,
+      cpc: await convertAdMetricToBase(
+        apiSnap.cpc ?? null,
+        fromCur,
+        baseCurrency,
+        dateKey,
+      ),
       ctr: apiSnap.ctr ?? null,
-      cpm: apiSnap.cpm ?? null,
-      currency: apiSnap.currency ?? "USD",
+      cpm: await convertAdMetricToBase(
+        apiSnap.cpm ?? null,
+        fromCur,
+        baseCurrency,
+        dateKey,
+      ),
+      currency: baseCurrency.toUpperCase(),
+      spendPlatform: 0,
+      byPlatform: [],
     };
   }
 
-  const metrics = await loadStoreAdMetricsForDay(storeId, dateKey);
-  if (!metrics || metrics.total.spend <= 0) return null;
+  const insights = await aggregateStoreAdInsightsForPeriod(storeId, [dateKey]);
+  if (!insights || insights.spend <= 0) return null;
 
-  const currency =
-    metrics.byPlatform[0]?.currency ??
-    metrics.campaigns[0]?.currency ??
-    "USD";
+  const fromCur = "USD";
+  const spendPlatform = (
+    await convertToBaseCurrency(
+      insights.spend,
+      fromCur,
+      baseCurrency,
+      dateKey,
+    )
+  ).amountBase;
+
+  const cpc =
+    insights.cpc != null
+      ? (
+          await convertToBaseCurrency(
+            insights.cpc,
+            fromCur,
+            baseCurrency,
+            dateKey,
+          )
+        ).amountBase
+      : null;
+  const cpm =
+    insights.cpm != null
+      ? (
+          await convertToBaseCurrency(
+            insights.cpm,
+            fromCur,
+            baseCurrency,
+            dateKey,
+          )
+        ).amountBase
+      : null;
 
   return {
-    cpc: metrics.total.cpc,
-    ctr: metrics.total.ctr,
-    cpm: metrics.total.cpm,
-    currency,
+    cpc,
+    ctr: insights.ctr,
+    cpm,
+    currency: baseCurrency.toUpperCase(),
+    spendPlatform,
+    byPlatform: [],
   };
 }
 
@@ -174,6 +235,15 @@ function pushReportAdKpis(lines: string[], kpis: ReportAdKpis): void {
   pushIf(lines, kpis.cpc != null, `CPC: ${fmtAdMoney(kpis.cpc!, kpis.currency)}`);
   pushIf(lines, kpis.ctr != null, `CTR: ${fmtReportPct(kpis.ctr)}`);
   pushIf(lines, kpis.cpm != null, `CPM: ${fmtAdMoney(kpis.cpm!, kpis.currency)}`);
+}
+
+function pushManualField(
+  lines: string[],
+  label: string,
+  value: string | undefined | null,
+): void {
+  const t = (value ?? "").trim();
+  if (t) lines.push(`${label}: ${t}`);
 }
 
 export type DailyReportResult = {
@@ -275,7 +345,12 @@ export async function buildDailyReportText(opts: {
   pushFunnelReportLines(lines, financials);
 
   const apiSnap = storeNote?.apiSnapshot;
-  const adKpis = await resolveReportAdKpis(opts.storeId, opts.dateKey, apiSnap);
+  const adKpis = await resolveReportAdKpis(
+    opts.storeId,
+    opts.dateKey,
+    currency,
+    apiSnap,
+  );
   if (adKpis) {
     pushReportAdKpis(lines, adKpis);
   }
@@ -506,42 +581,27 @@ export async function buildWeeklyReportText(opts: {
 
   pushFunnelReportLines(lines, financials);
 
-  const adMetrics = await loadStoreAdMetricsFromDb(opts.storeId, keys);
-  const adInsights =
-    adMetrics != null
-      ? {
-          spend: adMetrics.total.spend,
-          impressions: adMetrics.total.impressions,
-          clicks: adMetrics.total.clicks,
-          cpc: adMetrics.total.cpc,
-          ctr: adMetrics.total.ctr,
-          cpm: adMetrics.total.cpm,
-        }
-      : await aggregateStoreAdInsightsForPeriod(opts.storeId, keys);
-  if (adInsights) {
-    const adCurrency =
-      adMetrics?.byPlatform[0]?.currency ??
-      adMetrics?.campaigns[0]?.currency ??
-      "USD";
+  const adKpis = await loadReportAdKpisForPeriod(opts.storeId, keys, currency);
+  if (adKpis) {
     pushAdMetricsBlock(
       lines,
       "ADS (total)",
-      adInsights.cpc,
-      adInsights.ctr,
-      adInsights.cpm,
-      adCurrency,
-      adInsights.spend,
+      adKpis.cpc,
+      adKpis.ctr,
+      adKpis.cpm,
+      adKpis.currency,
+      adKpis.spendPlatform,
     );
-    if (adMetrics && adMetrics.byPlatform.length > 1) {
-      for (const p of adMetrics.byPlatform) {
+    if (adKpis.byPlatform.length > 1) {
+      for (const p of adKpis.byPlatform) {
         pushAdMetricsBlock(
           lines,
           p.platformLabel.toUpperCase(),
           p.cpc,
           p.ctr,
           p.cpm,
-          p.currency,
-          p.spend,
+          adKpis.currency,
+          p.spendPlatform,
         );
       }
     }

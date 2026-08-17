@@ -3890,3 +3890,65 @@ export async function fetchStoreRangeFinancials(
     dayCount: sortedKeys.length,
   };
 }
+
+export type StoreDailyOrderTotals = {
+  revenue: number;
+  refunds: number;
+  cogs: number;
+};
+
+/** Totais diários de encomendas (receita líquida, reembolsos, COGS) para exportações. */
+export async function loadStoreDailyOrderTotalsByDay(
+  workspaceId: string,
+  storeId: string,
+  fromKey: string,
+  toKey: string,
+): Promise<Map<string, StoreDailyOrderTotals> | null> {
+  await connectToDatabase();
+  const wsId = new mongoose.Types.ObjectId(workspaceId);
+  const store = await Store.findOne({
+    _id: storeId,
+    workspaceId: wsId,
+    deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
+  })
+    .select(
+      "ianaTimezone cogsMode cogsDayFromKey cogsModePriorToDayForce",
+    )
+    .lean();
+  if (!store) return null;
+
+  const storeTz = normalizeStoreTimezone(store.ianaTimezone);
+  const cogsMode = (store.cogsMode ?? "shopify") as CogsMode;
+  const cogsDayOpts = {
+    cogsDayFromKey: store.cogsDayFromKey ?? null,
+    cogsModePriorToDayForce: isCogsMode(store.cogsModePriorToDayForce ?? "")
+      ? (store.cogsModePriorToDayForce as CogsMode)
+      : null,
+  };
+
+  const { start, end } = {
+    start: zonedStartOfDay(fromKey, storeTz),
+    end: zonedEndOfDay(toKey, storeTz),
+  };
+  const slice = { start, end };
+
+  const orderByDay = await aggregateDailyOrders(
+    wsId,
+    [store._id],
+    slice,
+    storeTz,
+    cogsMode,
+    cogsDayOpts,
+  );
+
+  const result = new Map<string, StoreDailyOrderTotals>();
+  for (const [dateKey, o] of orderByDay) {
+    result.set(dateKey, {
+      revenue: o.revenue,
+      refunds: o.refunds,
+      cogs: o.cogs,
+    });
+  }
+  return result;
+}

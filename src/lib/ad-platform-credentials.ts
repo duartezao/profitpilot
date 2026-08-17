@@ -36,8 +36,9 @@ export async function listWorkspaceGoogleLogins(
   }));
 }
 
-export async function upsertWorkspaceGoogleCredential(
+async function upsertWorkspacePlatformCredential(
   workspaceId: Types.ObjectId | string,
+  platform: AdPlatform | "google-sheets",
   loginEmail: string,
   refreshToken: string,
 ): Promise<WorkspaceGoogleLogin> {
@@ -48,14 +49,14 @@ export async function upsertWorkspaceGoogleCredential(
   const row = await AdPlatformCredential.findOneAndUpdate(
     {
       workspaceId: new mongoose.Types.ObjectId(workspaceId),
-      platform: "google",
+      platform,
       loginEmail: email,
       deletedAt: null,
     },
     {
       $set: {
         workspaceId: new mongoose.Types.ObjectId(workspaceId),
-        platform: "google",
+        platform,
         loginEmail: email,
         credentials,
       },
@@ -70,18 +71,51 @@ export async function upsertWorkspaceGoogleCredential(
   return { id: String(row._id), loginEmail: row.loginEmail };
 }
 
-export async function getWorkspaceGoogleRefreshToken(
+export async function upsertWorkspaceGoogleCredential(
+  workspaceId: Types.ObjectId | string,
+  loginEmail: string,
+  refreshToken: string,
+): Promise<WorkspaceGoogleLogin> {
+  return upsertWorkspacePlatformCredential(
+    workspaceId,
+    "google",
+    loginEmail,
+    refreshToken,
+  );
+}
+
+export async function upsertWorkspaceGoogleSheetsCredential(
+  workspaceId: Types.ObjectId | string,
+  loginEmail: string,
+  refreshToken: string,
+): Promise<WorkspaceGoogleLogin> {
+  return upsertWorkspacePlatformCredential(
+    workspaceId,
+    "google-sheets",
+    loginEmail,
+    refreshToken,
+  );
+}
+
+export async function getWorkspacePlatformRefreshToken(
   workspaceId: string,
-  credentialId: string,
+  platform: AdPlatform | "google-sheets",
+  credentialId?: string,
 ): Promise<{ refreshToken: string; loginEmail: string } | null> {
-  if (!mongoose.isValidObjectId(credentialId)) return null;
   await connectToDatabase();
-  const row = await AdPlatformCredential.findOne({
-    _id: new mongoose.Types.ObjectId(credentialId),
+  const filter: Record<string, unknown> = {
     workspaceId: new mongoose.Types.ObjectId(workspaceId),
-    platform: "google",
+    platform,
     deletedAt: null,
-  }).lean();
+  };
+  if (credentialId) {
+    if (!mongoose.isValidObjectId(credentialId)) return null;
+    filter._id = new mongoose.Types.ObjectId(credentialId);
+  }
+
+  const row = credentialId
+    ? await AdPlatformCredential.findOne(filter).lean()
+    : await AdPlatformCredential.findOne(filter).sort({ updatedAt: -1 }).lean();
 
   if (!row) return null;
   const creds = decryptAdCredentials<GoogleCredentials>(row.credentials);
@@ -90,6 +124,23 @@ export async function getWorkspaceGoogleRefreshToken(
     refreshToken: creds.refreshToken.trim(),
     loginEmail: row.loginEmail,
   };
+}
+
+export async function hasWorkspaceGoogleSheetsCredential(
+  workspaceId: string,
+): Promise<boolean> {
+  const cred = await getWorkspacePlatformRefreshToken(
+    workspaceId,
+    "google-sheets",
+  );
+  return cred != null;
+}
+
+export async function getWorkspaceGoogleRefreshToken(
+  workspaceId: string,
+  credentialId: string,
+): Promise<{ refreshToken: string; loginEmail: string } | null> {
+  return getWorkspacePlatformRefreshToken(workspaceId, "google", credentialId);
 }
 
 export async function saveWorkspaceGoogleCredentialManual(

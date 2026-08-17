@@ -595,7 +595,7 @@ Cada loja deve ter:
 
 > Gerar, para um dia e uma loja, um relatório com os dados já preenchidos automaticamente — pronto a copiar/exportar.
 
-**Estado (implementado):** painel «Resumo» em `/notas`, `/metricas` (loja seleccionada) e na **Dashboard consolidada** (todas as lojas). Ontem por defeito, `?date=YYYY-MM-DD` opcional, com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** (totais ads do dia, BD ou `apiSnapshot`). Do lado dos ads no resumo copiado: **MELHOR CAMPANHA** (`apiSnapshot.bestCampaign`) — sem lista de campanhas nem bloco OBS da API. **PRODUTO BEST-SELLER** vem do top produto do dia (unidades/lucro conforme `cogsMode`); se não houver vendas, usa o campo manual da nota. Campos manuais (produtos/coleções testadas, OBS escrita à mão, dificuldades, scale) vêm da **nota diária** (`reportFields`). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
+**Estado (implementado):** painel «Resumo» em `/notas`, `/metricas` (loja seleccionada) e na **Dashboard consolidada** (todas as lojas). Ontem por defeito, `?date=YYYY-MM-DD` opcional, com botão copiar. Métricas automáticas: REV, REFUNDS, ADSPEND, DESPESAS, PROFIT (aviso COGS), funil ATC/checkout/CVR, **CPC/CTR/CPM** (totais ads do dia; **CPC/CPM em EUR — moeda base da loja — calculados sobre gasto plataforma sem fee de agência**; BD campanhas ou `apiSnapshot`). Do lado dos ads no resumo copiado: **MELHOR CAMPANHA** (`apiSnapshot.bestCampaign`) — sem lista de campanhas nem bloco OBS da API. **PRODUTO BEST-SELLER** vem do top produto do dia (unidades/lucro conforme `cogsMode`); se não houver vendas, usa o campo manual da nota. Campos manuais (produtos/coleções testadas, OBS escrita à mão, dificuldades, scale) vêm da **nota diária** (`reportFields`). O texto copiado **só inclui campos preenchidos** (sem linhas vazias nem `—`). Exportação **TXT** e **PDF** (`?format=txt|pdf`) + cartão visual com print.
 
 **Diário ou semanal (toggle):** o painel «Resumo» tem dois modos. O **diário** gera para o dia escolhido (com campos manuais da nota). O **semanal** (`?period=week`) agrega os **7 dias até à data** escolhida (REV, refunds, ad spend, despesas, profit somados; funil e CPC/CTR/CPM recalculados sobre os totais da semana) — cabeçalho `SEMANA: dd/mm – dd/mm`. Em ambos, na vista consolidada/todas as lojas gera **um bloco por loja** (vista de texto por defeito) e por loja mostra também o cartão visual.
 
@@ -611,9 +611,9 @@ PROFIT: 198,40   (com aviso se COGS em falta no dia)
 ATC %: 10,16%
 REACHED CHECKOUT %: 6,77%
 CVR %: 5,08%
-CPC: $0.24
+CPC: 0,22€
 CTR: 5.46%
-CPM: US$ 13,01
+CPM: 11,95€
 Produtos testados: 0
 Coleções testadas: 1
 Quais coleções já testadas: 1
@@ -638,7 +638,7 @@ Principais dificuldades: 0
 | ATC % | `sessões com add to cart / sessões` — mesma origem e **mesmo filtro de país(es)** que SESSÕES |
 | REACHED CHECKOUT % | `sessões que chegaram ao checkout / sessões` — mesma origem e **mesmo filtro de país(es)** |
 | CVR % | `sessões que concluíram checkout / sessões` — mesma origem e **mesmo filtro de país(es)** |
-| CPC, CTR, CPM | Métricas das contas de ads ligadas |
+| CPC, CTR, CPM | Contas ads ligadas — **CPC/CPM em EUR (moeda base), gasto plataforma sem fee**; ADSPEND no report continua com fees (custo real) |
 | Produtos/Coleções testadas, próxima coleção, best-seller, OBS, dificuldades | **Campos da nota diária** (preenchidos por ti) |
 
 > **Funil (sessões, ATC %, checkout %, CVR %):** vêm da Shopify (ShopifyQL via Admin GraphQL **2025-10+**, scope `read_reports`), filtradas pelos **países das sessões** em Definições (lista ISO; vazio = mundo). Com **1 país** o report mantém `ATC %` / `CVR %` como antes; com **2+ países** o report **separa por país** (`ATC % BE: …`, `CVR % FR: …`). Os dados ficam na BD em blobs mensais gzip (`session_metrics_months`, chave `countryKey` ISO) — um sync por país. Dashboard / KPIs somam os países seleccionados (label «Sessões: Bélgica, França»). **2+ países:** o COGS automático continua até à **data da 1ª encomenda** noutro país da lista (`cogsDayFromKey`); **a partir desse dia** `cogsMode` = `day` (manual). Dias anteriores mantêm o COGS automático já nas orders. Mudança de países em Definições apaga o cache afectado e dispara re-sync. `sessionMetricsQueryVersion` na loja força re-sync quando a query ShopifyQL muda. REV, REFUNDS, PROFIT e ADSPEND **não** usam este filtro — vêm das orders/ad spend da loja. CPC/CTR/CPM vêm das contas de ads.
@@ -651,10 +651,10 @@ Principais dificuldades: 0
 ADSPEND total: 12,35  (Meta 8,10 | Google 4,25)
 
 — META —
-CPC: $0.24   CTR: 5.46%   CPM: US$ 13,01
+CPC: 0,22€   CTR: 5.46%   CPM: 11,95€
 
 — GOOGLE —
-CPC: $0.31   CTR: 3.10%   CPM: US$ 9,80
+CPC: 0,29€   CTR: 3.10%   CPM: 8,72€
 ```
 
 * Cada plataforma tem o seu bloco de CPC/CTR/CPM/spend.
@@ -1187,7 +1187,7 @@ Lucro após taxas =
 
 > Sim — podes exportar **os dados que quiseres, como quiseres**: escolher o que exportar, que colunas, que período e que lojas. Funciona para lojas ativas **e arquivadas**.
 
-**Estado (implementado v1):** botões CSV / Excel / PDF nas páginas de pedidos, reembolsos, chargebacks, anúncios, payouts, finanças (P&L), métricas (snapshots diários) e produtos. Parâmetro `?format=csv|xlsx|pdf` nas rotas `/api/export/*` e `/api/products/ranking`.
+**Estado (implementado v1):** botões CSV / Excel / PDF nas páginas de pedidos, reembolsos, chargebacks, anúncios, payouts, finanças (P&L), métricas (snapshots diários) e produtos. Parâmetro `?format=csv|xlsx|pdf` nas rotas `/api/export/*` e `/api/products/ranking`. **Profit Sheet (coach, Google Sheets):** botão em `/metricas` — duplica o template original no Google Drive via **OAuth do utilizador** (sem chave de conta de serviço), preenche B/C/E/G e abre a cópia. Env `PROFIT_SHEET_TEMPLATE_ID` + OAuth Google (`GOOGLE_ADS_CLIENT_ID`/`SECRET`, redirect `/api/oauth/google-sheets/callback`, APIs Drive+Sheets activas). Ligação: «Ligar Google (Profit Sheet)» → `/api/oauth/google-sheets/start`. Conta de serviço (`GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`) opcional se a org permitir chaves.
 
 ## Como funciona (exportação flexível)
 

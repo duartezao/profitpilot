@@ -6,25 +6,23 @@ import { useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/components/workspace-context";
 import { hrefWithScopeAndStore } from "@/lib/scope-query";
 
-function DataWarningsInner({
-  cogsIncomplete,
-  missingCogsCount,
-  missingCogsMessage,
-  missingAdSpendDays,
-  adsHref: adsHrefProp,
-}: {
+type DataWarningsProps = {
   cogsIncomplete: boolean;
   missingCogsCount: number;
   missingCogsMessage?: string;
   missingAdSpendDays: number;
   adsHref?: string;
-}) {
-  const searchParams = useSearchParams();
-  const { workspaceId } = useWorkspace();
-  const cogsHref = hrefWithScopeAndStore("/cogs", searchParams, workspaceId);
-  const adsHref =
-    adsHrefProp ?? hrefWithScopeAndStore("/anuncios", searchParams, workspaceId);
+  cogsHref?: string;
+};
 
+function DataWarningsContent({
+  cogsIncomplete,
+  missingCogsCount,
+  missingCogsMessage,
+  missingAdSpendDays,
+  cogsHref,
+  adsHref,
+}: DataWarningsProps & { cogsHref: string; adsHref: string }) {
   if (!cogsIncomplete && missingAdSpendDays <= 0) return null;
 
   const cogsText =
@@ -64,18 +62,39 @@ function DataWarningsInner({
   );
 }
 
-export function DataWarnings(
-  props: Parameters<typeof DataWarningsInner>[0] & { cogsHref?: string },
-) {
+function DataWarningsWithSearchParams(props: DataWarningsProps) {
+  const searchParams = useSearchParams();
+  const { workspaceId } = useWorkspace();
+  const cogsHref =
+    props.cogsHref ??
+    hrefWithScopeAndStore("/cogs", searchParams, workspaceId);
+  const adsHref =
+    props.adsHref ??
+    hrefWithScopeAndStore("/anuncios", searchParams, workspaceId);
+
   return (
-    <Suspense fallback={null}>
-      <DataWarningsInner
-        cogsIncomplete={props.cogsIncomplete}
-        missingCogsCount={props.missingCogsCount}
-        missingCogsMessage={props.missingCogsMessage}
-        missingAdSpendDays={props.missingAdSpendDays}
+    <DataWarningsContent
+      {...props}
+      cogsHref={cogsHref}
+      adsHref={adsHref}
+    />
+  );
+}
+
+export function DataWarnings(props: DataWarningsProps) {
+  if (props.cogsHref && props.adsHref) {
+    return (
+      <DataWarningsContent
+        {...props}
+        cogsHref={props.cogsHref}
         adsHref={props.adsHref}
       />
+    );
+  }
+
+  return (
+    <Suspense fallback={null}>
+      <DataWarningsWithSearchParams {...props} />
     </Suspense>
   );
 }

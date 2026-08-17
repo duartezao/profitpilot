@@ -442,6 +442,52 @@ export async function buildStoreAdSpendSummaries(
   return summaries.sort((a, b) => b.missingCount - a.missingCount);
 }
 
+/** Gasto Google por dia (EUR, só plataforma — sem fees de agência). */
+export async function aggregateDailyGoogleAdSpend(
+  storeOids: Types.ObjectId[],
+  slice: PeriodSlice,
+  storeTimeZone?: string | null,
+): Promise<Map<string, number>> {
+  if (!storeOids.length) return new Map();
+
+  const rows = await ManualAdSpend.aggregate<{ _id: string; total: number }>([
+    {
+      $match: {
+        storeId: { $in: storeOids },
+        ...adSpendDateMatch(slice, storeTimeZone),
+      },
+    },
+    {
+      $project: {
+        dateKey: 1,
+        google: {
+          $sum: {
+            $map: {
+              input: { $ifNull: ["$lines", []] },
+              as: "line",
+              in: {
+                $cond: [
+                  { $eq: ["$$line.platform", "google"] },
+                  "$$line.amount",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      $group: {
+        _id: "$dateKey",
+        total: { $sum: "$google" },
+      },
+    },
+  ]);
+
+  return new Map(rows.map((r) => [r._id, r.total]));
+}
+
 export type AdSpendExportRow = {
   dateKey: string;
   meta: number | null;

@@ -16,7 +16,54 @@ import {
   oauthCookieOptions,
   parseOAuthStoreId,
 } from "@/lib/ad-oauth";
-import { upsertWorkspaceGoogleCredential } from "@/lib/ad-platform-credentials";
+import {
+  upsertWorkspaceGoogleCredential,
+  upsertWorkspaceGoogleSheetsCredential,
+} from "@/lib/ad-platform-credentials";
+import {
+  GOOGLE_SHEETS_OAUTH_RETURN_COOKIE,
+  GOOGLE_SHEETS_OAUTH_STATE_COOKIE,
+} from "@/lib/google-sheets-oauth";
+
+async function exchangeGoogleCode(
+  code: string,
+  redirectUri: string,
+): Promise<{
+  refresh_token?: string;
+  access_token?: string;
+  id_token?: string;
+  error?: string;
+  error_description?: string;
+}> {
+  const clientId = process.env.GOOGLE_ADS_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) {
+    return { error: "google_config" };
+  }
+
+  const body = new URLSearchParams({
+    code,
+    client_id: clientId,
+    client_secret: clientSecret,
+    redirect_uri: redirectUri,
+    grant_type: "authorization_code",
+  });
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+    cache: "no-store",
+  });
+
+  return (await res.json()) as {
+    refresh_token?: string;
+    access_token?: string;
+    id_token?: string;
+    error?: string;
+    error_description?: string;
+  };
+}
 
 export async function GET(request: Request) {
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID?.trim();
@@ -35,6 +82,75 @@ export async function GET(request: Request) {
     searchParams.get("error_description") ?? searchParams.get("error");
 
   const jar = await cookies();
+
+  /* --- Profit Sheet (Google Sheets) --- */
+  const sheetsExpectedState = jar.get(GOOGLE_SHEETS_OAUTH_STATE_COOKIE)?.value;
+  const sheetsReturnPath =
+    jar.get(GOOGLE_SHEETS_OAUTH_RETURN_COOKIE)?.value ?? "/metricas";
+  const isSheetsFlow = Boolean(
+    sheetsExpectedState && state && state === sheetsExpectedState,
+  );
+  const sheetsFlowStarted = Boolean(
+    sheetsExpectedState || jar.get(GOOGLE_SHEETS_OAUTH_RETURN_COOKIE)?.value,
+  );
+
+  if (sheetsFlowStarted && !isSheetsFlow) {
+    jar.delete(GOOGLE_SHEETS_OAUTH_STATE_COOKIE);
+    jar.delete(GOOGLE_SHEETS_OAUTH_RETURN_COOKIE);
+    const dest = new URL(sheetsReturnPath, request.url);
+    dest.searchParams.set("sheets_oauth_error", "state");
+    return NextResponse.redirect(dest);
+  }
+
+  if (isSheetsFlow) {
+    jar.delete(GOOGLE_SHEETS_OAUTH_STATE_COOKIE);
+    jar.delete(GOOGLE_SHEETS_OAUTH_RETURN_COOKIE);
+
+    const dest = new URL(sheetsReturnPath, request.url);
+
+    const user = await getCurrentUser();
+    if (!user?.workspaceId) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+
+    if (error || !code) {
+      dest.searchParams.set("sheets_oauth_error", error ?? "cancelled");
+      return NextResponse.redirect(dest);
+    }
+
+    const json = await exchangeGoogleCode(code, redirectUri);
+    if (!json.refresh_token) {
+      dest.searchParams.set(
+        "sheets_oauth_error",
+        json.error_description ??
+          json.error ??
+          "Sem refresh token — tenta outra vez e aceita todas as permissões.",
+      );
+      return NextResponse.redirect(dest);
+    }
+
+    const loginEmail = await resolveGoogleOAuthLoginEmail(json);
+    if (!loginEmail) {
+      dest.searchParams.set("sheets_oauth_error", "email");
+      return NextResponse.redirect(dest);
+    }
+
+    try {
+      await upsertWorkspaceGoogleSheetsCredential(
+        user.workspaceId,
+        loginEmail,
+        json.refresh_token,
+      );
+    } catch {
+      dest.searchParams.set("sheets_oauth_error", "save_failed");
+      return NextResponse.redirect(dest);
+    }
+
+    dest.searchParams.set("sheets_oauth", "ok");
+    return NextResponse.redirect(dest);
+  }
+
+  /* --- Google Ads --- */
   const expectedState = jar.get(adOAuthStateCookie("google"))?.value;
   const storeId = parseOAuthStoreId(jar.get(adOAuthStoreCookie("google"))?.value);
   const returnTo = jar.get(adOAuthReturnCookie("google"))?.value ?? "";
@@ -46,7 +162,7 @@ export async function GET(request: Request) {
 
   const dest = toDefinicoes
     ? new URL("/definicoes", request.url)
-  : new URL("/anuncios", request.url);
+    : new URL("/anuncios", request.url);
   if (toDefinicoes) {
     dest.hash = "google-ads";
   } else if (storeId) {
@@ -77,30 +193,8 @@ export async function GET(request: Request) {
     return NextResponse.redirect(dest);
   }
 
-  const body = new URLSearchParams({
-    code,
-    client_id: clientId,
-    client_secret: clientSecret,
-    redirect_uri: redirectUri,
-    grant_type: "authorization_code",
-  });
-
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    cache: "no-store",
-  });
-
-  const json = (await res.json()) as {
-    refresh_token?: string;
-    access_token?: string;
-    id_token?: string;
-    error?: string;
-    error_description?: string;
-  };
-
-  if (!res.ok || !json.refresh_token) {
+  const json = await exchangeGoogleCode(code, redirectUri);
+  if (!json.refresh_token) {
     dest.searchParams.set(
       "oauth_error",
       json.error_description ??
