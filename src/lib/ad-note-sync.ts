@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import { DailyNote } from "@/models/DailyNote";
 import { resolveStoreAdMetricsForDay } from "@/lib/ad-insights";
+import { loadReportAdKpisForPeriod } from "@/lib/ad-campaign-metrics";
 import { loadActiveAdAccountIdsForStore } from "@/lib/ad-accounts";
 import { buildWorkspacePnl } from "@/lib/metrics";
 import { berRoas } from "@/lib/profit";
@@ -12,6 +13,7 @@ import {
 } from "@/lib/campaign-decision";
 import { roasFromCampaign } from "@/lib/ad-campaign-types";
 import { startOfDay, endOfDay, parseDateInput } from "@/lib/period";
+import { Store } from "@/models/Store";
 
 function isApiAutoObs(obs: string | undefined | null): boolean {
   const t = (obs ?? "").trim();
@@ -62,7 +64,15 @@ export async function syncApiMetricsToDailyNote(
   );
   const conversions = metrics.campaigns.reduce((s, c) => s + c.conversions, 0);
   const roas = roasFromCampaign(metrics.total.spend, conversionValue);
-  const currency = metrics.byPlatform[0]?.currency ?? "EUR";
+
+  const storeDoc = await Store.findById(storeId).select("currency").lean();
+  const baseCurrency = storeDoc?.currency ?? "EUR";
+  const reportKpis = await loadReportAdKpisForPeriod(
+    storeId,
+    [dateKey],
+    baseCurrency,
+  );
+  const currency = reportKpis?.currency ?? baseCurrency;
 
   const wsOid = new mongoose.Types.ObjectId(workspaceId);
   const storeOid = new mongoose.Types.ObjectId(storeId);
@@ -74,9 +84,9 @@ export async function syncApiMetricsToDailyNote(
     conversions,
     conversionValue,
     roas,
-    cpc: metrics.total.cpc,
-    ctr: metrics.total.ctr,
-    cpm: metrics.total.cpm,
+    cpc: reportKpis?.cpc ?? metrics.total.cpc,
+    ctr: reportKpis?.ctr ?? metrics.total.ctr,
+    cpm: reportKpis?.cpm ?? metrics.total.cpm,
     currency,
     bestCampaign: best?.name ?? "",
     campaignSuggestion: "",

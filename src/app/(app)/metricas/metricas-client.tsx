@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
+import { Download } from "lucide-react";
 import { ExportFormatLinks } from "@/components/export-format-links";
 import { StoreMetricsView } from "@/components/dashboard/store-metrics-view";
 import { StoreDashboardHeader } from "@/components/dashboard/store-dashboard-view";
@@ -38,19 +39,33 @@ async function fetchSummary(params: URLSearchParams): Promise<DashboardSummary> 
 
 export function MetricasClient({
   initialPanelPrefs,
+  profitSheetTemplateReady = false,
+  profitSheetGoogleConnected = false,
+  profitSheetCanExport = false,
+  profitSheetOAuthConfigured = false,
 }: {
   initialPanelPrefs?: MetricPanelPreferences;
+  profitSheetTemplateReady?: boolean;
+  profitSheetGoogleConnected?: boolean;
+  profitSheetCanExport?: boolean;
+  profitSheetOAuthConfigured?: boolean;
 }) {
   const { workspaceId } = useWorkspace();
   const searchParams = useSearchParams();
   const storeId = searchParams.get("store");
   const period = periodFromSearchParams(searchParams);
   const adsHref = hrefWithScopeAndStore("/anuncios", searchParams, workspaceId);
+  const cogsHref = hrefWithScopeAndStore("/cogs", searchParams, workspaceId);
   const { prefs, ready, save } = useMetricPanelPreferences(
     workspaceId,
     initialPanelPrefs,
   );
   const [saving, setSaving] = useState(false);
+  const [clientReady, setClientReady] = useState(false);
+
+  useEffect(() => {
+    setClientReady(true);
+  }, []);
 
   const { data, isError } = useQuery({
     queryKey: ["metrics-summary", workspaceId, storeId, period.key],
@@ -60,9 +75,19 @@ export function MetricasClient({
     refetchInterval: 60 * 1000,
   });
 
-  const periodLabel = data?.storeDashboard?.periodLabel ?? period.label;
-  const prevPeriodLabel = data?.storeDashboard?.prevPeriodLabel;
-  const headerTitle = data?.scopeDomain ?? data?.scopeName ?? "Métricas";
+  const periodLabel =
+    clientReady && data?.storeDashboard?.periodLabel
+      ? data.storeDashboard.periodLabel
+      : period.label;
+  const prevPeriodLabel = clientReady
+    ? data?.storeDashboard?.prevPeriodLabel
+    : undefined;
+  const headerTitle =
+    clientReady && data
+      ? (data.scopeDomain ?? data.scopeName ?? "Métricas")
+      : "Métricas";
+
+  const showLoadedContent = clientReady && Boolean(data);
 
   if (!storeId) {
     return (
@@ -98,6 +123,43 @@ export function MetricasClient({
           <ExportFormatLinks
             href={`/api/export/daily-metrics?store=${encodeURIComponent(storeId)}`}
           />
+          {profitSheetCanExport ? (
+            <a
+              href={`/api/export/profit-sheet?store=${encodeURIComponent(storeId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              <Download className="h-4 w-4" />
+              Profit Sheet
+            </a>
+          ) : profitSheetTemplateReady && profitSheetOAuthConfigured && !profitSheetGoogleConnected ? (
+            <a
+              href={`/api/oauth/google-sheets/start?returnTo=${encodeURIComponent("/metricas")}&store=${encodeURIComponent(storeId)}`}
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium hover:bg-muted"
+            >
+              <Download className="h-4 w-4" />
+              Ligar Google (Profit Sheet)
+            </a>
+          ) : (
+            <span
+              title={
+                !profitSheetTemplateReady
+                  ? "Configura PROFIT_SHEET_TEMPLATE_ID no .env e reinicia o servidor."
+                  : !profitSheetOAuthConfigured
+                    ? "Configura GOOGLE_ADS_CLIENT_ID e GOOGLE_ADS_CLIENT_SECRET no .env."
+                    : "Liga o teu Gmail para exportar Profit Sheet."
+              }
+              className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground"
+            >
+              <Download className="h-4 w-4" />
+              {!profitSheetTemplateReady
+                ? "Profit Sheet (template em falta)"
+                : !profitSheetOAuthConfigured
+                  ? "Profit Sheet (OAuth em falta)"
+                  : "Profit Sheet"}
+            </span>
+          )}
         </div>
       </div>
 
@@ -107,26 +169,27 @@ export function MetricasClient({
         </p>
       )}
 
-      {data && (
+      {showLoadedContent && (
         <>
           <OperationsAlertsBanner
-            exclusionNote={data.operationContext?.exclusionNote}
-            scopedStoreStatus={data.operationContext?.scopedStoreStatus}
-            collectionReminders={data.operationContext?.collectionReminders}
+            exclusionNote={data!.operationContext?.exclusionNote}
+            scopedStoreStatus={data!.operationContext?.scopedStoreStatus}
+            collectionReminders={data!.operationContext?.collectionReminders}
           />
           <DataWarnings
-            cogsIncomplete={data.cogsIncomplete}
-            missingCogsCount={data.missingCogsCount}
-            missingCogsMessage={data.missingCogsMessage}
-            missingAdSpendDays={data.missingAdSpendDays}
+            cogsIncomplete={data!.cogsIncomplete}
+            missingCogsCount={data!.missingCogsCount}
+            missingCogsMessage={data!.missingCogsMessage}
+            missingAdSpendDays={data!.missingAdSpendDays}
             adsHref={adsHref}
+            cogsHref={cogsHref}
           />
         </>
       )}
 
-      {data && ready ? (
+      {showLoadedContent && ready ? (
         <StoreMetricsView
-          data={data}
+          data={data!}
           storeId={storeId}
           orderedMetricIds={prefs.orderedIds}
         />

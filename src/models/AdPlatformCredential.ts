@@ -11,7 +11,7 @@ const AdPlatformCredentialSchema = new Schema(
     },
     platform: {
       type: String,
-      enum: ["meta", "google", "tiktok"],
+      enum: ["meta", "google", "google-sheets", "tiktok"],
       required: true,
     },
     /** Email usado no OAuth (chave lógica por workspace). */
