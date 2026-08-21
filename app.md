@@ -1561,8 +1561,9 @@ Pipeline operacional de dropshipping.
 | **Coleções** (`testCollections`) | Por testar · A testar · Não vai testar · Performou · Matada |
 | **Produtos** (`testProducts`) | A testar · Já testado · Performou · Falhou |
 
-* **Rotas**: `/operacao` (**Hoje**), `/operacao/tarefas`, `/operacao/colecoes`, `/operacao/produtos`
+* **Rotas**: `/operacao` (**Hoje**), `/operacao/tarefas`, `/operacao/colecoes`, `/operacao/produtos`, **`/pesquisa`** (Product & Collection Research — partilhado no workspace)
 * **Hoje** (`/operacao`): hub do dia — lembretes de ciclo, decisão assistida (lucro/ROAS), tarefas inline com atribuição, coleções/produtos com mudança de estado, lojas colapsáveis, atalhos para quadro completo
+* **Pesquisa PR** (`/pesquisa`, coleção `research_items`): biblioteca partilhada do workspace (produto/coleção). Campos: Reach, Active Days, Fb Ad Link, Store Link, Market, Date (auto na criação, editável), Gender, Notes, mais Tipo, Nome, Estado (Novo/Shortlist/A testar/Winner/Descartado), Ângulo/hook. Soft delete; editor+ escreve, viewer consulta. Filtros por texto/tipo/estado. Disponível na nav financeira e no modo operação.
 * **Decisão assistida**: ao fim do ciclo sugere Performou/Matada com base em lucro e ROAS do período de teste (`collection-decision.ts`)
 * **Ciclo de coleções**: `collectionTestCycleDays` (defeito 5) e `collectionReminderDaysBefore` (defeito 2). Ao passar para «A testar» regista início/fim; lembretes antes do fim ou início agendado. Banner no dashboard/métricas + bloco no relatório diário (`--- Operação (coleções) ---`, `--- Operação (produtos) ---`)
 * **Tarefas** (`operationTasks`): Kanban drag-and-drop + setas no telemóvel; atribuição a membros do workspace; filtros Todas / Minhas / Sem responsável
@@ -1651,6 +1652,25 @@ Pipeline operacional de dropshipping.
 * `reportFields` (campos manuais do relatório diário: `productsTested`, `collectionsTested`, `collectionsTestedList`, `nextCollection`, `bestSellerCollection`, `dayNumber`, `difficulties`, `obs`)
 * `apiSnapshot` (preenchido no sync de ads API: `spend`, `clicks`, `impressions`, `conversions`, `conversionValue`, `roas`, `cpc`, `ctr`, `cpm`, `currency`, `bestCampaign`, `campaignSuggestion`, `syncedAt`; não preenche `reportFields.obs` — o resumo diário usa só `bestCampaign`)
 * `createdAt`
+
+## research_items
+
+> Product & Collection Research partilhada no workspace (`/pesquisa`).
+
+* `_id`
+* `workspaceId`
+* `kind` (`product` | `collection`)
+* `name`
+* `reach` / `activeDays`
+* `fbAdLink` / `storeLink`
+* `market`
+* `researchedAt` (data da research — auto na criação)
+* `gender` (`female` | `male` | `unisex` | `unknown`)
+* `notes` / `angle`
+* `status` (`new` | `shortlist` | `testing` | `winner` | `rejected`)
+* `createdBy`
+* `deletedAt` (soft delete)
+* `createdAt` / `updatedAt`
 
 ## dailyMetrics
 

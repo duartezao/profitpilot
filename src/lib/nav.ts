@@ -22,6 +22,7 @@ import {
   ListTodo,
   Tags,
   Target,
+  Search,
   type LucideIcon,
 } from "lucide-react";
 import type { AppViewMode } from "@/lib/app-view-mode";
@@ -41,6 +42,7 @@ export type NavGroup = {
 export const workspaceNavItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Lojas", href: "/lojas", icon: Store },
+  { label: "Pesquisa PR", href: "/pesquisa", icon: Search },
   { label: "Lucro & Finanças", href: "/financas", icon: LineChart },
   { label: "Payouts", href: "/payouts", icon: Banknote },
   { label: "Notas", href: "/notas", icon: NotebookPen },
@@ -54,6 +56,7 @@ export const storeNavItems: NavItem[] = [
   { label: "Métricas", href: "/metricas", icon: BarChart3 },
   { label: "Lucro & Finanças", href: "/financas", icon: LineChart },
   { label: "Decisão", href: "/decisao", icon: Scale },
+  { label: "Pesquisa PR", href: "/pesquisa", icon: Search },
   { label: "Produtos", href: "/produtos", icon: Package },
   { label: "Vendas por coleção", href: "/colecoes-vendas", icon: Tags },
   { label: "ROAS por coleção", href: "/colecoes-roas", icon: Target },
@@ -73,6 +76,7 @@ export const operationsNavItems: NavItem[] = [
   { label: "Tarefas", href: "/operacao/tarefas", icon: ListTodo },
   { label: "Coleções", href: "/operacao/colecoes", icon: Layers },
   { label: "Produtos teste", href: "/operacao/produtos", icon: FlaskConical },
+  { label: "Pesquisa PR", href: "/pesquisa", icon: Search },
   { label: "Lojas", href: "/lojas", icon: Store },
   { label: "Definições", href: "/definicoes", icon: Settings },
 ];
@@ -122,6 +126,7 @@ export function navGroupsForStoreScope(
     {
       label: "Operação",
       items: pick(
+        "/pesquisa",
         "/produtos",
         "/colecoes-vendas",
         "/colecoes-roas",
