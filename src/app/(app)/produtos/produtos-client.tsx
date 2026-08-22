@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { ExportFormatLinks } from "@/components/export-format-links";
@@ -66,7 +67,7 @@ export function ProdutosClient({ storeId }: { storeId: string }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
             Produtos ·{" "}
@@ -78,7 +79,15 @@ export function ProdutosClient({ storeId }: { storeId: string }) {
               : `Top produtos por lucro · ${data.periodLabel}`}
           </p>
         </div>
-        <ExportFormatLinks href={productsExportUrl(storeId, searchParams)} />
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href={`/produtos/precos?store=${encodeURIComponent(storeId)}`}
+            className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Preço & COGS
+          </Link>
+          <ExportFormatLinks href={productsExportUrl(storeId, searchParams)} />
+        </div>
       </div>
 
       <CollapsibleSection
