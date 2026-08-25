@@ -83,31 +83,53 @@ function CollectionRoasCard({ row }: { row: CollectionRoasRow }) {
           </div>
         </div>
 
-        <div className="grid w-full grid-cols-3 gap-2 sm:w-auto sm:min-w-[280px]">
-          <div className="text-right">
-            <p className="text-[11px] text-muted-foreground">REV</p>
-            <p className="tabular-nums text-sm font-medium">
-              <Sensitive>{row.revenueFmt}</Sensitive>
-            </p>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[300px]">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">REV</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.revenueFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">Spend</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.adSpendFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">ROAS real</p>
+              <p
+                className={cn(
+                  "tabular-nums text-sm font-semibold",
+                  row.realRoas != null && row.realRoas >= 1
+                    ? "text-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                <Sensitive>{row.realRoasFmt}</Sensitive>
+              </p>
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-[11px] text-muted-foreground">Spend</p>
-            <p className="tabular-nums text-sm font-medium">
-              <Sensitive>{row.adSpendFmt}</Sensitive>
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] text-muted-foreground">ROAS real</p>
-            <p
-              className={cn(
-                "tabular-nums text-sm font-semibold",
-                row.realRoas != null && row.realRoas >= 1
-                  ? "text-foreground"
-                  : "text-muted-foreground",
-              )}
-            >
-              <Sensitive>{row.realRoasFmt}</Sensitive>
-            </p>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">CPC</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.cpcFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">CPM</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.cpmFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">CTR</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.ctrFmt}</Sensitive>
+              </p>
+            </div>
           </div>
         </div>
 
@@ -126,13 +148,16 @@ function CollectionRoasCard({ row }: { row: CollectionRoasRow }) {
             Campanhas com este destino ({row.campaigns.length})
           </p>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[480px] text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted-foreground">
                   <th className="pb-2 pr-3 font-medium">Campanha</th>
                   <th className="pb-2 pr-3 font-medium">Plataforma</th>
                   <th className="pb-2 pr-3 text-right font-medium">Activo</th>
                   <th className="pb-2 pr-3 text-right font-medium">Spend</th>
+                  <th className="pb-2 pr-3 text-right font-medium">CPC</th>
+                  <th className="pb-2 pr-3 text-right font-medium">CPM</th>
+                  <th className="pb-2 pr-3 text-right font-medium">CTR</th>
                   <th className="pb-2 text-right font-medium">ROAS plat.</th>
                 </tr>
               </thead>
@@ -161,6 +186,15 @@ function CollectionRoasCard({ row }: { row: CollectionRoasRow }) {
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">
                       <Sensitive>{c.spendFmt}</Sensitive>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                      <Sensitive>{c.cpcFmt}</Sensitive>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                      <Sensitive>{c.cpmFmt}</Sensitive>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                      <Sensitive>{c.ctrFmt}</Sensitive>
                     </td>
                     <td className="py-2 text-right tabular-nums text-muted-foreground">
                       <Sensitive>{c.platformRoasFmt}</Sensitive>
