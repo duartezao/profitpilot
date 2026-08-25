@@ -44,6 +44,15 @@ export type CollectionRoasCampaign = {
   platformLabel: string;
   spend: number;
   spendFmt: string;
+  impressions: number;
+  clicks: number;
+  /** CPC/CPM sobre spend plataforma (AdCampaignDay.spend, sem fee). */
+  cpc: number | null;
+  cpcFmt: string;
+  cpm: number | null;
+  cpmFmt: string;
+  ctr: number | null;
+  ctrFmt: string;
   landingUrls: string[];
   platformRoas: number | null;
   platformRoasFmt: string;
@@ -63,6 +72,15 @@ export type CollectionRoasRow = {
   adSpendFmt: string;
   realRoas: number | null;
   realRoasFmt: string;
+  impressions: number;
+  clicks: number;
+  /** Agregado das campanhas da coleção (spend plataforma / cliques·impressões). */
+  cpc: number | null;
+  cpcFmt: string;
+  cpm: number | null;
+  cpmFmt: string;
+  ctr: number | null;
+  ctrFmt: string;
   campaigns: CollectionRoasCampaign[];
   unmatched: boolean;
   /** Dias seguidos com spend > 0 em pelo menos uma campanha ligada. */
@@ -94,6 +112,37 @@ export type CollectionRoasReport = {
 function fmtRoas(v: number | null): string {
   if (v == null || !Number.isFinite(v)) return "—";
   return `${v.toFixed(2).replace(".", ",")}×`;
+}
+
+function fmtCtr(v: number | null): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return `${v.toFixed(2).replace(".", ",")}%`;
+}
+
+function metricsFromSpend(
+  spend: number,
+  impressions: number,
+  clicks: number,
+  fmtMoney: (v: number) => string,
+): {
+  cpc: number | null;
+  cpcFmt: string;
+  cpm: number | null;
+  cpmFmt: string;
+  ctr: number | null;
+  ctrFmt: string;
+} {
+  const cpc = clicks > 0 ? spend / clicks : null;
+  const cpm = impressions > 0 ? (spend / impressions) * 1000 : null;
+  const ctr = impressions > 0 ? (clicks / impressions) * 100 : null;
+  return {
+    cpc,
+    cpcFmt: cpc != null ? fmtMoney(cpc) : "—",
+    cpm,
+    cpmFmt: cpm != null ? fmtMoney(cpm) : "—",
+    ctr,
+    ctrFmt: fmtCtr(ctr),
+  };
 }
 
 function fmtActiveDays(n: number): string {
@@ -245,6 +294,8 @@ export async function buildCollectionRoasReport(
     _id: { campaignId: string; platform: string };
     spend: number;
     conversionValue: number;
+    impressions: number;
+    clicks: number;
     campaignName: string;
   }>([
     {
@@ -258,6 +309,8 @@ export async function buildCollectionRoasReport(
         _id: { campaignId: "$campaignId", platform: "$platform" },
         spend: { $sum: "$spend" },
         conversionValue: { $sum: "$conversionValue" },
+        impressions: { $sum: "$impressions" },
+        clicks: { $sum: "$clicks" },
         campaignName: { $last: "$campaignName" },
       },
     },
@@ -268,6 +321,8 @@ export async function buildCollectionRoasReport(
     {
       spend: number;
       conversionValue: number;
+      impressions: number;
+      clicks: number;
       campaignName: string;
       platform: AdPlatform;
     }
@@ -276,12 +331,27 @@ export async function buildCollectionRoasReport(
     const campaignId = normalizeCampaignId(String(r._id.campaignId));
     const platform = r._id.platform as AdPlatform;
     const key = `${platform}:${campaignId}`;
-    spendByCampaign.set(key, {
-      spend: r.spend,
-      conversionValue: r.conversionValue,
-      campaignName: r.campaignName || campaignId,
-      platform,
-    });
+    const prev = spendByCampaign.get(key);
+    if (prev) {
+      // Mesmo campaignId normalizado pode vir de IDs com prefixo diferente.
+      spendByCampaign.set(key, {
+        spend: prev.spend + r.spend,
+        conversionValue: prev.conversionValue + r.conversionValue,
+        impressions: prev.impressions + r.impressions,
+        clicks: prev.clicks + r.clicks,
+        campaignName: r.campaignName || prev.campaignName || campaignId,
+        platform,
+      });
+    } else {
+      spendByCampaign.set(key, {
+        spend: r.spend,
+        conversionValue: r.conversionValue,
+        impressions: r.impressions,
+        clicks: r.clicks,
+        campaignName: r.campaignName || campaignId,
+        platform,
+      });
+    }
   }
 
   /** handle → campanhas (ainda sem streak) */
@@ -302,6 +372,12 @@ export async function buildCollectionRoasReport(
 
     const platformRoas =
       spend.spend > 0 ? spend.conversionValue / spend.spend : null;
+    const adMetrics = metricsFromSpend(
+      spend.spend,
+      spend.impressions,
+      spend.clicks,
+      fmtMoney,
+    );
     const campaign: PendingCampaign = {
       key,
       campaignId,
@@ -310,6 +386,9 @@ export async function buildCollectionRoasReport(
       platformLabel: AD_PLATFORM_LABELS[platform] ?? platform,
       spend: spend.spend,
       spendFmt: fmtMoney(spend.spend),
+      impressions: spend.impressions,
+      clicks: spend.clicks,
+      ...adMetrics,
       landingUrls: t.landingUrls ?? [],
       platformRoas,
       platformRoasFmt: fmtRoas(platformRoas),
@@ -436,6 +515,17 @@ export async function buildCollectionRoasReport(
       const revenue = sales?.revenue ?? 0;
       const units = sales?.units ?? 0;
       const adSpend = uniqueCampaigns.reduce((s, cam) => s + cam.spend, 0);
+      const impressions = uniqueCampaigns.reduce(
+        (s, cam) => s + cam.impressions,
+        0,
+      );
+      const clicks = uniqueCampaigns.reduce((s, cam) => s + cam.clicks, 0);
+      const collectionAdMetrics = metricsFromSpend(
+        adSpend,
+        impressions,
+        clicks,
+        fmtMoney,
+      );
       const realRoas = adSpend > 0 ? revenue / adSpend : null;
       const realRoasFmt = fmtRoas(realRoas);
       const collectionTitle = sales?.collectionTitle ?? handle;
@@ -469,6 +559,9 @@ export async function buildCollectionRoasReport(
         adSpendFmt: fmtMoney(adSpend),
         realRoas,
         realRoasFmt,
+        impressions,
+        clicks,
+        ...collectionAdMetrics,
         campaigns: uniqueCampaigns,
         unmatched: false,
         activeDays,
@@ -491,6 +584,12 @@ export async function buildCollectionRoasReport(
     const platformRoas =
       spend.spend > 0 ? spend.conversionValue / spend.spend : null;
     const activeDays = campaignStreak.get(key) ?? 0;
+    const adMetrics = metricsFromSpend(
+      spend.spend,
+      spend.impressions,
+      spend.clicks,
+      fmtMoney,
+    );
     unmatchedCampaigns.push({
       campaignId: campaignId!,
       campaignName: target?.campaignName || spend.campaignName,
@@ -498,6 +597,9 @@ export async function buildCollectionRoasReport(
       platformLabel: AD_PLATFORM_LABELS[spend.platform] ?? spend.platform,
       spend: spend.spend,
       spendFmt: fmtMoney(spend.spend),
+      impressions: spend.impressions,
+      clicks: spend.clicks,
+      ...adMetrics,
       landingUrls: target?.landingUrls ?? [],
       platformRoas,
       platformRoasFmt: fmtRoas(platformRoas),
