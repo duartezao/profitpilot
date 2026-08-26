@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, ChevronDown, ChevronUp, Copy, Link2, Target } from "lucide-react";
@@ -8,6 +8,26 @@ import { Sensitive } from "@/components/privacy-mode";
 import type { CollectionRoasReport, CollectionRoasRow } from "@/lib/collection-roas";
 import { periodQueryFromSearchParams } from "@/lib/period";
 import { cn } from "@/lib/utils";
+
+type RevenueFilter = "all" | "with_rev" | "no_sales";
+
+const REVENUE_FILTERS: {
+  id: RevenueFilter;
+  label: string;
+}[] = [
+  { id: "all", label: "Todas" },
+  { id: "with_rev", label: "Com REV" },
+  { id: "no_sales", label: "Sem vendas" },
+];
+
+function filterCollections(
+  rows: CollectionRoasRow[],
+  filter: RevenueFilter,
+): CollectionRoasRow[] {
+  if (filter === "with_rev") return rows.filter((r) => r.revenue > 0);
+  if (filter === "no_sales") return rows.filter((r) => r.revenue <= 0);
+  return rows;
+}
 
 async function fetchCollectionRoas(
   storeId: string,
@@ -219,11 +239,26 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
   const hasCustomRange =
     Boolean(searchParams.get("from") && searchParams.get("to")) ||
     Boolean(searchParams.get("dates"));
+  const [revenueFilter, setRevenueFilter] = useState<RevenueFilter>("all");
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["collection-roas", storeId, periodQs],
     queryFn: () => fetchCollectionRoas(storeId, searchParams, false),
   });
+
+  const filterCounts = useMemo(() => {
+    const rows = data?.collections ?? [];
+    return {
+      all: rows.length,
+      with_rev: rows.filter((r) => r.revenue > 0).length,
+      no_sales: rows.filter((r) => r.revenue <= 0).length,
+    };
+  }, [data?.collections]);
+
+  const filteredCollections = useMemo(
+    () => filterCollections(data?.collections ?? [], revenueFilter),
+    [data?.collections, revenueFilter],
+  );
 
   async function refreshUrls() {
     await fetchCollectionRoas(storeId, searchParams, true);
@@ -327,19 +362,53 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
           )}
 
           <section className="overflow-hidden rounded-lg border border-border bg-surface">
-            <div className="border-b border-border px-4 py-3 sm:px-5">
-              <h2 className="text-lg font-semibold">Coleções com ads</h2>
-              <p className="text-sm text-muted-foreground">
-                Acordeão fechado por defeito. Briefing EN da loja no fundo da
-                página.
-              </p>
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <div>
+                <h2 className="text-lg font-semibold">Coleções com ads</h2>
+                <p className="text-sm text-muted-foreground">
+                  {filteredCollections.length === data.collections.length
+                    ? `${data.collections.length} coleções`
+                    : `${filteredCollections.length} de ${data.collections.length}`}
+                  {" · "}acordeão fechado por defeito
+                </p>
+              </div>
+              <div
+                className="inline-flex w-full rounded-lg border border-border p-0.5 sm:w-auto"
+                role="group"
+                aria-label="Filtrar por receita"
+              >
+                {REVENUE_FILTERS.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setRevenueFilter(f.id)}
+                    className={cn(
+                      "flex-1 rounded-md px-2.5 py-1.5 text-xs font-medium sm:flex-none sm:px-3 sm:text-sm",
+                      revenueFilter === f.id
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {f.label}
+                    <span className="ml-1 tabular-nums text-muted-foreground">
+                      {filterCounts[f.id]}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
             {data.collections.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted-foreground sm:px-5">
                 Nenhuma coleção com campanha URL associada neste período.
               </p>
+            ) : filteredCollections.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-muted-foreground sm:px-5">
+                {revenueFilter === "with_rev"
+                  ? "Nenhuma coleção com receita neste período."
+                  : "Nenhuma coleção sem vendas neste período."}
+              </p>
             ) : (
-              data.collections.map((row) => (
+              filteredCollections.map((row) => (
                 <CollectionRoasCard key={row.collectionId} row={row} />
               ))
             )}
