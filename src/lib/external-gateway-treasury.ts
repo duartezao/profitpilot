@@ -3,11 +3,7 @@ import type { Types } from "mongoose";
 import { Order } from "@/models/Order";
 import { addBusinessDaysToDateKey } from "@/lib/business-days";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
-import {
-  orderFeesBase,
-  orderMerchantPayoutBase,
-  orderRefundedBase,
-} from "@/lib/order-money";
+import { orderMerchantPayoutBase } from "@/lib/order-merchant-payout";
 import { orderDateMatch } from "@/lib/period";
 import { dateKeyInTimezone, normalizeStoreTimezone, orderDateMatchInTimezone } from "@/lib/store-timezone";
 import type { IncomingDayLine } from "@/lib/treasury-day-lines";
@@ -33,11 +29,54 @@ export type ExternalGatewayTreasury = {
   receivedByDay: IncomingDayLine[];
 };
 
-/** Encomendas a projectar como gateway externo (evita double-count com Shopify Payments). */
+/** Hora típica de chegada do payout externo no fuso da loja (Stripe ~07:00). */
+export const EXTERNAL_GATEWAY_PAYOUT_HOUR = 7;
+
+/**
+ * Gateway externo (Stripe/PayPal/MB): o dinheiro costuma cair ~07:00 no fuso da loja.
+ * No **dia de payout**, só entra em «recebido» após essa hora — antes fica em «a receber».
+ */
+export function isExternalGatewayPayoutReceived(
+  payoutDateKey: string,
+  todayDateKey: string,
+  opts?: { now?: Date; timeZone?: string | null },
+): boolean {
+  if (payoutDateKey < todayDateKey) return true;
+  if (payoutDateKey > todayDateKey) return false;
+
+  const now = opts?.now ?? new Date();
+  const tz = normalizeStoreTimezone(opts?.timeZone);
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "numeric",
+      hour12: false,
+    }).format(now),
+  );
+  return hour >= EXTERNAL_GATEWAY_PAYOUT_HOUR;
+}
+
+/** Gateway Shopify Payments — entra nos payouts sync, não na projeção externa. */
+export const SHOPIFY_PAYMENTS_GATEWAY = "shopify_payments";
+
+export function isExplicitExternalPaymentGateway(
+  gateway: string | null | undefined,
+): boolean {
+  if (!gateway || !gateway.trim()) return false;
+  return gateway.trim().toLowerCase() !== SHOPIFY_PAYMENTS_GATEWAY;
+}
+
+/**
+ * Encomendas a projectar como gateway externo (evita double-count com Shopify Payments).
+ * Loja mista: exclui `feesSource: real` (já entram nos payouts Shopify) e gateway
+ * `shopify_payments`. Encomendas com gateway null + taxa estimada são Stripe/PayPal
+ * até o sync gravar o gateway — têm de contar na projeção externa.
+ */
 export function externalGatewayOrderFilter(shopifyPaymentsActive: boolean) {
   if (!shopifyPaymentsActive) return {};
   return {
-    $nor: [{ feesSource: "real" }, { paymentGateway: "shopify_payments" }],
+    feesSource: { $ne: "real" },
+    paymentGateway: { $ne: SHOPIFY_PAYMENTS_GATEWAY },
   };
 }
 
@@ -83,12 +122,12 @@ export async function buildExternalGatewayTreasury(
     const amount = orderMerchantPayoutBase(order);
     if (amount <= 0) continue;
 
-    if (payoutKey > todayKey) {
-      incoming += amount;
-      incomingMap.set(payoutKey, (incomingMap.get(payoutKey) ?? 0) + amount);
-    } else {
+    if (isExternalGatewayPayoutReceived(payoutKey, todayKey, { timeZone: storeTimeZone })) {
       received += amount;
       receivedMap.set(payoutKey, (receivedMap.get(payoutKey) ?? 0) + amount);
+    } else {
+      incoming += amount;
+      incomingMap.set(payoutKey, (incomingMap.get(payoutKey) ?? 0) + amount);
     }
   }
 

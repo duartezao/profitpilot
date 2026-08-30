@@ -66,23 +66,24 @@ function DashboardSkeleton({ multiStoreChart = true }: { multiStoreChart?: boole
   );
 }
 
-function summaryApiUrl(params: URLSearchParams): string {
-  const q = new URLSearchParams(periodQueryFromSearchParams(params));
-  const store = params.get("store");
-  if (store) q.set("store", store);
+function summaryApiUrl(periodQs: string, storeId: string | null): string {
+  const q = new URLSearchParams(periodQs);
+  if (storeId) q.set("store", storeId);
   const qs = q.toString();
   return qs ? `/api/metrics/summary?${qs}` : "/api/metrics/summary";
 }
 
-function portfolioApiUrl(params: URLSearchParams): string {
-  const q = new URLSearchParams(periodQueryFromSearchParams(params));
-  const portfolio = params.get("portfolio");
+function portfolioApiUrl(periodQs: string, portfolio: string | null): string {
+  const q = new URLSearchParams(periodQs);
   if (portfolio) q.set("portfolio", portfolio);
   return `/api/metrics/portfolio?${q.toString()}`;
 }
 
-async function fetchSummary(params: URLSearchParams): Promise<DashboardSummary> {
-  const res = await fetch(withLiveFreshParam(summaryApiUrl(params)), {
+async function fetchSummary(
+  periodQs: string,
+  storeId: string | null,
+): Promise<DashboardSummary> {
+  const res = await fetch(withLiveFreshParam(summaryApiUrl(periodQs, storeId)), {
     cache: "no-store",
   });
   if (!res.ok) throw new Error("Falha ao carregar os dados.");
@@ -90,9 +91,10 @@ async function fetchSummary(params: URLSearchParams): Promise<DashboardSummary> 
 }
 
 async function fetchPortfolio(
-  params: URLSearchParams,
+  periodQs: string,
+  portfolio: string | null,
 ): Promise<PortfolioSummary> {
-  const res = await fetch(withLiveFreshParam(portfolioApiUrl(params)), {
+  const res = await fetch(withLiveFreshParam(portfolioApiUrl(periodQs, portfolio)), {
     cache: "no-store",
   });
   if (!res.ok) throw new Error("Falha ao carregar o portfolio.");
@@ -106,6 +108,7 @@ export function DashboardClient() {
   const portfolioParam = searchParams.get("portfolio");
   const isPortfolio = parsePortfolioParam(portfolioParam) !== null;
   const period = periodFromSearchParams(searchParams);
+  const periodQs = periodQueryFromSearchParams(searchParams);
   const adsHref = hrefWithScopeAndStore("/anuncios", searchParams, workspaceId);
   // Evita hydration mismatch: SSR e 1.º paint do cliente iguais (skeleton).
   // Depois do mount, sessionStorage / RQ cache podem preencher os dados.
@@ -114,22 +117,23 @@ export function DashboardClient() {
     setMounted(true);
   }, []);
 
-  const { data, isError, isFetching, isPending, isPlaceholderData } = useQuery<
+  const { data, isError, isFetching, isPending } = useQuery<
     DashboardSummary | PortfolioSummary
   >({
     queryKey: isPortfolio
-      ? ["portfolio-summary", portfolioParam, period.key]
-      : ["metrics-summary", workspaceId, storeId, period.key],
-    queryFn: () =>
-      isPortfolio
-        ? fetchPortfolio(searchParams)
-        : fetchSummary(searchParams),
-    placeholderData: (prev) => prev,
+      ? ["portfolio-summary", portfolioParam, period.key, periodQs]
+      : ["metrics-summary", workspaceId, storeId, period.key, periodQs],
+    queryFn: ({ queryKey }) => {
+      const qs = String(queryKey[queryKey.length - 1]);
+      return isPortfolio
+        ? fetchPortfolio(qs, portfolioParam)
+        : fetchSummary(qs, storeId);
+    },
     staleTime: LIVE_DATA_POLL_MS - 10_000,
     refetchInterval: LIVE_DATA_POLL_MS,
   });
 
-  const chartLoading = isPlaceholderData && isFetching;
+  const chartLoading = isFetching && !isPending;
 
   const portfolioData =
     data && "portfolioMode" in data ? (data as PortfolioSummary) : null;
@@ -150,10 +154,14 @@ export function DashboardClient() {
   );
 
   const fetchingDim =
-    Boolean(data) && isFetching ? "opacity-[0.92] transition-opacity duration-150" : "";
+    Boolean(data) && isFetching && !isPending
+      ? "opacity-[0.92] transition-opacity duration-150"
+      : "";
 
-  if (!mounted || (!data && (isPending || isFetching))) {
-    return <DashboardSkeleton />;
+  if (!mounted || isPending) {
+    return (
+      <DashboardSkeleton multiStoreChart={!isPortfolio && !storeId} />
+    );
   }
 
   if (isPortfolio) {

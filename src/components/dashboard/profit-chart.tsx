@@ -6,8 +6,6 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  Line,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -26,9 +24,23 @@ import type {
   ProfitChartSeries,
   ProfitChartStoreSlice,
 } from "@/lib/metrics";
+import {
+  formatMonthAxisLabel,
+  monthAxisTickLabel,
+  monthStartTicksFromDateKeys,
+  resolveChartAxisGranularity,
+  type ChartAxisGranularity,
+} from "@/lib/period";
 
 type MultiStoreView = "stores" | "total";
 type ChartMetric = "profit" | "revenue";
+
+/** Altura do gráfico — mais área vertical para ler tendências. */
+const CHART_FRAME_CLASS = "h-72 w-full min-w-0 sm:h-80 lg:h-96";
+const CHART_EMPTY_CLASS =
+  "mt-4 flex h-72 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-80 lg:h-96";
+const CHART_SINGLE_DAY_CLASS =
+  "flex min-h-72 w-full min-w-0 flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed border-border px-3 py-6 sm:min-h-80 sm:px-4 lg:min-h-96";
 
 type BarRow = {
   storeId: string;
@@ -45,6 +57,246 @@ function compactAxisValue(v: number): string {
   return String(Math.round(v));
 }
 
+/** Domínio Y — lucro ancora sempre em 0; faturação pode ampliar quando longe de zero. */
+function computeChartYDomain(
+  values: number[],
+  opts?: { anchorZero?: boolean },
+): [number, number] | undefined {
+  const nums = values.filter((v) => Number.isFinite(v));
+  if (nums.length === 0) return undefined;
+
+  let min = Math.min(...nums);
+  let max = Math.max(...nums);
+  if (min === max) {
+    const pad = Math.max(Math.abs(min) * 0.12, 10);
+    min -= pad;
+    max += pad;
+  } else {
+    const span = max - min;
+    const pad = Math.max(span * 0.1, 1);
+    min -= pad;
+    max += pad;
+  }
+
+  if (opts?.anchorZero) {
+    min = Math.min(min, 0);
+    max = Math.max(max, 0);
+  } else if (min < 0 && max > 0) {
+    min = Math.min(min, 0);
+    max = Math.max(max, 0);
+  } else if (min >= 0) {
+    const span = max - min;
+    if (min <= span * 2) min = Math.min(min, 0);
+  } else if (max <= 0) {
+    const span = max - min;
+    if (Math.abs(max) <= span * 2) max = Math.max(max, 0);
+  }
+
+  return [min, max];
+}
+
+function monthKeysInRange(startDateKey: string, endDateKey: string): string[] {
+  const sy = Number(startDateKey.slice(0, 4));
+  const sm = Number(startDateKey.slice(5, 7));
+  const ey = Number(endDateKey.slice(0, 4));
+  const em = Number(endDateKey.slice(5, 7));
+  const out: string[] = [];
+  let y = sy;
+  let m = sm;
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}
+
+function aggregateProfitChartByMonth(
+  points: ProfitChartPoint[],
+  series?: ProfitChartSeries[],
+): ProfitChartPoint[] {
+  if (points.length === 0) return [];
+
+  type StoreAcc = {
+    storeId: string;
+    name: string;
+    color: string;
+    profit: number;
+    profitDays: number;
+    revenue: number;
+    revenueDays: number;
+  };
+
+  type MonthAcc = {
+    monthKey: string;
+    anchorKey: string;
+    profit: number;
+    profitDays: number;
+    revenue: number;
+    revenueDays: number;
+    stores: Map<string, StoreAcc>;
+    dynamic: Map<string, { sum: number; days: number }>;
+  };
+
+  const sorted = [...points].sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+  const allMonthKeys = monthKeysInRange(
+    sorted[0]!.dateKey,
+    sorted[sorted.length - 1]!.dateKey,
+  );
+
+  const buckets = new Map<string, MonthAcc>();
+  for (const monthKey of allMonthKeys) {
+    buckets.set(monthKey, {
+      monthKey,
+      anchorKey: `${monthKey}-01`,
+      profit: 0,
+      profitDays: 0,
+      revenue: 0,
+      revenueDays: 0,
+      stores: new Map(),
+      dynamic: new Map(),
+    });
+  }
+
+  for (const p of points) {
+    const monthKey = p.dateKey.slice(0, 7);
+    const bucket = buckets.get(monthKey);
+    if (!bucket) continue;
+
+    if (typeof p.profit === "number" && Number.isFinite(p.profit)) {
+      bucket.profit += p.profit;
+      bucket.profitDays += 1;
+    }
+    if (typeof p.revenue === "number" && Number.isFinite(p.revenue)) {
+      bucket.revenue += p.revenue;
+      bucket.revenueDays += 1;
+    }
+
+    for (const slice of p.byStore ?? []) {
+      let st = bucket.stores.get(slice.storeId);
+      if (!st) {
+        st = {
+          storeId: slice.storeId,
+          name: slice.name,
+          color: slice.color,
+          profit: 0,
+          profitDays: 0,
+          revenue: 0,
+          revenueDays: 0,
+        };
+        bucket.stores.set(slice.storeId, st);
+      }
+      st.profit += slice.profit;
+      st.profitDays += 1;
+      st.revenue += slice.revenue ?? 0;
+      st.revenueDays += 1;
+    }
+
+    if (series) {
+      const ext = p as ProfitChartPoint & Record<string, unknown>;
+      for (const s of series) {
+        for (const key of [s.key, s.revenueKey || `r_${s.storeId}`]) {
+          const raw = ext[key];
+          if (typeof raw !== "number" || !Number.isFinite(raw)) continue;
+          const acc = bucket.dynamic.get(key) ?? { sum: 0, days: 0 };
+          acc.sum += raw;
+          acc.days += 1;
+          bucket.dynamic.set(key, acc);
+        }
+      }
+    }
+  }
+
+  return allMonthKeys.map((monthKey) => {
+    const bucket = buckets.get(monthKey)!;
+    const monthLabel = formatMonthAxisLabel(bucket.anchorKey);
+    const year = bucket.anchorKey.slice(0, 4);
+    const profit = bucket.profitDays > 0 ? bucket.profit : 0;
+    const revenue = bucket.revenueDays > 0 ? bucket.revenue : 0;
+
+    const byStore: ProfitChartStoreSlice[] = series?.length
+      ? series.map((s) => {
+          const st = bucket.stores.get(s.storeId);
+          const storeProfit = st && st.profitDays > 0 ? st.profit : 0;
+          const storeRevenue = st && st.revenueDays > 0 ? st.revenue : 0;
+          return {
+            storeId: s.storeId,
+            name: s.name,
+            color: s.color,
+            profit: storeProfit,
+            profitFmt: compactBarLabel(storeProfit),
+            revenue: storeRevenue,
+            revenueFmt: compactBarLabel(storeRevenue),
+          };
+        })
+      : [...bucket.stores.values()]
+          .filter((s) => s.profitDays > 0)
+          .map((s) => ({
+            storeId: s.storeId,
+            name: s.name,
+            color: s.color,
+            profit: s.profit,
+            profitFmt: compactBarLabel(s.profit),
+            revenue: s.revenueDays > 0 ? s.revenue : 0,
+            revenueFmt:
+              s.revenueDays > 0 ? compactBarLabel(s.revenue) : compactBarLabel(0),
+          }))
+          .sort((a, b) => Math.abs(b.profit) - Math.abs(a.profit));
+
+    const row: ProfitChartPoint & Record<string, unknown> = {
+      dateKey: bucket.anchorKey,
+      label: monthLabel,
+      dateLabel: `${monthLabel} ${year}`,
+      profit,
+      profitFmt: compactBarLabel(profit),
+      revenue,
+      revenueFmt: compactBarLabel(revenue),
+      byStore,
+    };
+
+    if (series) {
+      for (const s of series) {
+        const profitKey = s.key;
+        const revKey = s.revenueKey || `r_${s.storeId}`;
+        const pAcc = bucket.dynamic.get(profitKey);
+        const rAcc = bucket.dynamic.get(revKey);
+        row[profitKey] = pAcc && pAcc.days > 0 ? pAcc.sum : 0;
+        row[revKey] = rAcc && rAcc.days > 0 ? rAcc.sum : 0;
+      }
+    }
+
+    return row as ProfitChartPoint;
+  });
+}
+
+function collectChartMetricValues(
+  chartData: Array<ProfitChartPoint & Record<string, unknown>>,
+  metric: ChartMetric,
+  series: ProfitChartSeries[] | undefined,
+  showPerStore: boolean,
+): number[] {
+  const keys: string[] = [];
+  if (showPerStore && series?.length) {
+    for (const s of series) {
+      keys.push(metric === "revenue" ? s.revenueKey || `r_${s.storeId}` : s.key);
+    }
+  } else {
+    keys.push(metric === "revenue" ? "revenue" : "profit");
+  }
+
+  const out: number[] = [];
+  for (const row of chartData) {
+    for (const key of keys) {
+      const v = row[key];
+      if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+    }
+  }
+  return out;
+}
+
 function compactBarLabel(v: number): string {
   const abs = Math.abs(v);
   const sign = v < 0 ? "−" : "";
@@ -56,14 +308,20 @@ function compactBarLabel(v: number): string {
 function metricValue(
   point: ProfitChartPoint,
   metric: ChartMetric,
-): { value: number; fmt: string } {
+): { value: number | null; fmt: string } {
   if (metric === "revenue") {
+    const v = point.revenue;
     return {
-      value: point.revenue ?? 0,
-      fmt: point.revenueFmt ?? compactBarLabel(point.revenue ?? 0),
+      value: v,
+      fmt:
+        point.revenueFmt ??
+        (v != null ? compactBarLabel(v) : "—"),
     };
   }
-  return { value: point.profit, fmt: point.profitFmt };
+  return {
+    value: point.profit,
+    fmt: point.profitFmt ?? (point.profit != null ? compactBarLabel(point.profit) : "—"),
+  };
 }
 
 function sliceValue(
@@ -87,6 +345,19 @@ function seriesDataKey(
     return s.revenueKey || `r_${s.storeId}`;
   }
   return s.key;
+}
+
+function chartMetricValue(
+  sliceVal: number | undefined,
+  rowVal: unknown,
+): number | null {
+  if (sliceVal !== undefined) return sliceVal;
+  if (rowVal === null || rowVal === undefined) return null;
+  return typeof rowVal === "number" ? rowVal : 0;
+}
+
+function areaGradientId(storeId: string): string {
+  return `profit-area-${storeId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 }
 
 function useOpenStoreDashboard() {
@@ -154,7 +425,7 @@ export function ProfitChartSkeleton({
           <div className="h-8 w-32 rounded-lg bg-muted sm:h-9 sm:w-40" />
         )}
       </div>
-      <div className="h-52 w-full rounded-lg bg-muted/70 sm:h-64" />
+      <div className={cn(CHART_FRAME_CLASS, "animate-pulse rounded-lg bg-muted/70")} />
       {multiStore && (
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -337,11 +608,11 @@ function SingleDayProfitView({
   }
 
   const { value, fmt } = metricValue(point, metric);
-  const positive = value >= 0;
+  const positive = (value ?? 0) >= 0;
   const slices = point.byStore ?? [];
 
   return (
-    <div className="flex min-h-52 w-full min-w-0 flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed border-border px-3 py-6 sm:min-h-64 sm:px-4">
+    <div className={CHART_SINGLE_DAY_CLASS}>
       <p className="text-xs text-muted-foreground">{point.dateLabel}</p>
       <p
         className={cn(
@@ -427,6 +698,7 @@ function ProfitTooltip({
   if (!active || !payload?.length) return null;
   const point = payload[0].payload as ProfitChartPoint;
   const { value, fmt } = metricValue(point, metric);
+  if (value == null) return null;
   const positive = value >= 0;
   const slices = point.byStore ?? [];
   const totalLabel = metric === "revenue" ? "Faturação" : "Lucro";
@@ -557,6 +829,22 @@ function NoteDot(props: {
   );
 }
 
+function seriesLayerOrder(
+  series: ProfitChartSeries[],
+  chartData: Array<ProfitChartPoint & Record<string, unknown>>,
+  dataKey: (s: ProfitChartSeries) => string,
+): ProfitChartSeries[] {
+  const avgAbs = (s: ProfitChartSeries) => {
+    const key = dataKey(s);
+    const total = chartData.reduce(
+      (sum, p) => sum + Math.abs(Number(p[key] ?? 0)),
+      0,
+    );
+    return total / Math.max(chartData.length, 1);
+  };
+  return [...series].sort((a, b) => avgAbs(b) - avgAbs(a));
+}
+
 function ChartLegend({
   series,
   onStoreClick,
@@ -617,16 +905,30 @@ export function ProfitChart({
   const onStoreClick = multiStore ? openStore : undefined;
   const totalDataKey = metric === "revenue" ? "revenue" : "profit";
 
+  const axisGranularity: ChartAxisGranularity = useMemo(
+    () => resolveChartAxisGranularity(data.length),
+    [data.length],
+  );
+
+  const seriesSource = useMemo(() => {
+    if (axisGranularity === "month") {
+      return aggregateProfitChartByMonth(data, series);
+    }
+    return data;
+  }, [data, series, axisGranularity]);
+
   /** Dados prontos para o Recharts: as chaves s_* levam lucro ou faturação conforme a métrica. */
   const chartData = useMemo(() => {
-    return data.map((p) => {
+    return seriesSource.map((p) => {
       const row = { ...p } as ProfitChartPoint & Record<string, unknown>;
       const slices = p.byStore ?? [];
 
-      let totalRevenue =
+      let totalRevenue: number | null =
         typeof p.revenue === "number"
           ? p.revenue
-          : slices.reduce((sum, b) => sum + (b.revenue ?? 0), 0);
+          : slices.length > 0
+            ? slices.reduce((sum, b) => sum + (b.revenue ?? 0), 0)
+            : null;
 
       if (series?.length) {
         let sumRev = 0;
@@ -637,20 +939,16 @@ export function ProfitChart({
           const profitFromPoint = row[s.key];
           const revFromPoint = row[revKey];
 
-          const profitVal =
-            slice?.profit ??
-            (typeof profitFromPoint === "number" ? profitFromPoint : 0);
-          const revVal =
-            slice?.revenue ??
-            (typeof revFromPoint === "number" ? revFromPoint : 0);
+          const profitVal = chartMetricValue(slice?.profit, profitFromPoint);
+          const revVal = chartMetricValue(slice?.revenue, revFromPoint);
 
           if (slice && typeof slice.revenue === "number") {
             hasSliceRev = true;
             sumRev += slice.revenue;
           }
 
-          // Sempre escrever na chave s_* (a que o Line usa) o valor da métrica activa.
-          row[s.key] = metric === "revenue" ? revVal : profitVal;
+          row[s.key] =
+            metric === "revenue" ? revVal : profitVal;
           row[revKey] = revVal;
         }
         if (typeof p.revenue !== "number" && hasSliceRev) {
@@ -659,10 +957,10 @@ export function ProfitChart({
       }
 
       row.revenue = totalRevenue;
-      row.profit = typeof p.profit === "number" ? p.profit : 0;
-      return row as ProfitChartPoint & Record<string, number | string>;
+      row.profit = typeof p.profit === "number" ? p.profit : null;
+      return row as ProfitChartPoint & Record<string, number | string | null>;
     });
-  }, [data, series, metric]);
+  }, [seriesSource, series, metric]);
 
   const tickInterval = useMemo(() => {
     if (chartData.length <= 10) return 0;
@@ -671,9 +969,64 @@ export function ProfitChart({
     return Math.floor(chartData.length / 8);
   }, [chartData.length]);
 
+  const axisGranularityResolved: ChartAxisGranularity = useMemo(
+    () =>
+      chartData.length > 0 && chartData.length < data.length
+        ? "month"
+        : resolveChartAxisGranularity(chartData.length),
+    [chartData.length, data.length],
+  );
+
+  const monthTicks = useMemo(() => {
+    if (axisGranularityResolved !== "month") return undefined;
+    return monthStartTicksFromDateKeys(chartData.map((p) => p.dateKey));
+  }, [axisGranularityResolved, chartData]);
+
+  const formatXAxisTick = useCallback(
+    (value: string) => {
+      if (axisGranularityResolved !== "month") {
+        const point = chartData.find((p) => p.dateKey === value);
+        return point?.label ?? value;
+      }
+      const idx = monthTicks?.indexOf(value) ?? -1;
+      const prev = idx > 0 ? monthTicks![idx - 1] : undefined;
+      return monthAxisTickLabel(value, prev);
+    },
+    [axisGranularityResolved, chartData, monthTicks],
+  );
+
+  const longRangeChart = axisGranularityResolved === "month";
+  const chartMargin = longRangeChart
+    ? { top: 10, right: 10, left: 2, bottom: 6 }
+    : { top: 12, right: 8, left: 2, bottom: 4 };
+  const areaStrokeWidth = longRangeChart ? 1.25 : 1.5;
+
+  const yDomain = useMemo((): [number, number] | undefined => {
+    return computeChartYDomain(
+      collectChartMetricValues(chartData, metric, series, showPerStore),
+      { anchorZero: metric === "profit" },
+    );
+  }, [chartData, metric, series, showPerStore]);
+
+  const zeroReference = (
+    <ReferenceLine
+      y={0}
+      stroke="var(--muted-foreground)"
+      strokeOpacity={0.7}
+      strokeWidth={1}
+      ifOverflow="extendDomain"
+      label={{
+        value: "0",
+        position: "left",
+        fill: "var(--muted-foreground)",
+        fontSize: 10,
+      }}
+    />
+  );
+
   if (chartData.length === 0) {
     return (
-      <div className="mt-4 flex h-52 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-64">
+      <div className={CHART_EMPTY_CLASS}>
         Sem dados no período selecionado.
       </div>
     );
@@ -681,8 +1034,11 @@ export function ProfitChart({
 
   const singleDay = chartData.length === 1;
   const chartRemountKey = `${metric}-${multiView}`;
-  /** Com chartData já mapeado, as linhas usam sempre s.key (lucro ou rev). */
   const lineDataKey = (s: ProfitChartSeries) => s.key;
+  const layeredSeries =
+    showPerStore && series
+      ? seriesLayerOrder(series, chartData, lineDataKey)
+      : series;
 
   return (
     <div className="mt-4 min-w-0 overflow-hidden" data-sensitive-chart>
@@ -731,37 +1087,68 @@ export function ProfitChart({
         </>
       ) : (
         <>
-          <div className="h-52 w-full min-w-0 sm:h-64">
+          <div className={CHART_FRAME_CLASS}>
             <ResponsiveContainer width="100%" height="100%">
-              {showPerStore && series ? (
-                <LineChart
+              {showPerStore && layeredSeries ? (
+                <AreaChart
                   key={chartRemountKey}
                   data={chartData}
-                  margin={{ top: 8, right: 4, left: 0, bottom: 0 }}
+                  margin={chartMargin}
                 >
+                  <defs>
+                    {layeredSeries.map((s) => (
+                      <linearGradient
+                        key={s.storeId}
+                        id={areaGradientId(s.storeId)}
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="0%"
+                          stopColor={s.color}
+                          stopOpacity={longRangeChart ? 0.22 : 0.32}
+                        />
+                        <stop
+                          offset="55%"
+                          stopColor={s.color}
+                          stopOpacity={longRangeChart ? 0.07 : 0.1}
+                        />
+                        <stop offset="100%" stopColor={s.color} stopOpacity={0} />
+                      </linearGradient>
+                    ))}
+                  </defs>
                   <CartesianGrid
                     stroke="var(--border)"
-                    strokeDasharray="3 3"
+                    strokeDasharray="3 7"
                     vertical={false}
+                    strokeOpacity={0.45}
                   />
                   <XAxis
-                    dataKey="label"
+                    dataKey="dateKey"
                     tickLine={false}
-                    axisLine={{ stroke: "var(--border)" }}
-                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                    interval={tickInterval}
-                    minTickGap={24}
+                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.9 }}
+                    tick={{
+                      fill: "var(--muted-foreground)",
+                      fontSize: longRangeChart ? 10 : 11,
+                    }}
+                    ticks={monthTicks}
+                    tickFormatter={formatXAxisTick}
+                    interval={longRangeChart ? 0 : tickInterval}
+                    minTickGap={longRangeChart ? 8 : 24}
                   />
                   <YAxis
                     tickLine={false}
-                    axisLine={false}
+                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.75 }}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                    width={40}
+                    width={52}
                     tickFormatter={compactAxisValue}
+                    domain={yDomain}
+                    allowDataOverflow
+                    tickCount={6}
                   />
-                  {metric === "profit" && (
-                    <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1} />
-                  )}
+                  {metric === "profit" && zeroReference}
                   <Tooltip
                     content={
                       <ProfitTooltip
@@ -770,19 +1157,25 @@ export function ProfitChart({
                         onStoreClick={onStoreClick}
                       />
                     }
-                    cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
+                    cursor={{
+                      stroke: "var(--muted-foreground)",
+                      strokeWidth: 1,
+                      strokeOpacity: 0.25,
+                    }}
                   />
-                  {series.map((s) => (
-                    <Line
+                  {layeredSeries.map((s) => (
+                    <Area
                       key={`${s.storeId}-${metric}`}
                       type="monotone"
                       dataKey={lineDataKey(s)}
                       name={s.name}
                       stroke={s.color}
-                      strokeWidth={2}
+                      strokeWidth={areaStrokeWidth}
+                      fill={`url(#${areaGradientId(s.storeId)})`}
+                      baseValue={0}
                       dot={false}
                       isAnimationActive={false}
-                      connectNulls
+                      connectNulls={false}
                       style={
                         onStoreClick ? { cursor: "pointer" } : undefined
                       }
@@ -797,36 +1190,58 @@ export function ProfitChart({
                       }}
                     />
                   ))}
-                </LineChart>
+                </AreaChart>
               ) : (
                 <AreaChart
                   key={chartRemountKey}
                   data={chartData}
-                  margin={{ top: 8, right: 4, left: 0, bottom: 0 }}
+                  margin={chartMargin}
                 >
+                  <defs>
+                    <linearGradient id="profit-area-total" x1="0" y1="0" x2="0" y2="1">
+                      <stop
+                        offset="0%"
+                        stopColor="var(--accent)"
+                        stopOpacity={longRangeChart ? 0.2 : 0.28}
+                      />
+                      <stop
+                        offset="55%"
+                        stopColor="var(--accent)"
+                        stopOpacity={longRangeChart ? 0.06 : 0.08}
+                      />
+                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid
                     stroke="var(--border)"
-                    strokeDasharray="3 3"
+                    strokeDasharray="3 7"
                     vertical={false}
+                    strokeOpacity={0.45}
                   />
                   <XAxis
-                    dataKey="label"
+                    dataKey="dateKey"
                     tickLine={false}
-                    axisLine={{ stroke: "var(--border)" }}
-                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                    interval={tickInterval}
-                    minTickGap={24}
+                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.9 }}
+                    tick={{
+                      fill: "var(--muted-foreground)",
+                      fontSize: longRangeChart ? 10 : 11,
+                    }}
+                    ticks={monthTicks}
+                    tickFormatter={formatXAxisTick}
+                    interval={longRangeChart ? 0 : tickInterval}
+                    minTickGap={longRangeChart ? 8 : 24}
                   />
                   <YAxis
                     tickLine={false}
-                    axisLine={false}
+                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.75 }}
                     tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                    width={40}
+                    width={52}
                     tickFormatter={compactAxisValue}
+                    domain={yDomain}
+                    allowDataOverflow
+                    tickCount={6}
                   />
-                  {metric === "profit" && (
-                    <ReferenceLine y={0} stroke="var(--border)" strokeWidth={1} />
-                  )}
+                  {metric === "profit" && zeroReference}
                   <Tooltip
                     content={
                       <ProfitTooltip
@@ -841,11 +1256,11 @@ export function ProfitChart({
                     type="monotone"
                     dataKey={totalDataKey}
                     stroke="var(--accent)"
-                    strokeWidth={2}
-                    fill="var(--accent)"
-                    fillOpacity={0.12}
+                    strokeWidth={longRangeChart ? 2 : areaStrokeWidth}
+                    fill="url(#profit-area-total)"
+                    baseValue={0}
                     isAnimationActive={false}
-                    connectNulls
+                    connectNulls={false}
                     dot={metric === "profit" ? <NoteDot /> : false}
                     activeDot={{
                       r: 4,

@@ -157,8 +157,9 @@ async function mergePortfolioProfitChart(
       );
 
       for (const point of summary.profitChart) {
+        if (point.profit == null && point.revenue == null) continue;
         const profit = await convertMoney(
-          point.profit,
+          point.profit ?? 0,
           from,
           displayCurrency,
           point.dateKey || dateKey,

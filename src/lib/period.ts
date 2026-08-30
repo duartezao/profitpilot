@@ -113,6 +113,64 @@ export function formatDateKeyLabel(
   });
 }
 
+/** Rótulos curtos do eixo X em vistas longas (3+ meses). */
+const MONTH_AXIS_LABELS = [
+  "jan",
+  "fev",
+  "mar",
+  "abr",
+  "mai",
+  "jun",
+  "jul",
+  "ago",
+  "set",
+  "out",
+  "nov",
+  "dez",
+] as const;
+
+export type ChartAxisGranularity = "day" | "month";
+
+/** Períodos longos (≥45 dias) usam meses no eixo X; curtos mantêm o dia. */
+export function resolveChartAxisGranularity(dayCount: number): ChartAxisGranularity {
+  return dayCount >= 45 ? "month" : "day";
+}
+
+export function formatMonthAxisLabel(dateKey: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey.trim());
+  if (!m) return dateKey;
+  const monthIdx = Number(m[2]) - 1;
+  if (monthIdx < 0 || monthIdx > 11) return dateKey;
+  return MONTH_AXIS_LABELS[monthIdx];
+}
+
+/** Primeiro dia presente em cada mês — ticks do eixo X mensal. */
+export function monthStartTicksFromDateKeys(dateKeys: string[]): string[] {
+  const seen = new Set<string>();
+  const ticks: string[] = [];
+  for (const dk of dateKeys) {
+    const ym = dk.slice(0, 7);
+    if (!seen.has(ym)) {
+      seen.add(ym);
+      ticks.push(dk);
+    }
+  }
+  return ticks;
+}
+
+export function monthAxisTickLabel(
+  dateKey: string,
+  previousTickKey?: string,
+): string {
+  const month = formatMonthAxisLabel(dateKey);
+  const year = dateKey.slice(0, 4);
+  const prevYear = previousTickKey?.slice(0, 4);
+  if (prevYear && year !== prevYear) {
+    return `${month} '${year.slice(2)}`;
+  }
+  return month;
+}
+
 export function formatDateKeyRangeLabel(
   startKey: string,
   endKey: string,
