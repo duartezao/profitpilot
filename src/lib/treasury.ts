@@ -1,7 +1,7 @@
 import "server-only";
 import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
-import { formatCurrency, formatCurrencyCompact } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { Store } from "@/models/Store";
 import { Workspace } from "@/models/Workspace";
 import { Payout } from "@/models/Payout";
@@ -17,6 +17,7 @@ import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import type { CogsMode } from "@/lib/cogs-modes";
 import { endOfDay, formatRangeLabel, orderDateMatch } from "@/lib/period";
 import {
+  dateKeyInTimezone,
   normalizeStoreTimezone,
   orderDateMatchInTimezone,
 } from "@/lib/store-timezone";
@@ -574,12 +575,14 @@ export async function buildWorkspaceTreasury(
   );
   const expenseRows = await loadWorkspaceExpensesLean(wsId);
 
-  const todayKey = new Date().toISOString().slice(0, 10);
   const fmtBase = (v: number) => fmt(v, currency);
 
   const lines: StoreTreasuryLine[] = await Promise.all(
     stores.map(async (s) => {
     const sid = String(s._id);
+    const storeTz = normalizeStoreTimezone(s.ianaTimezone);
+    /** Dia civil da loja — alinha gateway externo (payout ~07:00) com o dia útil, não UTC. */
+    const storeTodayKey = dateKeyInTimezone(new Date(), storeTz);
     const storeCurrency = storeCurrencyByStore.get(sid) ?? currency;
     const availableRaw = s.paymentsBalance ?? 0;
     const startingBalanceRaw = s.startingBalance ?? 0;
@@ -598,7 +601,7 @@ export async function buildWorkspaceTreasury(
       paidAt?: Date | null;
     }) => {
       const date =
-        dayKey(p.paidAt ?? p.issuedAt ?? p.createdAt) ?? todayKey;
+        dayKey(p.paidAt ?? p.issuedAt ?? p.createdAt) ?? storeTodayKey;
       const cur = (p.currency ?? storeCurrency).toUpperCase();
       return moneyToBase(p.net ?? 0, cur, currency, date);
     };
@@ -608,7 +611,7 @@ export async function buildWorkspaceTreasury(
       net?: number | null;
       currency?: string | null;
     }) => {
-      const date = dayKey(bt.transactionDate) ?? todayKey;
+      const date = dayKey(bt.transactionDate) ?? storeTodayKey;
       const cur = (bt.currency ?? storeCurrency).toUpperCase();
       return moneyToBase(bt.net ?? 0, cur, currency, date);
     };
@@ -641,7 +644,7 @@ export async function buildWorkspaceTreasury(
       availableRaw,
       storeCurrency,
       currency,
-      todayKey,
+      storeTodayKey,
     );
     const startingBalance = startingBalanceRaw;
 
@@ -680,7 +683,7 @@ export async function buildWorkspaceTreasury(
           s._id,
           externalDays ?? 0,
           since,
-          todayKey,
+          storeTodayKey,
           s.ianaTimezone ?? null,
           fmtBase,
           shopifyActive,
@@ -802,13 +805,13 @@ export async function buildWorkspaceTreasury(
       shopifyPendingTitle: fmtBase(shopifyPending),
       externalGatewayPayoutBusinessDays: externalDays,
       cashOnHand,
-      cashOnHandFmt: formatCurrencyCompact(cashOnHand, currency),
+      cashOnHandFmt: fmtBase(cashOnHand),
       cashOnHandTitle: fmtBase(cashOnHand),
       projectedCash,
-      projectedCashFmt: formatCurrencyCompact(projectedCash, currency),
+      projectedCashFmt: fmtBase(projectedCash),
       projectedCashTitle: fmtBase(projectedCash),
       projected,
-      projectedFmt: formatCurrencyCompact(projected, currency),
+      projectedFmt: fmtBase(projected),
       projectedTitle: fmtBase(projected),
       incomingByDay: incomingByDayFinal,
       receivedByDay: receivedByDayFinal,
@@ -884,13 +887,13 @@ export async function buildWorkspaceTreasury(
       shopifyPending: shopifyPendingTotal,
       shopifyPendingFmt: fmt(shopifyPendingTotal),
       cashOnHand: cashOnHandTotal,
-      cashOnHandFmt: formatCurrencyCompact(cashOnHandTotal, currency),
+      cashOnHandFmt: fmt(cashOnHandTotal),
       cashOnHandTitle: fmt(cashOnHandTotal),
       projectedCash: projectedTotal,
-      projectedCashFmt: formatCurrencyCompact(projectedTotal, currency),
+      projectedCashFmt: fmt(projectedTotal),
       projectedCashTitle: fmt(projectedTotal),
       projected: projectedTotal,
-      projectedFmt: formatCurrencyCompact(projectedTotal, currency),
+      projectedFmt: fmt(projectedTotal),
       projectedTitle: fmt(projectedTotal),
     },
     incomingByDay: allIncomingByDay,

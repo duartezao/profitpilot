@@ -5,7 +5,10 @@ import {
   isShopifyPaymentsActive,
   shouldUseExternalGatewayTreasury,
 } from "../src/lib/treasury.ts";
-import { externalGatewayOrderFilter } from "../src/lib/external-gateway-treasury.ts";
+import {
+  externalGatewayOrderFilter,
+  isExplicitExternalPaymentGateway,
+} from "../src/lib/external-gateway-treasury.ts";
 
 describe("computeShopifyPendingTotal", () => {
   it("soma vendas por liquidar + payouts agendados sem overlap", () => {
@@ -57,13 +60,27 @@ describe("isShopifyPaymentsActive", () => {
 });
 
 describe("externalGatewayOrderFilter", () => {
-  it("em loja mista exclui Shopify Payments e feesSource real", () => {
+  it("em loja mista exclui Shopify Payments e taxas reais (null gateway = externo até sync)", () => {
     assert.deepEqual(externalGatewayOrderFilter(true), {
-      $nor: [{ feesSource: "real" }, { paymentGateway: "shopify_payments" }],
+      feesSource: { $ne: "real" },
+      paymentGateway: { $ne: "shopify_payments" },
     });
   });
 
   it("em loja só gateway externo inclui todas as encomendas pagas", () => {
     assert.deepEqual(externalGatewayOrderFilter(false), {});
+  });
+});
+
+describe("isExplicitExternalPaymentGateway", () => {
+  it("aceita gateways externos conhecidos", () => {
+    assert.equal(isExplicitExternalPaymentGateway("stripe"), true);
+    assert.equal(isExplicitExternalPaymentGateway("paypal"), true);
+  });
+
+  it("rejeita null, vazio e shopify_payments", () => {
+    assert.equal(isExplicitExternalPaymentGateway(null), false);
+    assert.equal(isExplicitExternalPaymentGateway(""), false);
+    assert.equal(isExplicitExternalPaymentGateway("shopify_payments"), false);
   });
 });

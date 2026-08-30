@@ -275,7 +275,7 @@ Organização orientada ao lucro (alinhada com o design system — sóbria, sem 
 
 1. **KPIs principais** (grelha responsiva, até 6 por linha): **Faturamento**, **Net Profit** (card destacado — borda accent, valor maior), **Custos totais**, **Margem %**, **Ad Spend**, **ROAS**.
 2. **Gráfico «Lucro líquido» + painel «Repartição de custos»** lado a lado (`lg:grid-cols-3` — gráfico ocupa 2/3, painel 1/3; empilham no telemóvel).
-   * Com **2+ lojas** no consolidado: toggle **Por loja** (uma linha por loja) / **Total** (uma só linha com o lucro diário de todas juntas). O tooltip mantém o detalhe por loja em ambos os modos.
+   * Com **2+ lojas** no consolidado: toggle **Por loja** / **Total**. Períodos longos (≥45 dias) agregam por **mês** com eixo jan, fev, mar…; meses **sem actividade = 0** para a linha crescer desde zero. Escala Y do lucro ancora em **0**. Dia em curso excluído do gráfico.
    * O painel mostra Faturamento, cada custo real (custo de produto, envio, taxas, anúncios, despesas operacionais) com barra proporcional e % da receita, **Custos totais** e **Lucro líquido** em destaque. Reembolsos aparecem em rodapé como informativo (já estão na receita líquida).
 3. **Metas do mês** (se configuradas) e **tabela comparativa loja a loja**.
 4. **Ver mais métricas** (painel expansível): BER, Margem contrib. %, COGS, Envio, Taxas, Refunds, Encomendas, AOV, MER, POAS, etc.
@@ -376,7 +376,7 @@ Net Profit =
 * Net Profit ao longo do tempo (gráfico diário na dashboard consolidada)
 * **Waterfall do lucro**: Revenue → menos cada custo → Net Profit (mostra para onde vai o dinheiro)
 * **P&L em `/financas`** — demonstração de resultados com COGS, envio, taxas, ad spend e reembolsos; avisos de COGS/ad spend em falta. No **overview (todas as lojas)**: cartão **Saldo em conta (banca)** no Resumo + tab **Caixa** com soma e detalhe por loja (`cashOnHand` = inicial + entradas + capital − COGS − envio − ads − levantamentos). Entradas e saídas usam a **mesma data de início** (saldo inicial, ou importação/criação da loja).
-* **Gateway externo** (Stripe/PayPal/MB): com `externalGatewayPayoutBusinessDays` definido, entradas de caixa = estimativa por encomenda (total − reembolsos − taxas). Loja **mista** (Shopify Payments + Stripe/PayPal): payouts Shopify vêm dos balance transactions; gateway externo = encomendas que **não** são `shopify_payments` / `feesSource: real` (inclui encomendas Stripe ainda sem taxa sincronizada). Campo `paymentGateway` gravado no sync de taxas. Continua a ser **projecção**, não o extrato Stripe/PayPal.
+* **Gateway externo** (Stripe/PayPal/MB): com `externalGatewayPayoutBusinessDays` definido, entradas de caixa = estimativa por encomenda (total − reembolsos − taxas estimadas/reais). O payout cai tipicamente **~07:00** no fuso da loja; no **dia de payout** só entra em «recebido» **depois das 07:00** (antes fica em «a receber»). **Saldo em conta** mostra o valor **exacto em euros** (ex.: 20.587,32 €), não arredondado a «mil €». Loja **mista**: payouts Shopify = `feesSource: real`; gateway externo = taxa estimada e gateway ≠ `shopify_payments` (inclui `paymentGateway` null até sync). Continua a ser **projecção**, não o extracto Stripe/PayPal.
 * Lucro por loja, por produto, por país, por canal de aquisição
 * **Profit por order** (margem média por encomenda)
 * Breakeven ROAS por produto (a partir de que ROAS o produto deixa de dar prejuízo) — coluna **BER** em `/produtos` e dashboard da loja; exportação CSV em `/produtos`.
@@ -1075,7 +1075,7 @@ Lucro após taxas =
 
 **O que defines à mão para ficar exato:**
 
-* **Saldo inicial (banca) por loja** — só quando injectaste capital **nesta** loja (moeda base do workspace). Ao **criar loja**: opção «Banca do workspace» (defeito, saldo 0 — usa caixa/lucro das outras) vs «Banca própria» (valor + data). Evita duplicar banca no consolidado. Também em Definições → Lojas → Tesouraria. **Gateway externo**: «Payout gateway externo (dias úteis)» — encomenda paga entra em a receber/recebido N dias úteis após a venda. **Retirar banca**: zera o saldo inicial sem apagar histórico.
+* **Saldo inicial (banca) por loja** — só quando injectaste capital **nesta** loja (moeda base do workspace). Ao **criar loja**: opção «Banca do workspace» (defeito, saldo 0 — usa caixa/lucro das outras) vs «Banca própria» (valor + data). Evita duplicar banca no consolidado. Também em Definições → Lojas → Tesouraria. **Gateway externo**: «Payout gateway externo (dias úteis)» — encomenda paga entra em a receber/recebido N dias úteis após a venda; no **dia de payout** só conta no saldo **depois das ~07:00** (fuso da loja). **Retirar banca**: zera o saldo inicial sem apagar histórico.
 * **Injeções de capital** — em Definições → **Capital no negócio**: regista quando depositas ou levantas dinheiro da conta do negócio (com data, valor e confirmação), sem alterar o saldo inicial por engano.
 * **Contas a pagar a fornecedores** — quanto e quando pagas o produto (AliExpress/CJ/etc.), para a saída de caixa ser real. (Em dropshipping é o que mais mexe no caixa.)
 * **Reserva para impostos/IVA** — defines uma % a separar; a app guarda esse valor à parte e mostra o caixa "limpo".

@@ -264,9 +264,9 @@ export type ProfitChartPoint = {
   dateKey: string;
   label: string;
   dateLabel: string;
-  profit: number;
+  profit: number | null;
   profitFmt: string;
-  revenue: number;
+  revenue: number | null;
   revenueFmt: string;
   hasNote?: boolean;
   notePreview?: string;
@@ -1347,6 +1347,8 @@ async function buildConsolidatedDailyProfitSeries(
   stores: Array<{
     _id: mongoose.Types.ObjectId;
     name: string;
+    importStartDate?: Date | null;
+    createdAt?: Date;
     cogsMode?: string | null;
     ianaTimezone?: string | null;
     operationStatus?: string | null;
@@ -1383,6 +1385,8 @@ async function buildConsolidatedDailyProfitSeries(
     refunds: 0,
   };
 
+  const tzNorm = normalizeStoreTimezone(storeTimeZone);
+
   const points = dayKeysInSlice(slice, storeTimeZone).map((dateKey) => {
     const byStore: ProfitChartStoreSlice[] = [];
     let totalProfit = 0;
@@ -1399,8 +1403,20 @@ async function buildConsolidatedDailyProfitSeries(
 
     for (const meta of series) {
       const storeRef = stores.find((s) => String(s._id) === meta.storeId);
+      if (!storeRef) continue;
+
+      const importKey = importDateKey(
+        storeRef.importStartDate,
+        storeRef.createdAt,
+        tzNorm,
+      );
+      if (importKey && dateKey < importKey) {
+        point[meta.key] = null as unknown as number;
+        point[meta.revenueKey] = null as unknown as number;
+        continue;
+      }
+
       if (
-        storeRef &&
         resolveStoreOperationStatus(storeRef) === "killed" &&
         storeRef.operationKilledAt
       ) {
@@ -1435,14 +1451,24 @@ async function buildConsolidatedDailyProfitSeries(
     }
 
     const workspaceOpEx = sumWorkspaceExpensesForDay(expenseRows, dateKey);
-    totalProfit -= workspaceOpEx;
+    const hasActiveStore = byStore.length > 0;
 
     point.label = formatDateKeyLabel(dateKey);
     point.dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
-    point.profit = totalProfit;
-    point.profitFmt = fmtMoney(totalProfit);
-    point.revenue = totalRevenue;
-    point.revenueFmt = fmtMoney(totalRevenue);
+
+    if (hasActiveStore) {
+      totalProfit -= workspaceOpEx;
+      point.profit = totalProfit;
+      point.profitFmt = fmtMoney(totalProfit);
+      point.revenue = totalRevenue;
+      point.revenueFmt = fmtMoney(totalRevenue);
+    } else {
+      point.profit = null;
+      point.profitFmt = "—";
+      point.revenue = null;
+      point.revenueFmt = "—";
+    }
+
     point.byStore = byStore.sort(
       (a, b) => Math.abs(b.profit) - Math.abs(a.profit),
     );
@@ -1703,6 +1729,49 @@ async function buildStoreDailyMetrics(
     .reverse();
 }
 
+/** Gráfico de lucro: exclui hoje enquanto o dia não fechou (evita queda artificial). */
+function trimIncompleteTodayFromProfitChart(
+  chart: ProfitChartPoint[],
+  storeTimeZone: string | null | undefined,
+  period: Pick<
+    ResolvedPeriod,
+    "start" | "end" | "specificDates" | "startDateKey" | "endDateKey"
+  >,
+): ProfitChartPoint[] {
+  if (periodIsSingleDay(period) || chart.length <= 1) return chart;
+  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const todayKey = dateKeyInTimezone(new Date(), tz);
+  const trimmed = chart.filter((p) => p.dateKey !== todayKey);
+  return trimmed.length > 0 ? trimmed : chart;
+}
+
+/** Dias completos para sparkline — exclui hoje (dia em curso distorce a tendência). */
+function completeDayKeysForSparkline(
+  slice: PeriodSlice,
+  storeTimeZone: string | null | undefined,
+  points: number,
+): string[] {
+  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const todayKey = dateKeyInTimezone(new Date(), tz);
+
+  const inPeriod = dayKeysInSlice(slice, storeTimeZone).filter(
+    (k) => k < todayKey,
+  );
+  if (inPeriod.length >= points) {
+    return inPeriod.slice(-points);
+  }
+
+  const tail: string[] = [];
+  const today = parseDateInput(todayKey);
+  if (!today) return inPeriod;
+  let d = addDays(today, -1);
+  while (tail.length < points) {
+    tail.unshift(formatDateInput(d));
+    d = addDays(d, -1);
+  }
+  return tail;
+}
+
 async function buildStoreSparklinesBatch(
   wsId: mongoose.Types.ObjectId,
   stores: StoreCogsCtx[],
@@ -1713,9 +1782,8 @@ async function buildStoreSparklinesBatch(
   const out = new Map<string, number[]>();
   if (!stores.length) return out;
 
-  const allKeys = dayKeysInSlice(slice, storeTimeZone);
-  const tailKeys = allKeys.slice(-points);
-  if (!tailKeys.length) {
+  const tailKeys = completeDayKeysForSparkline(slice, storeTimeZone, points);
+  if (tailKeys.length < 2) {
     for (const s of stores) out.set(String(s._id), []);
     return out;
   }
@@ -2467,10 +2535,11 @@ export async function buildWorkspaceSummary(
   const importFloor = scoped
     ? resolveImportFloor(scoped.importStartDate, scoped.createdAt)
     : earliestImportFloor(stores);
-  const chartSlice: PeriodSlice = clampSliceToImportFloor(
-    effectiveCurrentSlice,
-    importFloor,
-  );
+  /** Consolidado multi-loja: eixo = período completo; cada loja só desenha após a sua importação. */
+  const chartSlice: PeriodSlice =
+    !scoped && stores.length > 1
+      ? effectiveCurrentSlice
+      : clampSliceToImportFloor(effectiveCurrentSlice, importFloor);
   let effectiveChartSlice = chartSlice;
   if (scoped && resolveStoreOperationStatus(scoped) === "killed") {
     effectiveChartSlice =
@@ -3031,7 +3100,11 @@ export async function buildWorkspaceSummary(
   let profitChartSeries: ProfitChartSeries[] | undefined;
 
   const chartBuilt = await profitChartTask;
-  profitChart = chartBuilt.points;
+  profitChart = trimIncompleteTodayFromProfitChart(
+    chartBuilt.points,
+    storeTz,
+    period,
+  );
   profitChartSeries = chartBuilt.series;
 
   // Vista por loja: produtos por lucro + waterfall + payout + métricas diárias.

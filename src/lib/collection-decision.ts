@@ -64,7 +64,7 @@ export async function buildCollectionDecisionHint(opts: {
     opts.storeAccess,
   );
 
-  const profit = summary.profitChart.reduce((s, p) => s + p.profit, 0);
+  const profit = summary.profitChart.reduce((s, p) => s + (p.profit ?? 0), 0);
   const revenue = summary.dailyMetrics.reduce(
     (s, row) => s + parseMoneyKpi(row.revenue),
     0,
