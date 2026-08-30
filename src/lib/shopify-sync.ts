@@ -1880,8 +1880,6 @@ export async function syncPayouts(
   return count;
 }
 
-const INCOMING_BT_STATUSES = new Set(["pending"]);
-
 /**
  * Importa balance transactions ainda não pagas (pending, scheduled, in transit)
  * para agregar "a caminho" por dia na tesouraria.
@@ -1944,8 +1942,17 @@ export async function syncIncomingBalanceTransactions(
     if (!account) break;
 
     for (const bt of account.balanceTransactions.nodes) {
+      // A query já filtra payout_status:pending; incluir transacções sem
+      // payout associado (status vazio) e excluir só as já pagas/canceladas.
       const payoutStatus = (bt.associatedPayout?.status ?? "").toLowerCase();
-      if (!INCOMING_BT_STATUSES.has(payoutStatus)) continue;
+      if (
+        payoutStatus &&
+        payoutStatus !== "pending" &&
+        payoutStatus !== "scheduled" &&
+        payoutStatus !== "in_transit"
+      ) {
+        continue;
+      }
 
       incoming.push({
         shopifyId: bt.id,

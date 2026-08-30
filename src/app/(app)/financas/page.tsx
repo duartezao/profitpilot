@@ -175,7 +175,7 @@ export default async function FinancasPage({
       {consolidatedCash && (
         <div className="mt-4 rounded-lg border border-border bg-background p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-muted-foreground">
                 Saldo em conta (banca)
               </p>
@@ -191,10 +191,51 @@ export default async function FinancasPage({
               >
                 {consolidatedCash.totals.cashOnHandFmt}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Soma de todas as lojas · projecção (não é o saldo real do banco).
-                Inclui a soma dos saldos iniciais de cada loja.
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+                <div>
+                  <dt className="text-muted-foreground">Saldo inicial</dt>
+                  <dd className="tabular-nums font-medium" data-sensitive>
+                    {money(
+                      consolidatedCash.stores.reduce(
+                        (s, l) => s + l.startingBalance,
+                        0,
+                      ),
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Payouts recebidos</dt>
+                  <dd className="tabular-nums font-medium text-positive" data-sensitive>
+                    {consolidatedCash.totals.receivedFmt}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Saídas</dt>
+                  <dd className="tabular-nums font-medium text-negative" data-sensitive>
+                    −{consolidatedCash.totals.outflowsTotalFmt}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">Capital − levant.</dt>
+                  <dd className="tabular-nums font-medium" data-sensitive>
+                    {consolidatedCash.totals.manualIn > 0 ||
+                    consolidatedCash.totals.manualOut > 0
+                      ? `${consolidatedCash.totals.manualInFmt} / −${consolidatedCash.totals.manualOutFmt}`
+                      : "—"}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Projecção desde o início de cada loja — não é o extracto do banco.
+                Soma dos saldos iniciais de cada loja.
               </p>
+              {consolidatedCash.warnings.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs text-warning">
+                  {consolidatedCash.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              )}
             </div>
             <div className="text-right">
               <p className="text-xs font-medium text-muted-foreground">

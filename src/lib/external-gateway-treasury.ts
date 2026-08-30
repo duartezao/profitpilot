@@ -10,7 +10,7 @@ import {
 } from "@/lib/order-money";
 import { orderDateMatch } from "@/lib/period";
 import { dateKeyInTimezone, normalizeStoreTimezone, orderDateMatchInTimezone } from "@/lib/store-timezone";
-import type { IncomingDayLine } from "@/lib/treasury";
+import type { IncomingDayLine } from "@/lib/treasury-day-lines";
 
 const num = (v: unknown): number => {
   const n = Number(v);
@@ -33,9 +33,18 @@ export type ExternalGatewayTreasury = {
   receivedByDay: IncomingDayLine[];
 };
 
+/** Encomendas a projectar como gateway externo (evita double-count com Shopify Payments). */
+export function externalGatewayOrderFilter(shopifyPaymentsActive: boolean) {
+  if (!shopifyPaymentsActive) return {};
+  return {
+    $nor: [{ feesSource: "real" }, { paymentGateway: "shopify_payments" }],
+  };
+}
+
 /**
  * Projecta entradas de gateway externo (Multibanco, PayPal, etc.):
  * cada encomenda paga cai na conta N dias úteis após a data da venda.
+ * Com Shopify Payments activo, só encomendas com taxa estimada (gateway externo).
  */
 export async function buildExternalGatewayTreasury(
   storeId: Types.ObjectId,
@@ -44,6 +53,7 @@ export async function buildExternalGatewayTreasury(
   todayKey: string,
   storeTimeZone: string | null,
   fmt: (v: number) => string,
+  shopifyPaymentsActive = false,
 ): Promise<ExternalGatewayTreasury | null> {
   if (!businessDays || businessDays <= 0) return null;
 
@@ -52,10 +62,11 @@ export async function buildExternalGatewayTreasury(
   const orders = await Order.find(
     mergePaidOrderFilter({
       storeId,
+      ...externalGatewayOrderFilter(shopifyPaymentsActive),
       ...(tz ? orderDateMatchInTimezone(slice, tz) : orderDateMatch(slice)),
     }),
   )
-    .select("orderDate totalPrice subtotal netRevenue refunded fees amountsBase")
+    .select("orderDate totalPrice subtotal netRevenue refunded fees feesSource amountsBase")
     .lean();
 
   const incomingMap = new Map<string, number>();

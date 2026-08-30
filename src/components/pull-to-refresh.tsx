@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { refreshLiveQueries } from "@/lib/refresh-live-queries";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { cn } from "@/lib/utils";
 
 const PULL_THRESHOLD_PX = 80;
@@ -19,8 +17,7 @@ type Phase = "idle" | "pulling" | "holding" | "refreshing";
  * para reler a BD (`?fresh=1`). Desktop desactivado.
  */
 export function PullToRefresh({ children }: { children: React.ReactNode }) {
-  const queryClient = useQueryClient();
-  const router = useRouter();
+  const { refresh, refreshing } = useLiveRefresh();
   const [phase, setPhase] = useState<Phase>("idle");
   const [pullPx, setPullPx] = useState(0);
   const [enabled, setEnabled] = useState(false);
@@ -59,12 +56,11 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     pullRef.current = PULL_THRESHOLD_PX;
     setPullPx(PULL_THRESHOLD_PX);
     try {
-      await refreshLiveQueries(queryClient, { fresh: true });
-      router.refresh();
+      await refresh();
     } finally {
       reset();
     }
-  }, [clearHoldTimer, queryClient, reset, router, setPhaseBoth]);
+  }, [clearHoldTimer, refresh, reset, setPhaseBoth]);
 
   useEffect(() => {
     const mq = window.matchMedia(LG_MQ);
@@ -162,7 +158,8 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
     };
   }, [enabled, clearHoldTimer, reset, runRefresh, setPhaseBoth]);
 
-  const showIndicator = enabled && (pullPx > 4 || phase === "refreshing");
+  const showIndicator =
+    enabled && (pullPx > 4 || phase === "refreshing" || refreshing);
   const progress = Math.min(1, pullPx / PULL_THRESHOLD_PX);
 
   return (
@@ -172,23 +169,23 @@ export function PullToRefresh({ children }: { children: React.ReactNode }) {
           "pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center overflow-hidden transition-[height] duration-150",
           showIndicator ? "opacity-100" : "opacity-0",
         )}
-        style={{ height: showIndicator ? Math.max(pullPx, phase === "refreshing" ? 48 : 0) : 0 }}
+        style={{ height: showIndicator ? Math.max(pullPx, phase === "refreshing" || refreshing ? 48 : 0) : 0 }}
         aria-hidden={!showIndicator}
       >
         <div className="flex flex-col items-center justify-end gap-1 pb-2 pt-1 text-muted-foreground">
           <RefreshCw
             className={cn(
               "size-5 stroke-[1.5]",
-              phase === "refreshing" && "animate-spin",
+              (phase === "refreshing" || refreshing) && "animate-spin",
             )}
             style={
-              phase === "refreshing"
+              phase === "refreshing" || refreshing
                 ? undefined
                 : { transform: `rotate(${progress * 180}deg)` }
             }
           />
           <span className="text-[11px] font-medium tracking-wide">
-            {phase === "refreshing"
+            {phase === "refreshing" || refreshing
               ? "A actualizar…"
               : phase === "holding"
                 ? "Segura…"

@@ -29,6 +29,7 @@ import {
   aggregateOrderFeesFromBalanceTx,
   shouldIncludeBalanceTxForOrderFees,
   sumSuccessfulTransactionFees,
+  resolvePrimaryPaymentGateway,
   type BalanceTxFeeNode,
 } from "@/lib/order-fees-aggregate";
 
@@ -38,6 +39,7 @@ export {
   aggregateOrderFeesFromBalanceTx,
   shouldIncludeBalanceTxForOrderFees,
   sumSuccessfulTransactionFees,
+  resolvePrimaryPaymentGateway,
 };
 
 function num(v: unknown): number {
@@ -214,6 +216,8 @@ export async function applyOrderFeesFromTransactions(
       id
       transactions {
         status
+        kind
+        gateway
         fees { amount { amount currencyCode } }
       }
     }
@@ -224,6 +228,8 @@ export async function applyOrderFeesFromTransactions(
       id: string;
       transactions: Array<{
         status: string | null;
+        kind: string | null;
+        gateway: string | null;
         fees: Array<{
           amount: { amount: string; currencyCode?: string } | null;
         } | null> | null;
@@ -274,6 +280,7 @@ export async function applyOrderFeesFromTransactions(
   const netRevenue = orderNetRevenue({ subtotal, totalPrice, refunded });
 
   const summed = sumSuccessfulTransactionFees(orderNode.transactions);
+  const paymentGateway = resolvePrimaryPaymentGateway(orderNode.transactions);
   let fees: number;
   let feesSource: OrderFeesSource;
 
@@ -326,7 +333,14 @@ export async function applyOrderFeesFromTransactions(
 
   await Order.updateOne(
     { _id: dbOrder._id },
-    { $set: { fees, feesSource, amountsBase } },
+    {
+      $set: {
+        fees,
+        feesSource,
+        paymentGateway: paymentGateway ?? (feesSource === "real" ? "shopify_payments" : null),
+        amountsBase,
+      },
+    },
   );
 
   return { fees, feesSource };
@@ -473,7 +487,14 @@ export async function applyOrderFeesFromShopify(
     bulk.push({
       updateOne: {
         filter: { _id: order._id },
-        update: { $set: { fees, feesSource, amountsBase } },
+        update: {
+          $set: {
+            fees,
+            feesSource,
+            ...(hasRealFee ? { paymentGateway: "shopify_payments" } : {}),
+            amountsBase,
+          },
+        },
       },
     });
   }

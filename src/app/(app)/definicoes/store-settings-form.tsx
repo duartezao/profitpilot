@@ -346,8 +346,9 @@ export function StoreSettingsForm({
             Para Multibanco, PayPal ou outro gateway fora da Shopify Payments:
             quantos dias úteis (seg–sex) após cada encomenda{" "}
             <strong className="font-medium">paga</strong> o dinheiro cai na
-            conta. Usado na tesouraria e projeção de «a receber». Deixa vazio
-            se usas só Shopify Payments.
+            conta. Podes usar em lojas que também têm Shopify Payments — a app
+            separa automaticamente (payouts Shopify vs. encomendas PayPal/MB).
+            Deixa vazio se usas só Shopify Payments.
           </p>
         </div>
         {canEdit &&

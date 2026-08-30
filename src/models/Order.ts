@@ -58,6 +58,8 @@ const OrderSchema = new Schema(
       enum: ["real", "estimated"],
       default: null,
     },
+    /** Gateway da transação de pagamento (ex. shopify_payments, stripe). */
+    paymentGateway: { type: String, trim: true, default: null, index: true },
 
     /** COGS manual por encomenda (modo «order»), na moeda base do workspace. */
     manualCogs: { type: Number, default: null },

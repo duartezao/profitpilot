@@ -164,6 +164,12 @@ export async function updateStoreSettingsAction(
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   }
   const d = parsed.data;
+  if (d.startingBalance > 0 && !d.startingBalanceDate.trim()) {
+    return {
+      error:
+        "Com saldo inicial > 0, indica também a data do saldo (dia em que tinhas esse valor na conta).",
+    };
+  }
   if (!isValidSessionCountries(d.analyticsSessionCountries)) {
     return { error: "País de sessões inválido." };
   }

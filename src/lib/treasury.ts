@@ -35,23 +35,56 @@ import {
   sumLoadedExpenses,
   sumLoadedWorkspaceExpenses,
 } from "@/lib/expenses";
+import type { IncomingDayLine } from "@/lib/treasury-day-lines";
+import { mergeIncomingDayLines } from "@/lib/treasury-day-lines";
 
-const INCOMING_PAYOUT_STATUSES = new Set([
-  "pending",
+export type { IncomingDayLine } from "@/lib/treasury-day-lines";
+
+/** Payouts já criados (agendados/a caminho) — dinheiro já alocado, fora do saldo por pagar. */
+export const ALLOCATED_PAYOUT_STATUSES = new Set([
   "scheduled",
   "in_transit",
   "action_required",
 ]);
 
-export type IncomingDayLine = {
-  date: string;
-  dateLabel: string;
-  amount: number;
-  amountFmt: string;
-  /** Payout agendado vs vendas pendentes vs já recebido vs gateway externo. */
-  kind: "payout" | "pending" | "received" | "external_gateway";
-  kindLabel: string;
-};
+/**
+ * Loja com Shopify Payments activo (saldo/payouts sincronizados).
+ */
+export function isShopifyPaymentsActive(
+  paymentsBalanceUpdatedAt: Date | string | null | undefined,
+  paymentsBalance: number | null | undefined,
+  payoutCount: number,
+): boolean {
+  if (paymentsBalanceUpdatedAt) return true;
+  if ((paymentsBalance ?? 0) > 0) return true;
+  return payoutCount > 0;
+}
+
+export function shouldUseExternalGatewayTreasury(
+  businessDays: number | null | undefined,
+): boolean {
+  return Boolean(businessDays && businessDays > 0);
+}
+
+/**
+ * Total Shopify a receber sem double-count:
+ * vendas por liquidar + payouts agendados/a caminho (disjuntos).
+ */
+export function computeShopifyPendingTotal(opts: {
+  /** Saldo API Shopify (por pagar). */
+  available: number;
+  /** Soma das balance transactions pending importadas. */
+  pendingTxTotal: number;
+  /** Payouts scheduled / in_transit / action_required. */
+  allocatedIncoming: number;
+}): { unallocated: number; shopifyPending: number } {
+  const unallocated =
+    opts.pendingTxTotal > 0 ? opts.pendingTxTotal : opts.available;
+  return {
+    unallocated,
+    shopifyPending: unallocated + opts.allocatedIncoming,
+  };
+}
 
 export type StoreTreasuryLine = {
   storeId: string;
@@ -112,6 +145,16 @@ export type StoreTreasuryLine = {
   /** Payouts já pagos (entrada na conta), por dia. */
   receivedByDay: IncomingDayLine[];
   payoutsError: string | null;
+  /** Avisos sobre configuração ou dados que podem inflacionar o saldo. */
+  warnings: string[];
+  /** Origem do «recebido» no saldo em conta. */
+  receivedSource: "shopify_payouts" | "external_gateway" | "mixed";
+  /** Payouts Shopify Payments já na conta (modo misto). */
+  receivedShopify: number;
+  receivedShopifyFmt: string;
+  /** Projeção gateway externo já «caída» na conta (modo misto). */
+  receivedExternal: number;
+  receivedExternalFmt: string;
 };
 
 export type WorkspaceTreasury = {
@@ -148,6 +191,8 @@ export type WorkspaceTreasury = {
   receivedByDay: IncomingDayLine[];
   generatedAt: string;
   lastSyncedAt: string | null;
+  /** Avisos consolidados das lojas. */
+  warnings: string[];
 };
 
 function normStatus(s?: string | null) {
@@ -262,7 +307,7 @@ async function buildIncomingByDay(
 
   for (const p of payouts) {
     const st = normStatus(p.status);
-    if (!INCOMING_PAYOUT_STATUSES.has(st)) continue;
+    if (!ALLOCATED_PAYOUT_STATUSES.has(st)) continue;
     const day = dayKey(p.issuedAt ?? p.createdAt);
     if (!day) continue;
     const row = map.get(day) ?? { payout: 0, pending: 0 };
@@ -287,7 +332,8 @@ async function buildIncomingByDay(
         amount: amounts.payout,
         amountFmt: fmt(amounts.payout),
         kind: "payout",
-        kindLabel: "Payout",
+        kindLabel: "Payout agendado",
+        detailLabel: "Previsto na conta neste dia",
       });
     }
     if (amounts.pending > 0) {
@@ -297,7 +343,8 @@ async function buildIncomingByDay(
         amount: amounts.pending,
         amountFmt: fmt(amounts.pending),
         kind: "pending",
-        kindLabel: "Pendente",
+        kindLabel: "Vendas por liquidar",
+        detailLabel: "Data da venda — payout num dia útil",
       });
     }
   }
@@ -313,22 +360,7 @@ function mergeIncomingByDay(
   lines: IncomingDayLine[],
   currency: string,
 ): IncomingDayLine[] {
-  const map = new Map<string, IncomingDayLine>();
-  for (const line of lines) {
-    const key = `${line.date}:${line.kind}`;
-    const existing = map.get(key);
-    if (existing) {
-      existing.amount += line.amount;
-      existing.amountFmt = formatCurrency(existing.amount, currency);
-    } else {
-      map.set(key, { ...line });
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => {
-    const cmp = a.date.localeCompare(b.date);
-    if (cmp !== 0) return cmp;
-    return a.kind === "payout" ? -1 : 1;
-  });
+  return mergeIncomingDayLines(lines, currency);
 }
 
 async function sumOrderOutflowsSince(
@@ -419,6 +451,7 @@ export async function buildWorkspaceTreasury(
     receivedByDay: [],
     generatedAt: new Date().toISOString(),
     lastSyncedAt: null,
+    warnings: [],
   };
   if (!workspaceId) return empty;
 
@@ -439,7 +472,7 @@ export async function buildWorkspaceTreasury(
 
   let stores = await Store.find(storeQuery)
     .select(
-      "name currency cogsMode startingBalance startingBalanceDate importStartDate createdAt ianaTimezone paymentsBalance payoutsError externalGatewayPayoutBusinessDays",
+      "name currency cogsMode startingBalance startingBalanceDate importStartDate createdAt ianaTimezone paymentsBalance paymentsBalanceUpdatedAt payoutsError externalGatewayPayoutBusinessDays",
     )
     .lean();
 
@@ -583,13 +616,18 @@ export async function buildWorkspaceTreasury(
     const storePayouts = payouts.filter((p) => String(p.storeId) === sid);
     const storePendingTx = pendingTx.filter((bt) => String(bt.storeId) === sid);
 
-    const incomingPayouts = storePayouts.filter((p) =>
-      INCOMING_PAYOUT_STATUSES.has(normStatus(p.status)),
-    );
-    let incoming = 0;
-    for (const p of incomingPayouts) {
-      incoming += await payoutToBase(p);
+    let pendingTxTotal = 0;
+    for (const bt of storePendingTx) {
+      pendingTxTotal += await txToBase(bt);
     }
+
+    let allocatedIncoming = 0;
+    for (const p of storePayouts) {
+      if (!ALLOCATED_PAYOUT_STATUSES.has(normStatus(p.status))) continue;
+      allocatedIncoming += await payoutToBase(p);
+    }
+
+    let incoming = allocatedIncoming;
 
     let received = 0;
     for (const p of storePayouts) {
@@ -606,6 +644,13 @@ export async function buildWorkspaceTreasury(
       todayKey,
     );
     const startingBalance = startingBalanceRaw;
+
+    const { unallocated, shopifyPending: shopifyPendingFromComponents } =
+      computeShopifyPendingTotal({
+        available,
+        pendingTxTotal,
+        allocatedIncoming,
+      });
 
     const incomingByDay = await buildIncomingByDay(
       storePayouts,
@@ -624,27 +669,71 @@ export async function buildWorkspaceTreasury(
     );
 
     const externalDays = s.externalGatewayPayoutBusinessDays ?? null;
-    const externalGateway = await buildExternalGatewayTreasury(
-      s._id,
-      externalDays ?? 0,
-      since,
-      todayKey,
-      s.ianaTimezone ?? null,
-      fmtBase,
+    const shopifyActive = isShopifyPaymentsActive(
+      s.paymentsBalanceUpdatedAt,
+      availableRaw,
+      storePayouts.length,
     );
+    const useExternalGateway = shouldUseExternalGatewayTreasury(externalDays);
+    const externalGateway = useExternalGateway
+      ? await buildExternalGatewayTreasury(
+          s._id,
+          externalDays ?? 0,
+          since,
+          todayKey,
+          s.ianaTimezone ?? null,
+          fmtBase,
+          shopifyActive,
+        )
+      : null;
+
+    const warnings: string[] = [];
+    if (startingBalanceRaw !== 0 && !startDate) {
+      warnings.push(
+        "Saldo inicial sem data — define a data do saldo em Definições ou o valor pode estar inflacionado.",
+      );
+    }
+
+    let receivedSource: StoreTreasuryLine["receivedSource"] = "shopify_payouts";
+    let receivedShopify = received;
+    let receivedExternal = 0;
 
     /**
-     * Com gateway externo (Stripe/PayPal/MB): as entradas de caixa vêm da
-     * estimativa por encomenda — não somar payouts Shopify Payments em cima
-     * (double-count) nem misturar saldo Shopify no «a receber».
+     * Gateway externo: estimativa por encomenda (Stripe, PayPal, MB, etc.).
+     * Com Shopify Payments activo, exclui encomendas shopify_payments / feesSource real.
      */
-    let incomingByDayFinal = incomingByDay;
-    let receivedByDayFinal = receivedByDay;
+    let incomingByDayFinal = mergeIncomingByDay(incomingByDay, currency);
+    let receivedByDayFinal = mergeIncomingByDay(receivedByDay, currency);
+
     if (externalGateway) {
-      received = externalGateway.received;
-      incoming = externalGateway.incoming;
-      incomingByDayFinal = externalGateway.incomingByDay;
-      receivedByDayFinal = externalGateway.receivedByDay;
+      if (shopifyActive) {
+        receivedExternal = externalGateway.received;
+        received += externalGateway.received;
+        incoming += externalGateway.incoming;
+        incomingByDayFinal = mergeIncomingByDay(
+          [...incomingByDay, ...externalGateway.incomingByDay],
+          currency,
+        );
+        receivedByDayFinal = mergeIncomingByDay(
+          [...receivedByDay, ...externalGateway.receivedByDay],
+          currency,
+        );
+        receivedSource = "mixed";
+      } else {
+        receivedShopify = 0;
+        receivedExternal = externalGateway.received;
+        received = externalGateway.received;
+        incoming = externalGateway.incoming;
+        incomingByDayFinal = mergeIncomingByDay(
+          externalGateway.incomingByDay,
+          currency,
+        );
+        receivedByDayFinal = mergeIncomingByDay(
+          externalGateway.receivedByDay,
+          currency,
+        );
+        receivedSource = "external_gateway";
+      }
     }
 
     const outflowsOps = out.cogs + out.shipping + out.adSpend;
@@ -658,9 +747,16 @@ export async function buildWorkspaceTreasury(
     const outflowsOpEx = storeOpEx + wsOpExForStore;
     const outflowsTotal = outflowsOps + outflowsOpEx;
     const manual = manualCashMap.get(sid) ?? { manualIn: 0, manualOut: 0 };
-    const shopifyPending = externalGateway
-      ? incoming
-      : available + incoming;
+    /**
+     * Shopify: vendas por liquidar (unallocated) + payouts agendados/a caminho.
+     * Não somar status «pending» nos payouts — sobrepõe-se ao saldo API.
+     * Linhas «Vendas por liquidar» no timeline são breakdown do unallocated.
+     */
+    const shopifyPending =
+      externalGateway && !shopifyActive
+        ? incoming
+        : shopifyPendingFromComponents +
+          (shopifyActive && externalGateway ? externalGateway.incoming : 0);
     const cashOnHand =
       startingBalance +
       received +
@@ -676,8 +772,8 @@ export async function buildWorkspaceTreasury(
       currency,
       sinceDate: since.toISOString().slice(0, 10),
       sinceLabel,
-      available,
-      availableFmt: fmtBase(available),
+      available: unallocated,
+      availableFmt: fmtBase(unallocated),
       incoming,
       incomingFmt: fmtBase(incoming),
       received,
@@ -717,6 +813,12 @@ export async function buildWorkspaceTreasury(
       incomingByDay: incomingByDayFinal,
       receivedByDay: receivedByDayFinal,
       payoutsError: s.payoutsError ?? null,
+      warnings,
+      receivedSource,
+      receivedShopify,
+      receivedShopifyFmt: fmtBase(receivedShopify),
+      receivedExternal,
+      receivedExternalFmt: fmtBase(receivedExternal),
     };
   }),
   );
@@ -748,11 +850,7 @@ export async function buildWorkspaceTreasury(
   const allReceivedByDay = mergeIncomingByDay(
     lines.flatMap((l) => l.receivedByDay),
     currency,
-  ).map((line) => ({
-    ...line,
-    kind: "received" as const,
-    kindLabel: "Recebido",
-  }));
+  );
 
   const cashOnHandTotal = sum("cashOnHand") - workspaceOpExTotal;
   const outflowsOpExTotal = sum("outflowsOpEx") + workspaceOpExTotal;
@@ -799,5 +897,6 @@ export async function buildWorkspaceTreasury(
     receivedByDay: allReceivedByDay,
     generatedAt: new Date().toISOString(),
     lastSyncedAt,
+    warnings: [...new Set(lines.flatMap((l) => l.warnings))],
   };
 }
