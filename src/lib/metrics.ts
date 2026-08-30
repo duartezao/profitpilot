@@ -1739,7 +1739,7 @@ function trimIncompleteTodayFromProfitChart(
   >,
 ): ProfitChartPoint[] {
   if (periodIsSingleDay(period) || chart.length <= 1) return chart;
-  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const tz = normalizeStoreTimezone(storeTimeZone);
   const todayKey = dateKeyInTimezone(new Date(), tz);
   const trimmed = chart.filter((p) => p.dateKey !== todayKey);
   return trimmed.length > 0 ? trimmed : chart;
@@ -1751,7 +1751,7 @@ function completeDayKeysForSparkline(
   storeTimeZone: string | null | undefined,
   points: number,
 ): string[] {
-  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const tz = normalizeStoreTimezone(storeTimeZone);
   const todayKey = dateKeyInTimezone(new Date(), tz);
 
   const inPeriod = dayKeysInSlice(slice, storeTimeZone).filter(
@@ -1788,14 +1788,8 @@ async function buildStoreSparklinesBatch(
     return out;
   }
 
-  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
-  const clippedSlice: PeriodSlice = tz
-    ? sliceFromDateKeys(tailKeys, tz)
-    : {
-        start: startOfDay(parseDateInput(tailKeys[0])!),
-        end: endOfDay(parseDateInput(tailKeys[tailKeys.length - 1])!),
-        specificDates: tailKeys,
-      };
+  const tz = normalizeStoreTimezone(storeTimeZone);
+  const clippedSlice: PeriodSlice = sliceFromDateKeys(tailKeys, tz);
 
   const storeOids = stores.map((s) => s._id);
   const [ordersByStoreDay, adByStoreDay] = await Promise.all([
@@ -1838,7 +1832,7 @@ async function buildStoreSparkline(
     storeTimeZone,
   );
   const tail = series.slice(-points);
-  return tail.map((p) => p.profit);
+  return tail.map((p) => p.profit ?? 0);
 }
 
 async function sumMissingAdSpendDays(

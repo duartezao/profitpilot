@@ -172,7 +172,7 @@ async function mergePortfolioProfitChart(
         );
         const existing = byDate.get(point.dateKey);
         if (existing) {
-          existing.profit += profit;
+          existing.profit = (existing.profit ?? 0) + profit;
           existing.profitFmt = fmtMoney(existing.profit);
           existing.revenue = (existing.revenue ?? 0) + revenue;
           existing.revenueFmt = fmtMoney(existing.revenue);
