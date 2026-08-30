@@ -42,6 +42,8 @@ export function aggregateOrderFeesFromBalanceTx(
 
 export type OrderTransactionFeeInput = {
   status?: string | null;
+  gateway?: string | null;
+  kind?: string | null;
   fees?: Array<{
     amount?: { amount?: string; currencyCode?: string } | null;
   } | null> | null;
@@ -71,4 +73,25 @@ export function sumSuccessfulTransactionFees(
     }
   }
   return { amount: roundMoney(amount), currency, hasFeeData };
+}
+
+/** Gateway da transação SUCCESS principal (SALE/CAPTURE, senão primeira SUCCESS). */
+export function resolvePrimaryPaymentGateway(
+  transactions: OrderTransactionFeeInput[] | null | undefined,
+): string | null {
+  const success = (transactions ?? []).filter(
+    (tx) => (tx.status ?? "").toUpperCase() === "SUCCESS",
+  );
+  const preferredKinds = new Set(["SALE", "CAPTURE"]);
+  for (const tx of success) {
+    const kind = (tx.kind ?? "").toUpperCase();
+    if (!preferredKinds.has(kind)) continue;
+    const gw = tx.gateway?.trim().toLowerCase();
+    if (gw) return gw;
+  }
+  for (const tx of success) {
+    const gw = tx.gateway?.trim().toLowerCase();
+    if (gw) return gw;
+  }
+  return null;
 }

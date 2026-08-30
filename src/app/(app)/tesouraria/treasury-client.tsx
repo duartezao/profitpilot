@@ -2,11 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Wallet, Settings, AlertTriangle } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import { ScopeLink } from "@/components/scope-link";
-import type { IncomingDayLine, WorkspaceTreasury } from "@/lib/treasury";
+import type { WorkspaceTreasury } from "@/lib/treasury";
+import {
+  incomingDayLineReactKey,
+  mergeIncomingDayLines,
+  type IncomingDayLine,
+} from "@/lib/treasury-day-lines";
 import { useWorkspace } from "@/components/workspace-context";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { LastSyncBadge } from "@/components/last-sync-badge";
@@ -25,11 +30,18 @@ async function fetchTreasury(storeId: string | null): Promise<WorkspaceTreasury>
 function IncomingTimeline({
   lines,
   emptyLabel,
+  currency = "EUR",
 }: {
   lines: IncomingDayLine[];
   emptyLabel: string;
+  currency?: string;
 }) {
-  if (lines.length === 0) {
+  const merged = useMemo(
+    () => mergeIncomingDayLines(lines, currency),
+    [lines, currency],
+  );
+
+  if (merged.length === 0) {
     return (
       <p className="px-5 py-8 text-center text-sm text-muted-foreground">
         {emptyLabel}
@@ -39,14 +51,17 @@ function IncomingTimeline({
 
   return (
     <ul className="divide-y divide-border">
-      {lines.map((line) => (
+      {merged.map((line) => (
         <li
-          key={`${line.date}-${line.kind}`}
+          key={incomingDayLineReactKey(line)}
           className="flex items-center justify-between gap-4 px-5 py-3"
         >
           <div className="min-w-0">
             <p className="font-medium tabular-nums">{line.dateLabel}</p>
             <p className="text-xs text-muted-foreground">{line.kindLabel}</p>
+            {line.detailLabel ? (
+              <p className="text-[11px] text-muted-foreground">{line.detailLabel}</p>
+            ) : null}
           </div>
           <span className="shrink-0 tabular-nums font-medium" data-sensitive>
             {line.amountFmt}
@@ -131,6 +146,8 @@ export function TreasuryClient() {
           },
         ]
     : [];
+
+  const currency = data?.currency ?? "EUR";
 
   const incomingLines = scopeStore
     ? scopeStore.incomingByDay
@@ -256,9 +273,8 @@ export function TreasuryClient() {
 
           <p className="text-xs text-muted-foreground">
             Saldo em conta = saldo inicial + recebido − COGS − envio − ad spend
-            (desde o início da loja). Shopify Payments: entra em «recebido» quando
-            o payout está pago. Gateway externo: projectado em Definições → dias
-            úteis após cada encomenda paga.
+            (desde o início da loja). Não inclui vendas Shopify ainda por pagar.
+            «A receber» = por pagar na Shopify + payouts agendados/a caminho.
           </p>
 
           <div className="rounded-lg border border-border bg-surface">
@@ -270,6 +286,7 @@ export function TreasuryClient() {
             </div>
             <IncomingTimeline
               lines={receivedLines}
+              currency={currency}
               emptyLabel="Ainda sem payouts recebidos neste período."
             />
           </div>
@@ -278,12 +295,19 @@ export function TreasuryClient() {
             <div className="border-b border-border p-5">
               <h2 className="text-lg font-semibold">A caminho, por dia</h2>
               <p className="text-sm text-muted-foreground">
-                Payouts agendados, vendas pendentes na Shopify e entradas
-                projectadas do gateway externo — totais por dia.
+                <span className="font-medium text-foreground">Payout agendado</span>{" "}
+                = data prevista na conta.{" "}
+                <span className="font-medium text-foreground">
+                  Vendas por liquidar
+                </span>{" "}
+                = vendas desse dia ainda sem payout (inclui fim de semana — a
+                Shopify paga em dias úteis). Estas linhas são o detalhe do
+                saldo «por pagar», não somam por cima do total «A receber».
               </p>
             </div>
             <IncomingTimeline
               lines={incomingLines}
+              currency={currency}
               emptyLabel="Nada a caminho. Sincroniza a loja para atualizar."
             />
           </div>
@@ -301,8 +325,8 @@ export function TreasuryClient() {
                   <thead>
                     <tr className="text-left text-xs font-medium text-muted-foreground">
                       <th className="px-5 py-3">Loja</th>
-                      <th className="px-5 py-3 text-right">Por pagar</th>
-                      <th className="px-5 py-3 text-right">A caminho</th>
+                <th className="px-5 py-3 text-right">Por liquidar</th>
+                <th className="px-5 py-3 text-right">Agendado</th>
                       <th className="px-5 py-3 text-right">Recebido</th>
                       <th className="px-5 py-3 text-right">Saídas</th>
                       <th className="px-5 py-3 text-right">Em conta</th>

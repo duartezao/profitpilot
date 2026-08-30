@@ -376,7 +376,7 @@ Net Profit =
 * Net Profit ao longo do tempo (gráfico diário na dashboard consolidada)
 * **Waterfall do lucro**: Revenue → menos cada custo → Net Profit (mostra para onde vai o dinheiro)
 * **P&L em `/financas`** — demonstração de resultados com COGS, envio, taxas, ad spend e reembolsos; avisos de COGS/ad spend em falta. No **overview (todas as lojas)**: cartão **Saldo em conta (banca)** no Resumo + tab **Caixa** com soma e detalhe por loja (`cashOnHand` = inicial + entradas + capital − COGS − envio − ads − levantamentos). Entradas e saídas usam a **mesma data de início** (saldo inicial, ou importação/criação da loja).
-* **Gateway externo** (Stripe/PayPal/MB): com `externalGatewayPayoutBusinessDays` definido, entradas de caixa = estimativa por encomenda (total − reembolsos − taxas), **sem** somar payouts Shopify Payments (evita double-count). Continua a ser uma **projecção**, não o extrato Stripe.
+* **Gateway externo** (Stripe/PayPal/MB): com `externalGatewayPayoutBusinessDays` definido, entradas de caixa = estimativa por encomenda (total − reembolsos − taxas). Loja **mista** (Shopify Payments + Stripe/PayPal): payouts Shopify vêm dos balance transactions; gateway externo = encomendas que **não** são `shopify_payments` / `feesSource: real` (inclui encomendas Stripe ainda sem taxa sincronizada). Campo `paymentGateway` gravado no sync de taxas. Continua a ser **projecção**, não o extrato Stripe/PayPal.
 * Lucro por loja, por produto, por país, por canal de aquisição
 * **Profit por order** (margem média por encomenda)
 * Breakeven ROAS por produto (a partir de que ROAS o produto deixa de dar prejuízo) — coluna **BER** em `/produtos` e dashboard da loja; exportação CSV em `/produtos`.

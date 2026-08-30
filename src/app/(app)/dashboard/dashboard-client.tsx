@@ -30,8 +30,8 @@ import {
   LIVE_DATA_POLL_MS,
 } from "@/lib/ad-sync-constants";
 import { withLiveFreshParam } from "@/lib/refresh-live-queries";
+import { DashboardLiveActions } from "@/components/dashboard/dashboard-live-actions";
 import { hrefWithScopeAndStore } from "@/lib/scope-query";
-import { LastSyncBadge } from "@/components/last-sync-badge";
 import { cn } from "@/lib/utils";
 
 function DashboardSkeleton({ multiStoreChart = true }: { multiStoreChart?: boolean }) {
@@ -145,8 +145,8 @@ export function DashboardClient() {
   const lastSyncedAt =
     portfolioData?.lastSyncedAt ?? workspaceData?.lastSyncedAt ?? null;
 
-  const liveBadge = (
-    <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
+  const liveActions = (
+    <DashboardLiveActions lastSyncedAt={lastSyncedAt} fetching={isFetching} />
   );
 
   const fetchingDim =
@@ -175,7 +175,7 @@ export function DashboardClient() {
                 : ""}
             </p>
           </div>
-          {liveBadge}
+          {liveActions}
         </div>
 
         {isError && (
@@ -250,6 +250,7 @@ export function DashboardClient() {
             title={headerTitle}
             periodLabel={periodLabel}
             prevPeriodLabel={workspaceData.storeDashboard?.prevPeriodLabel}
+            actions={liveActions}
           />
           {isError && (
             <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
@@ -293,7 +294,7 @@ export function DashboardClient() {
                 Visão consolidada de todas as lojas · {periodLabel}
               </p>
             </div>
-            {liveBadge}
+            {liveActions}
           </div>
 
           {isError && (

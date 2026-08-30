@@ -68,10 +68,12 @@ export function StoreDashboardHeader({
   title,
   periodLabel,
   prevPeriodLabel,
+  actions,
 }: {
   title: string;
   periodLabel?: string;
   prevPeriodLabel?: string;
+  actions?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4">
@@ -82,15 +84,18 @@ export function StoreDashboardHeader({
         </Sensitive>
       </div>
 
-      {periodLabel && (
-        <div
-          className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm"
-          title={prevPeriodLabel ? `Comparado com ${prevPeriodLabel}` : undefined}
-        >
-          <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="tabular-nums">{periodLabel}</span>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        {periodLabel && (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm"
+            title={prevPeriodLabel ? `Comparado com ${prevPeriodLabel}` : undefined}
+          >
+            <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="tabular-nums">{periodLabel}</span>
+          </div>
+        )}
+        {actions}
+      </div>
     </div>
   );
 }

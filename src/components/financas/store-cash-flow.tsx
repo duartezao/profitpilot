@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { Settings, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import type { StoreTreasuryLine } from "@/lib/treasury";
+import {
+  incomingDayLineReactKey,
+  mergeIncomingDayLines,
+} from "@/lib/treasury-day-lines";
 import { ScopeLink } from "@/components/scope-link";
 import { CollapsibleSection } from "@/components/collapsible-section";
 
@@ -19,7 +23,29 @@ export function StoreCashFlowSection({
 }) {
   const entries = [
     { label: "Saldo inicial", value: cash.startingBalanceFmt, tone: "" },
-    { label: "Payouts recebidos", value: cash.receivedFmt, tone: "text-positive" },
+    ...(cash.receivedSource === "mixed"
+      ? [
+          {
+            label: "Payouts Shopify",
+            value: cash.receivedShopifyFmt,
+            tone: "text-positive",
+          },
+          {
+            label: "Gateway externo (Stripe, etc.)",
+            value: cash.receivedExternalFmt,
+            tone: "text-positive",
+          },
+        ]
+      : [
+          {
+            label:
+              cash.receivedSource === "external_gateway"
+                ? "Recebido (gateway externo)"
+                : "Payouts recebidos",
+            value: cash.receivedFmt,
+            tone: "text-positive",
+          },
+        ]),
     ...(cash.manualIn > 0
       ? [
           {
@@ -108,6 +134,14 @@ export function StoreCashFlowSection({
         </div>
       )}
 
+      {cash.warnings.length > 0 && (
+        <ul className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+          {cash.warnings.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+
       {cash.payoutsError && (
         <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
           Payouts incompletos — sincroniza a loja para actualizar entradas.
@@ -143,7 +177,7 @@ export function StoreCashFlowSection({
             {cash.shopifyPendingFmt}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Por pagar + a caminho
+            Por liquidar + payouts agendados/a caminho (sem double-count)
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
@@ -210,9 +244,11 @@ export function StoreCashFlowSection({
           flush
         >
           <ul className="divide-y divide-border">
-            {cash.receivedByDay.slice(0, 8).map((line) => (
+            {mergeIncomingDayLines(cash.receivedByDay, cash.currency)
+              .slice(0, 8)
+              .map((line) => (
               <li
-                key={line.date}
+                key={incomingDayLineReactKey(line)}
                 className="flex items-center justify-between px-4 py-3 sm:px-5"
               >
                 <span className="text-sm tabular-nums">{line.dateLabel}</span>
