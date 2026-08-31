@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { Pencil, Trash2, X } from "lucide-react";
 import type { ExpenseRow } from "@/lib/expenses";
 import {
@@ -19,7 +20,10 @@ import {
   type ExpenseCategory,
   type ExpenseFrequency,
 } from "@/lib/expense-constants";
+import { expenseAppliesInPeriod } from "@/lib/expense-proration";
+import type { PeriodDateKeys } from "@/lib/period-date-keys";
 import { CollapsibleSection } from "@/components/collapsible-section";
+import { cn } from "@/lib/utils";
 
 const inputCls =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60";
@@ -38,30 +42,66 @@ type ExpenseFormValues = {
   endDateKey: string;
 };
 
+type FrequencyFilter = "all" | ExpenseFrequency;
+
 export function ExpensesPanel({
   expenses,
   stores,
   canEdit,
   baseCurrency,
   embedded = false,
+  periodFilter,
 }: {
   expenses: ExpenseRow[];
   stores: StoreOption[];
   canEdit: boolean;
   baseCurrency: string;
   embedded?: boolean;
+  periodFilter: PeriodDateKeys;
 }) {
-  const [addState, addAction, adding] = useActionState<
-    ExpenseActionState,
-    FormData
-  >(addExpenseAction, {});
+  const [addState, addAction] = useActionState<ExpenseActionState, FormData>(
+    addExpenseAction,
+    {},
+  );
+  const [addFormKey, setAddFormKey] = useState(0);
+  const [frequencyFilter, setFrequencyFilter] = useState<FrequencyFilter>("all");
 
   const today = new Date().toISOString().slice(0, 10);
 
+  useEffect(() => {
+    if (addState.ok) setAddFormKey((k) => k + 1);
+  }, [addState.ok]);
+
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((e) => {
+      if (frequencyFilter !== "all" && e.frequency !== frequencyFilter) {
+        return false;
+      }
+      return expenseAppliesInPeriod(
+        {
+          amountBase: e.amountBase,
+          frequency: e.frequency,
+          startDateKey: e.startDateKey,
+          endDateKey: e.endDateKey,
+        },
+        periodFilter,
+      );
+    });
+  }, [expenses, frequencyFilter, periodFilter]);
+
   const body = (
     <>
+      <ExpenseFilterBar
+        periodLabel={periodFilter.label}
+        frequency={frequencyFilter}
+        onFrequencyChange={setFrequencyFilter}
+        visibleCount={filteredExpenses.length}
+        totalCount={expenses.length}
+      />
+
       {canEdit && (
         <form
+          key={addFormKey}
           action={addAction}
           className="space-y-4 rounded-lg border border-border bg-background p-4"
         >
@@ -85,13 +125,11 @@ export function ExpensesPanel({
             defaultStartDateKey={today}
           />
 
-          <button
-            type="submit"
-            disabled={adding}
+          <ExpenseSubmitButton
+            idleLabel="Adicionar despesa"
+            pendingLabel="A guardar…"
             className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
-          >
-            {adding ? "A guardar…" : "Adicionar despesa"}
-          </button>
+          />
         </form>
       )}
 
@@ -99,6 +137,11 @@ export function ExpensesPanel({
         <p className="text-sm text-muted-foreground">
           Ainda não há despesas registadas. O lucro só inclui COGS, envio, taxas e
           ads até adicionares apps ou subscrições aqui.
+        </p>
+      ) : filteredExpenses.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Nenhuma despesa corresponde ao período ({periodFilter.label}) ou ao
+          filtro seleccionado.
         </p>
       ) : (
         <>
@@ -116,7 +159,7 @@ export function ExpensesPanel({
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((e) => (
+                  {filteredExpenses.map((e) => (
                   <ExpenseTableRow
                     key={e.id}
                     expense={e}
@@ -130,7 +173,7 @@ export function ExpensesPanel({
           </div>
 
           <div className="space-y-3 lg:hidden">
-            {expenses.map((e) => (
+                  {filteredExpenses.map((e) => (
               <ExpenseMobileCard
                 key={e.id}
                 expense={e}
@@ -166,9 +209,9 @@ export function ExpensesPanel({
       title="Apps, subscrições e fixos"
       description="Custos fora de COGS e ads — pontual só no dia; mensal/anual na data de cobrança."
       badge={
-        expenses.length > 0 ? (
+        filteredExpenses.length > 0 ? (
           <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {expenses.length}
+            {filteredExpenses.length}
           </span>
         ) : undefined
       }
@@ -308,7 +351,7 @@ function ExpenseEditForm({
   baseCurrency: string;
   onDone: () => void;
 }) {
-  const [state, action, pending] = useActionState<ExpenseActionState, FormData>(
+  const [state, action] = useActionState<ExpenseActionState, FormData>(
     updateExpenseAction,
     {},
   );
@@ -347,13 +390,11 @@ function ExpenseEditForm({
       />
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={pending}
+        <ExpenseSubmitButton
+          idleLabel="Guardar alterações"
+          pendingLabel="A guardar…"
           className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
-        >
-          {pending ? "A guardar…" : "Guardar alterações"}
-        </button>
+        />
         <button
           type="button"
           onClick={onDone}
@@ -363,6 +404,72 @@ function ExpenseEditForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function ExpenseFilterBar({
+  periodLabel,
+  frequency,
+  onFrequencyChange,
+  visibleCount,
+  totalCount,
+}: {
+  periodLabel: string;
+  frequency: FrequencyFilter;
+  onFrequencyChange: (f: FrequencyFilter) => void;
+  visibleCount: number;
+  totalCount: number;
+}) {
+  const chips: { id: FrequencyFilter; label: string }[] = [
+    { id: "all", label: "Todas" },
+    { id: "one-time", label: "Pontual" },
+    { id: "monthly", label: "Mensal" },
+    { id: "yearly", label: "Anual" },
+  ];
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-background p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">Filtros</p>
+        <p className="text-xs text-muted-foreground">
+          {visibleCount} de {totalCount} · {periodLabel}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {chips.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            onClick={() => onFrequencyChange(chip.id)}
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+              frequency === chip.id
+                ? "border-accent bg-accent/10 text-accent"
+                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExpenseSubmitButton({
+  idleLabel,
+  pendingLabel,
+  className,
+}: {
+  idleLabel: string;
+  pendingLabel: string;
+  className?: string;
+}) {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending} className={className}>
+      {pending ? pendingLabel : idleLabel}
+    </button>
   );
 }
 
@@ -548,7 +655,7 @@ function ExpenseRowActions({
 }
 
 function DeleteExpenseButton({ expenseId }: { expenseId: string }) {
-  const [, action, pending] = useActionState<ExpenseActionState, FormData>(
+  const [, action] = useActionState<ExpenseActionState, FormData>(
     deleteExpenseAction,
     {},
   );
@@ -556,15 +663,22 @@ function DeleteExpenseButton({ expenseId }: { expenseId: string }) {
   return (
     <form action={action}>
       <input type="hidden" name="expenseId" value={expenseId} />
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-negative disabled:opacity-50"
-        title="Remover despesa"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      <DeleteSubmitButton />
     </form>
+  );
+}
+
+function DeleteSubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-negative disabled:opacity-50"
+      title="Remover despesa"
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
   );
 }
 

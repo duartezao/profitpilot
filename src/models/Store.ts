@@ -143,6 +143,8 @@ const StoreSchema = new Schema(
     // Saldo atual do Shopify Payments (ainda por pagar).
     paymentsBalance: { type: Number, default: 0 },
     paymentsBalanceUpdatedAt: { type: Date },
+    /** Moeda de payout Shopify Payments (ex. USD numa loja EUR). */
+    paymentsPayoutCurrency: { type: String, default: null },
     // Erro específico do sync de payouts (ex.: falta de scope).
     payoutsError: { type: String, default: null },
     // Filtro persistente de sessões Shopify — código ISO (ex. BE) ou null = todos.

@@ -365,3 +365,23 @@ export function importDateKey(
   }
   return formatDateInput(new Date(d));
 }
+
+/** Fuso mais comum entre lojas (vista consolidada). */
+export function dominantStoreTimezone(
+  stores: Array<{ ianaTimezone?: string | null }>,
+): string {
+  const counts = new Map<string, number>();
+  for (const s of stores) {
+    const tz = normalizeStoreTimezone(s.ianaTimezone);
+    counts.set(tz, (counts.get(tz) ?? 0) + 1);
+  }
+  let best = DEFAULT_STORE_TIMEZONE;
+  let bestCount = -1;
+  for (const [tz, n] of counts) {
+    if (n > bestCount) {
+      best = tz;
+      bestCount = n;
+    }
+  }
+  return best;
+}

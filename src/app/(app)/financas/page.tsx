@@ -22,6 +22,13 @@ import { FinancasModeToggle } from "@/components/financas/financas-mode-toggle";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { listWorkspaceExpenses, sumWorkspaceMonthlyFixedBase } from "@/lib/expenses";
+import { expenseAppliesInPeriod } from "@/lib/expense-proration";
+import { periodToDateKeys } from "@/lib/period-date-keys";
+import {
+  dominantStoreTimezone,
+  normalizeStoreTimezone,
+  resolvePeriodForStore,
+} from "@/lib/store-timezone";
 import { storeQueryForUser } from "@/lib/store-scope";
 
 export const metadata: Metadata = { title: "Lucro & Finanças" };
@@ -113,18 +120,38 @@ export default async function FinancasPage({
 
   await connectToDatabase();
   const storeDocs = await Store.find(storeQueryForUser(user))
-    .select("name")
+    .select("name ianaTimezone")
     .lean();
   const storeNames = new Map(storeDocs.map((s) => [String(s._id), s.name]));
   const storeOptions = storeDocs.map((s) => ({
     id: String(s._id),
     name: s.name,
   }));
+  const scopedStoreDoc = storeId
+    ? storeDocs.find((s) => String(s._id) === storeId)
+    : null;
+  const financasTz = scopedStoreDoc
+    ? normalizeStoreTimezone(scopedStoreDoc.ianaTimezone)
+    : dominantStoreTimezone(storeDocs);
+  const periodFilter = periodToDateKeys(
+    resolvePeriodForStore({ period, from, to, dates }, financasTz),
+  );
   const expenses = await listWorkspaceExpenses(
     user.workspaceId,
     storeNames,
     currency,
   );
+  const expensesInPeriodCount = expenses.filter((e) =>
+    expenseAppliesInPeriod(
+      {
+        amountBase: e.amountBase,
+        frequency: e.frequency,
+        startDateKey: e.startDateKey,
+        endDateKey: e.endDateKey,
+      },
+      periodFilter,
+    ),
+  ).length;
   const canEditExpenses = ["owner", "admin", "editor"].includes(user.role);
   const fixedMonthly = businessMode
     ? await sumWorkspaceMonthlyFixedBase(user.workspaceId)
@@ -360,6 +387,7 @@ export default async function FinancasPage({
       stores={storeOptions}
       canEdit={canEditExpenses}
       baseCurrency={currency}
+      periodFilter={periodFilter}
       embedded
     />
   );
@@ -428,11 +456,15 @@ export default async function FinancasPage({
         scopeName={scopeName}
         hasStoreCash={Boolean(storeCash || consolidatedCash)}
         hasStoreTable={!scopeName && stores.length > 0}
-        expenseCount={expenses.length}
+        expenseCount={expensesInPeriodCount}
         resumo={resumoPanel}
         storeCash={
           storeCash ? (
-            <StoreCashFlowSection cash={storeCash} embedded />
+            <StoreCashFlowSection
+              cash={storeCash}
+              periodFilter={periodFilter}
+              embedded
+            />
           ) : consolidatedCash ? (
             <ConsolidatedCashSection treasury={consolidatedCash} />
           ) : undefined

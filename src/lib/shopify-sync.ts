@@ -64,6 +64,7 @@ import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { buildOrderAmountsBase } from "@/lib/order-money";
 import { convertToBaseCurrency } from "@/lib/fx";
+import { enrichPayoutBaseAmountsForStore } from "@/lib/payout-shopify-fx";
 import {
   assimilatesCogsOnSync,
   syncsShopifyProductCosts,
@@ -88,6 +89,7 @@ export type StoreSyncPersist = {
   payoutsError?: string | null;
   paymentsBalance?: number;
   paymentsBalanceUpdatedAt?: Date;
+  paymentsPayoutCurrency?: string | null;
   lastSessionMetricsError?: string | null;
 };
 
@@ -1857,6 +1859,7 @@ export async function syncPayouts(
 ): Promise<number> {
   const query = `query($cursor: String) {
     shopifyPaymentsAccount {
+      defaultCurrency
       balance { amount currencyCode }
       payouts(first: 50, after: $cursor, sortKey: ISSUED_AT, reverse: true) {
         pageInfo { hasNextPage endCursor }
@@ -1885,6 +1888,7 @@ export async function syncPayouts(
   } | null;
   type Resp = {
     shopifyPaymentsAccount: {
+      defaultCurrency?: string | null;
       balance: Money[];
       payouts: {
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -1902,6 +1906,7 @@ export async function syncPayouts(
   let cursor: string | null = null;
   let count = 0;
   let balanceSaved = false;
+  const syncedPayoutIds: string[] = [];
 
   // Até N páginas por execução (2 em sync incremental, 6 na primeira sync).
   const maxPages = opts?.maxPages ?? 6;
@@ -1921,6 +1926,9 @@ export async function syncPayouts(
       );
       store.paymentsBalance = balance;
       store.paymentsBalanceUpdatedAt = new Date();
+      if (account.defaultCurrency) {
+        store.paymentsPayoutCurrency = account.defaultCurrency.toUpperCase();
+      }
       balanceSaved = true;
     }
 
@@ -1976,10 +1984,29 @@ export async function syncPayouts(
     if (ops.length) {
       await Payout.bulkWrite(ops as AnyBulkWriteOperation[], { ordered: false });
       count += ops.length;
+      syncedPayoutIds.push(...shopifyIds);
     }
 
     if (!account.payouts.pageInfo.hasNextPage) break;
     cursor = account.payouts.pageInfo.endCursor;
+  }
+
+  if (syncedPayoutIds.length > 0) {
+    const workspace = await Workspace.findById(store.workspaceId)
+      .select("baseCurrency")
+      .lean();
+    const baseCurrency = workspace?.baseCurrency ?? store.currency ?? "EUR";
+    try {
+      await enrichPayoutBaseAmountsForStore(
+        store,
+        domain,
+        token,
+        baseCurrency,
+        syncedPayoutIds,
+      );
+    } catch {
+      /* FX enrichment opcional — não bloqueia sync de payouts */
+    }
   }
 
   return count;
@@ -2287,6 +2314,9 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
       ? {
           paymentsBalance: store.paymentsBalance,
           paymentsBalanceUpdatedAt: store.paymentsBalanceUpdatedAt,
+          ...(store.paymentsPayoutCurrency
+            ? { paymentsPayoutCurrency: store.paymentsPayoutCurrency }
+            : {}),
         }
       : {}),
   });

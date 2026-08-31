@@ -993,13 +993,13 @@ Lucro após taxas =
 * **A caminho (in transit)** — já enviado pela Shopify, ainda não na conta.
 * **Histórico de payouts** já recebidos (data, valor, estado).
 * **Vista consolidada**: somatório de tudo o que vais receber de **todas as lojas**, com timeline ("esta semana vais receber X, na próxima Y").
-* **Multi-moeda**: lojas em moedas diferentes são convertidas para a moeda base, mantendo também o valor na moeda original do payout.
+* **Multi-moeda**: quando a moeda do payout Shopify (ex. USD numa loja EUR) difere da moeda da loja, o equivalente na moeda base usa a **taxa implícita Shopify** (balance transactions + encomendas), não ECB. O valor original do payout mantém-se visível na moeda do payout. Re-sincronizar a loja preenche `netBase` em payouts antigos.
 
 ## Detalhe de cada payout
 
 * Valor bruto, **taxas da Shopify Payments deduzidas**, valor líquido.
 * Repartição: vendas, reembolsos, chargebacks e ajustes incluídos nesse payout.
-* Moeda do payout (convertida para a moeda base).
+* Moeda do payout (valor original) + equivalente na moeda base (`netBase`, taxa Shopify quando aplicável).
 
 ## Fonte dos dados
 
@@ -1304,7 +1304,7 @@ Lucro após taxas =
 * `credentials` (encriptado AES-256-GCM — Shopify: `clientId`, `clientSecret`. Token obtido on-demand via client credentials, não persistido. **Nunca em texto simples**)
 * `scopes` (array de permissões concedidas)
 * `feeConfig` (taxa actual — espelho da última entrada do calendário)
-* `feeSchedule[]` — histórico: `effectiveFromKey`, `processingPercent`, `processingFixed`, `transactionFeePercent` (taxa só aplica a encomendas desde esse dia; dias anteriores mantêm fees gravados). Se `store.currency` ≠ moeda base do workspace (payout), soma-se automaticamente **+2%** de conversão de moeda Shopify em cada encomenda (`shopifyCurrencyConversionPercent`).
+* `feeSchedule[]` — histórico: `effectiveFromKey`, `processingPercent`, `processingFixed`, `transactionFeePercent` (taxa só aplica a encomendas desde esse dia; dias anteriores mantêm fees gravados). Se `store.currency` ≠ **moeda de payout Shopify** (`paymentsPayoutCurrency`, ex. loja EUR + payout USD), soma-se automaticamente **+2%** de conversão de moeda Shopify em cada encomenda (`shopifyOrderConversionPercent`).
 * `startingBalance` (saldo inicial de caixa **desta loja**, na moeda base do workspace — tesouraria por loja)
 * `startingBalanceDate` (data a que se refere o saldo inicial)
 * `externalGatewayPayoutBusinessDays` (dias úteis até o payout cair na conta quando usas gateway externo — Multibanco, PayPal, etc.; null = só Shopify Payments na tesouraria)
@@ -1316,6 +1316,7 @@ Lucro após taxas =
 * `timezoneSource` (`shopify` = sincronizado automaticamente da Shopify no sync; `manual` = override do utilizador em Definições → Lojas, **não é** sobrescrito pelo sync). Volta a `shopify` escolhendo «Automático (Shopify)».
 * `lastSessionMetricsAt` / `lastSessionMetricsError` (sync de sessões/funil)
 * `paymentsBalance` / `paymentsBalanceUpdatedAt` (saldo Shopify Payments ainda por pagar)
+* `paymentsPayoutCurrency` (moeda de payout Shopify Payments — `defaultCurrency` da conta, ex. USD numa loja EUR)
 * `autoSync` / `lastSyncAt` / `lastSyncError` / `payoutsError` — sync automático **global a cada 30 min** (Vercel Cron + `GLOBAL_SYNC_INTERVAL_MINUTES`, predefinição 30; mín. 15); `syncIntervalMinutes` legado na BD
 * `syncState` — progresso do sync manual em passos (`status`, `phase`, `progress`, `orderCursor`, contagens, `message`)
 * `webhooksRegisteredAt` — último registo/verificação de subscriptions Shopify (orders/refunds)
@@ -1518,7 +1519,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## expenses
 
-> Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). **Adicionar, editar** (ícone lápis, formulário inline) e **apagar** despesas. Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário**: **pontual** só no dia indicado; **mensal** uma vez por mês no dia de início (`startDateKey`); **anual** na data de aniversário. Despesas de **workspace** contam no consolidado (não se repartem por loja); despesas com `storeId` só à loja indicada.
+> Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). **Adicionar, editar** (ícone lápis, formulário inline) e **apagar** despesas. **Filtros:** período da topbar + tipo (Todas / Pontual / Mensal / Anual) — só lista despesas activas nesse intervalo. Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário**: **pontual** só no dia indicado; **mensal** uma vez por mês no dia de início (`startDateKey`); **anual** na data de aniversário. Despesas de **workspace** contam no consolidado (não se repartem por loja); despesas com `storeId` só à loja indicada.
 
 * `_id`
 * `workspaceId` (gasto da conta) ou `storeId` (gasto de uma loja)

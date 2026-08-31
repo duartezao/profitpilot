@@ -41,7 +41,7 @@ import {
   formatFeeConfigLabel,
   normalizeFeeConfig,
   resolveFeeConfigForDateKey,
-  shopifyCurrencyConversionPercent,
+  shopifyOrderConversionPercent,
   type FeeScheduleEntry,
 } from "@/lib/fee-schedule";
 import {
@@ -377,10 +377,7 @@ export default async function DefinicoesPage() {
                   );
                   const currency = s.currency ?? workspace?.baseCurrency ?? "EUR";
                   const baseCurrency = workspace?.baseCurrency ?? "EUR";
-                  const conversionPercent = shopifyCurrencyConversionPercent(
-                    currency,
-                    baseCurrency,
-                  );
+                  const conversionPercent = shopifyOrderConversionPercent(s);
                   const todayKey = dateKeyInTimezone(new Date(), tz);
                   const currentFee = resolveFeeConfigForDateKey(
                     schedule,

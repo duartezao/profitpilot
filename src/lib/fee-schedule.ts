@@ -21,6 +21,26 @@ export function shopifyCurrencyConversionPercent(
   return SHOPIFY_CURRENCY_CONVERSION_PERCENT;
 }
 
+/** Moeda de payout Shopify Payments (defaultCurrency) ou moeda da loja. */
+export function resolveShopifyPayoutCurrency(store: {
+  currency?: string | null;
+  paymentsPayoutCurrency?: string | null;
+}): string {
+  return (store.paymentsPayoutCurrency ?? store.currency ?? "EUR").toUpperCase();
+}
+
+/** +2% quando vendas (loja) ≠ payout Shopify Payments. */
+export function shopifyOrderConversionPercent(store: {
+  currency?: string | null;
+  paymentsPayoutCurrency?: string | null;
+}): number {
+  const storeCurrency = (store.currency ?? "EUR").toUpperCase();
+  return shopifyCurrencyConversionPercent(
+    storeCurrency,
+    resolveShopifyPayoutCurrency(store),
+  );
+}
+
 export type FeeScheduleEntry = FeeConfig & {
   /** Dia civil YYYY-MM-DD (fuso da loja) a partir do qual esta taxa vale. */
   effectiveFromKey: string;

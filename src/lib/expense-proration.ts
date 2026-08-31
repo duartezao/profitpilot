@@ -157,4 +157,22 @@ export function expenseAmountForDay(
   );
 }
 
+/** Despesa activa no período (tem cobrança ou pontual nesse intervalo). */
+export function expenseAppliesInPeriod(
+  expense: ExpenseProrationInput,
+  period: {
+    startKey: string;
+    endKey: string;
+    specificDates?: string[];
+  },
+): boolean {
+  if (period.specificDates?.length) {
+    return period.specificDates.some((key) => expenseAmountForDay(expense, key) > 0);
+  }
+  const start = parseDateKey(period.startKey);
+  const end = parseDateKey(period.endKey);
+  if (!start || !end) return false;
+  return expenseAmountForPeriod(expense, startOfDay(start), endOfDay(end)) > 0;
+}
+
 export { dateKey as expenseDateKey, overlapDays };

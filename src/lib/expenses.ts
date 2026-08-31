@@ -29,6 +29,7 @@ export type ExpenseRow = {
   amountFmt: string;
   amountBaseFmt: string;
   amount: number;
+  amountBase: number;
   currency: string;
   storeId: string | null;
   storeName: string | null;
@@ -82,6 +83,7 @@ export async function listWorkspaceExpenses(
       amountFmt: fmt(e.amount),
       amountBaseFmt: fmtBase(e.amountBase),
       amount: e.amount,
+      amountBase: e.amountBase,
       currency: (e.currency ?? "EUR").toUpperCase(),
       storeId,
       storeName: storeId ? (storeNames.get(storeId) ?? null) : null,

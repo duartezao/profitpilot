@@ -9,6 +9,7 @@ import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { Order } from "@/models/Order";
 import { sumAdSpendForPeriod } from "@/lib/ad-spend";
 import { moneyToBase } from "@/lib/fx";
+import { resolvePayoutNetBase } from "@/lib/payout-shopify-fx";
 import {
   cogsSumExprForMode,
   shippingSumBaseExpr,
@@ -595,6 +596,7 @@ export async function buildWorkspaceTreasury(
 
     const payoutToBase = async (p: {
       net?: number | null;
+      netBase?: number | null;
       currency?: string | null;
       issuedAt?: Date | null;
       createdAt?: Date;
@@ -602,8 +604,7 @@ export async function buildWorkspaceTreasury(
     }) => {
       const date =
         dayKey(p.paidAt ?? p.issuedAt ?? p.createdAt) ?? storeTodayKey;
-      const cur = (p.currency ?? storeCurrency).toUpperCase();
-      return moneyToBase(p.net ?? 0, cur, currency, date);
+      return resolvePayoutNetBase(p, storeCurrency, currency, date);
     };
 
     const txToBase = async (bt: {

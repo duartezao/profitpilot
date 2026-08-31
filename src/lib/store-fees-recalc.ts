@@ -8,7 +8,7 @@ import {
   computeOrderFees,
   ensureFeeSchedule,
   resolveFeeConfigForDateKey,
-  shopifyCurrencyConversionPercent,
+  shopifyOrderConversionPercent,
   type FeeScheduleEntry,
 } from "@/lib/fee-schedule";
 import { buildOrderAmountsBase } from "@/lib/order-money";
@@ -75,10 +75,7 @@ export async function recalculateStoreOrderFees(
       floorKey,
     );
     const totalPrice = num(order.totalPrice);
-    const conversionPercent = shopifyCurrencyConversionPercent(
-      storeCurrency,
-      baseCurrency,
-    );
+    const conversionPercent = shopifyOrderConversionPercent(store);
     const fees = computeOrderFees(totalPrice, feeConfig, conversionPercent);
     const manualCogs = order.manualCogs ?? null;
     const cogsForBase = manualCogs != null ? manualCogs : num(order.cogs);
