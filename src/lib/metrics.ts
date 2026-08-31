@@ -8,7 +8,7 @@ import { Order } from "@/models/Order";
 import { Payout } from "@/models/Payout";
 import { netRevenueSumExpr, orderNetRevenue } from "@/lib/order-revenue";
 import {
-  grossRevenueSumBaseExpr,
+  netRevenueSumBaseExpr,
   shippingSumBaseExpr,
   feesSumBaseExpr,
   cogsSumBaseExpr,
@@ -419,7 +419,7 @@ async function aggregateStoreAggs(
     {
       $group: {
         _id: "$storeId",
-        revenue: grossRevenueSumBaseExpr,
+        revenue: netRevenueSumBaseExpr,
         cogs: { $sum: 0 },
         shipping: shippingSumBaseExpr,
         fees: feesSumBaseExpr,
@@ -442,18 +442,20 @@ async function aggregateStoreAggs(
     const issued = refundsByStore.get(sid) ?? 0;
     result.set(sid, {
       ...agg,
-      revenue: agg.revenue - issued,
       refunds: issued,
     });
   }
   for (const s of stores) {
     if (!result.has(String(s._id))) {
       const issued = refundsByStore.get(String(s._id)) ?? 0;
-      result.set(String(s._id), {
-        ...emptyStoreAgg(),
-        revenue: -issued,
-        refunds: issued,
-      });
+      if (issued > 0) {
+        result.set(String(s._id), {
+          ...emptyStoreAgg(),
+          refunds: issued,
+        });
+      } else {
+        result.set(String(s._id), emptyStoreAgg());
+      }
     }
   }
 
@@ -585,6 +587,16 @@ function calcProfit(
   chargebacks = 0,
 ) {
   return calcNetProfit(a, adSpend, operatingExpenses, chargebacks);
+}
+
+/** Lucro diário: custos habituais − reembolsos emitidos nesse dia (REV mantém-se). */
+function calcDailyProfit(
+  a: Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">,
+  adSpend = 0,
+  operatingExpenses = 0,
+  chargebacks = 0,
+) {
+  return calcNetProfit(a, adSpend, operatingExpenses, chargebacks) - (a.refunds ?? 0);
 }
 
 function resolveDailyAdSpend(
@@ -1162,7 +1174,7 @@ async function aggregateDailyOrders(
           : {
               $dateToString: { format: "%Y-%m-%d", date: "$orderDate" },
             },
-        revenue: grossRevenueSumBaseExpr,
+        revenue: netRevenueSumBaseExpr,
         cogs: cogsExpr,
         shipping: shippingSumBaseExpr,
         fees: feesSumBaseExpr,
@@ -1291,7 +1303,7 @@ async function aggregateDailyOrdersByStore(
         {
           $group: {
             _id: dateExpr,
-            revenue: grossRevenueSumBaseExpr,
+            revenue: netRevenueSumBaseExpr,
             cogs: cogsExpr,
             shipping: shippingSumBaseExpr,
             fees: feesSumBaseExpr,
@@ -1484,7 +1496,7 @@ async function buildConsolidatedDailyProfitSeries(
         dateKey,
         meta.storeId,
       );
-      const profit = calcProfit(o, hasEntry ? ad : 0, storeOpEx);
+      const profit = calcDailyProfit(o, hasEntry ? ad : 0, storeOpEx);
       const revenue = o.revenue;
       byStore.push({
         storeId: meta.storeId,
@@ -1634,7 +1646,7 @@ async function buildDailyProfitSeries(
       expenseStoreId ?? undefined,
     );
     const dayCb = chargebacksByDay.get(dateKey) ?? 0;
-    const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx, dayCb);
+    const profit = calcDailyProfit(o, hasEntry ? ad : 0, dayOpEx, dayCb);
     const revenue = o.revenue;
     const label = formatDateKeyLabel(dateKey);
     const dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
@@ -1742,7 +1754,7 @@ async function buildStoreDailyMetrics(
       dateKey,
       String(storeOid),
     );
-    const profit = calcProfit(o, hasEntry ? ad : 0, dayOpEx);
+    const profit = calcDailyProfit(o, hasEntry ? ad : 0, dayOpEx);
     const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
     const dayNeedsManual =
       cogsMode === "day" && (!fromKey || dateKey >= fromKey);
@@ -1861,7 +1873,7 @@ async function buildStoreSparklinesBatch(
     const profits = tailKeys.map((dateKey) => {
       const o = ordersByStoreDay.get(storeDayKey(dateKey, sid)) ?? zeroRow();
       const { amount: ad, hasEntry } = resolveDailyAdSpend(adByStoreDay, dateKey);
-      return calcProfit(o, hasEntry ? ad : 0, 0);
+      return calcDailyProfit(o, hasEntry ? ad : 0, 0);
     });
     out.set(sid, profits);
   }
@@ -2630,7 +2642,7 @@ export async function buildWorkspaceSummary(
       {
         $group: {
           _id: null,
-          revenue: grossRevenueSumBaseExpr,
+          revenue: netRevenueSumBaseExpr,
           cogs: cogsExpr,
           shipping: shippingSumBaseExpr,
           fees: feesSumBaseExpr,
@@ -2654,7 +2666,6 @@ export async function buildWorkspaceSummary(
       slice,
       storeTz,
     );
-    agg.revenue -= issued;
     agg.refunds = issued;
 
     if (mode === "day" && storeOid) {
@@ -3759,7 +3770,7 @@ export async function fetchStoreDayFinancials(
     orders: 0,
   };
   const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
-  const profit = calcProfit(o, hasEntry ? ad : 0, operatingExpenses, dayChargebacks);
+  const profit = calcDailyProfit(o, hasEntry ? ad : 0, operatingExpenses, dayChargebacks);
   const fromKey = store.cogsDayFromKey ?? null;
   const dayNeedsManual =
     cogsMode === "day" && (!fromKey || dateKey >= fromKey);
@@ -3954,7 +3965,7 @@ export async function fetchStoreRangeFinancials(
     }
   }
 
-  const profit = calcProfit(
+  const profit = calcDailyProfit(
     totals,
     adSpendHasEntry ? adSpend : 0,
     operatingExpenses,
