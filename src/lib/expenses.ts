@@ -28,6 +28,8 @@ export type ExpenseRow = {
   frequencyLabel: string;
   amountFmt: string;
   amountBaseFmt: string;
+  amount: number;
+  currency: string;
   storeId: string | null;
   storeName: string | null;
   startDateKey: string;
@@ -79,6 +81,8 @@ export async function listWorkspaceExpenses(
       frequencyLabel: expenseFrequencyLabel(e.frequency as ExpenseFrequency),
       amountFmt: fmt(e.amount),
       amountBaseFmt: fmtBase(e.amountBase),
+      amount: e.amount,
+      currency: (e.currency ?? "EUR").toUpperCase(),
       storeId,
       storeName: storeId ? (storeNames.get(storeId) ?? null) : null,
       startDateKey: e.startDateKey,
