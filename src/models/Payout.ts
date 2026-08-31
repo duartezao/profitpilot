@@ -26,6 +26,17 @@ const PayoutSchema = new Schema(
     // Bruto das vendas incluídas no payout.
     gross: { type: Number, default: 0 },
     currency: { type: String, default: "EUR" },
+    /** Líquido na moeda base do workspace (taxa Shopify quando payout ≠ loja). */
+    netBase: { type: Number, default: null },
+    feeBase: { type: Number, default: null },
+    grossBase: { type: Number, default: null },
+    /** Taxa implícita loja/payout (ex.: EUR por 1 USD). */
+    fxRate: { type: Number, default: null },
+    fxSource: {
+      type: String,
+      enum: ["shopify", "market", "identity"],
+      default: null,
+    },
   },
   { timestamps: true },
 );

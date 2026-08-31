@@ -10,10 +10,14 @@ import { useWorkspace } from "@/components/workspace-context";
 import type { PayoutsView } from "@/lib/payouts-data";
 import { cn } from "@/lib/utils";
 
-async function fetchPayouts(storeId: string | null): Promise<PayoutsView> {
-  const url = storeId
+async function fetchPayouts(
+  storeId: string | null,
+  periodQs: string,
+): Promise<PayoutsView> {
+  const base = storeId
     ? `/api/payouts?store=${encodeURIComponent(storeId)}`
     : "/api/payouts";
+  const url = periodQs ? `${base}&${periodQs}` : base;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("Falha ao carregar payouts.");
   return res.json();
@@ -38,11 +42,20 @@ function PayoutsSkeleton() {
 
 export function PayoutsClient() {
   const { workspaceId } = useWorkspace();
-  const storeId = useSearchParams().get("store");
+  const searchParams = useSearchParams();
+  const storeId = searchParams.get("store");
+
+  const periodQs = ["period", "from", "to", "dates"]
+    .map((key) => {
+      const v = searchParams.get(key);
+      return v ? `${key}=${encodeURIComponent(v)}` : "";
+    })
+    .filter(Boolean)
+    .join("&");
 
   const { data, isError, isLoading } = useQuery({
-    queryKey: ["payouts", workspaceId, storeId],
-    queryFn: () => fetchPayouts(storeId),
+    queryKey: ["payouts", workspaceId, storeId, periodQs],
+    queryFn: () => fetchPayouts(storeId, periodQs),
     staleTime: 30_000,
   });
 
@@ -72,10 +85,11 @@ export function PayoutsClient() {
         <p className="text-sm text-muted-foreground">
           {data.scopeName ? (
             <>
-              Payouts da loja <Sensitive as="span">{data.scopeName}</Sensitive>.
+              Payouts de <Sensitive as="span">{data.scopeName}</Sensitive> ·{" "}
+              {data.periodLabel}.
             </>
           ) : (
-            "Quanto e quando vais receber do Shopify Payments."
+            <>Payouts no período seleccionado · {data.periodLabel}.</>
           )}
         </p>
         </div>
@@ -135,8 +149,8 @@ export function PayoutsClient() {
         title="Histórico de payouts"
         description={
           data.scopeName
-            ? `Últimos payouts de ${data.scopeName}.`
-            : "Últimos payouts de todas as lojas."
+            ? `${data.payouts.length} payouts de ${data.scopeName} · ${data.periodLabel}.`
+            : `${data.payouts.length} payouts · ${data.periodLabel}.`
         }
         badge={
           data.payouts.length > 0 ? (
@@ -150,9 +164,11 @@ export function PayoutsClient() {
         {data.payouts.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-12 text-center">
             <Banknote className="h-8 w-8 text-muted-foreground" />
-            <p className="mt-3 text-sm font-medium">Ainda não há payouts.</p>
+            <p className="mt-3 text-sm font-medium">
+              Sem payouts neste período.
+            </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Sincroniza uma loja com Shopify Payments para ver os payouts aqui.
+              Altera o período na barra superior ou sincroniza a loja.
             </p>
           </div>
         ) : (

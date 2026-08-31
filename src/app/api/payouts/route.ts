@@ -11,10 +11,16 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const user = await requireUser();
-    const storeId = new URL(request.url).searchParams.get("store") ?? undefined;
+    const url = new URL(request.url);
+    const storeId = url.searchParams.get("store") ?? undefined;
     if (storeId) await requireWorkspaceStore(user, storeId, { activeOnly: true });
 
-    const data = await buildPayoutsView(user, storeId);
+    const data = await buildPayoutsView(user, storeId, {
+      period: url.searchParams.get("period"),
+      from: url.searchParams.get("from"),
+      to: url.searchParams.get("to"),
+      dates: url.searchParams.get("dates"),
+    });
 
     return NextResponse.json(data, {
       headers: { "Cache-Control": "private, no-store" },

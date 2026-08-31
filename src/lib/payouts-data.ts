@@ -8,6 +8,15 @@ import { Payout } from "@/models/Payout";
 import { activeStoreQueryForUser } from "@/lib/store-scope";
 import { canAccessStore } from "@/lib/store-access";
 import type { CurrentUser } from "@/lib/auth";
+import type { PeriodInput } from "@/lib/period";
+import { periodToDateKeys } from "@/lib/period-date-keys";
+import {
+  dateKeyInTimezone,
+  dominantStoreTimezone,
+  normalizeStoreTimezone,
+  resolvePeriodForStore,
+} from "@/lib/store-timezone";
+import { resolvePayoutNetBase } from "@/lib/payout-shopify-fx";
 
 const statusLabel: Record<string, string> = {
   scheduled: "Agendado",
@@ -34,6 +43,7 @@ export type PayoutRow = {
   storeId: string;
   storeName: string;
   issuedAt: string | null;
+  issuedAtKey: string | null;
   status: string;
   statusLabel: string;
   statusCls: string;
@@ -44,6 +54,7 @@ export type PayoutRow = {
 export type PayoutsView = {
   currency: string;
   scopeName: string | null;
+  periodLabel: string;
   kpis: { label: string; value: string }[];
   payoutErrors: { storeId: string; name: string; error: string }[];
   payouts: PayoutRow[];
@@ -52,6 +63,7 @@ export type PayoutsView = {
 export async function buildPayoutsView(
   user: CurrentUser,
   storeId?: string,
+  periodInput: PeriodInput = {},
 ): Promise<PayoutsView> {
   await connectToDatabase();
 
@@ -66,12 +78,18 @@ export async function buildPayoutsView(
   }
 
   const stores = await Store.find(storeQuery)
-    .select("name paymentsBalance payoutsError")
+    .select("name currency paymentsBalance payoutsError ianaTimezone")
     .lean();
   const scopeName = storeId
     ? (stores.find((s) => String(s._id) === storeId)?.name ?? null)
     : null;
   const storeName = new Map(stores.map((s) => [String(s._id), s.name]));
+  const storeCurrencyById = new Map(
+    stores.map((s) => [String(s._id), (s.currency ?? currency).toUpperCase()]),
+  );
+  const storeTzById = new Map(
+    stores.map((s) => [String(s._id), normalizeStoreTimezone(s.ianaTimezone)]),
+  );
   const payoutErrors = stores
     .filter((s) => s.payoutsError)
     .map((s) => ({
@@ -80,47 +98,104 @@ export async function buildPayoutsView(
       error: s.payoutsError!,
     }));
 
+  const tz = storeId
+    ? normalizeStoreTimezone(stores[0]?.ianaTimezone)
+    : dominantStoreTimezone(stores);
+  const period = resolvePeriodForStore(periodInput, tz);
+  const periodKeys = periodToDateKeys(period);
+
   const payoutQuery: Record<string, unknown> = {
     workspaceId: new mongoose.Types.ObjectId(user.workspaceId),
+    issuedAt: { $gte: period.start, $lte: period.end },
   };
   if (storeId) payoutQuery.storeId = new mongoose.Types.ObjectId(storeId);
 
-  const payouts = await Payout.find(payoutQuery)
+  const payoutsRaw = await Payout.find(payoutQuery)
     .sort({ issuedAt: -1 })
-    .limit(100)
+    .limit(500)
     .lean();
 
+  const payouts = periodKeys.specificDates?.length
+    ? payoutsRaw.filter((p) => {
+        if (!p.issuedAt) return false;
+        const sid = String(p.storeId);
+        const storeTz = storeTzById.get(sid) ?? tz;
+        const key = dateKeyInTimezone(new Date(p.issuedAt), storeTz);
+        return periodKeys.specificDates!.includes(key);
+      })
+    : payoutsRaw;
+
   const saldoAtual = stores.reduce((sum, s) => sum + (s.paymentsBalance ?? 0), 0);
-  const aCaminho = payouts
-    .filter((p) => ["scheduled", "in_transit"].includes(norm(p.status)))
-    .reduce((sum, p) => sum + (p.net ?? 0), 0);
-  const since30 = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const paid30 = payouts.filter(
-    (p) =>
-      norm(p.status) === "paid" &&
-      p.issuedAt &&
-      new Date(p.issuedAt).getTime() >= since30,
-  );
-  const recebido30 = paid30.reduce((sum, p) => sum + (p.net ?? 0), 0);
-  const taxas30 = paid30.reduce((sum, p) => sum + (p.fee ?? 0), 0);
+
+  const payoutNetInBase = async (p: (typeof payouts)[number]) => {
+    const sid = String(p.storeId);
+    const storeTz = storeTzById.get(sid) ?? tz;
+    const storeCur = storeCurrencyById.get(sid) ?? currency;
+    const dateKey = p.issuedAt
+      ? dateKeyInTimezone(new Date(p.issuedAt), storeTz)
+      : dateKeyInTimezone(new Date(), storeTz);
+    return resolvePayoutNetBase(p, storeCur, currency, dateKey);
+  };
+
+  let aCaminho = 0;
+  for (const p of payouts.filter((row) =>
+    ["scheduled", "in_transit"].includes(norm(row.status)),
+  )) {
+    aCaminho += await payoutNetInBase(p);
+  }
+
+  const paidInPeriod = payouts.filter((p) => norm(p.status) === "paid");
+  let recebidoPeriodo = 0;
+  let taxasPeriodo = 0;
+  for (const p of paidInPeriod) {
+    recebidoPeriodo += await payoutNetInBase(p);
+    if (p.feeBase != null && Number.isFinite(p.feeBase)) {
+      taxasPeriodo += p.feeBase;
+    } else {
+      const sid = String(p.storeId);
+      const storeTz = storeTzById.get(sid) ?? tz;
+      const storeCur = storeCurrencyById.get(sid) ?? currency;
+      const dateKey = p.issuedAt
+        ? dateKeyInTimezone(new Date(p.issuedAt), storeTz)
+        : dateKeyInTimezone(new Date(), storeTz);
+      taxasPeriodo += await resolvePayoutNetBase(
+        { ...p, net: p.fee ?? 0 },
+        storeCur,
+        currency,
+        dateKey,
+      );
+    }
+  }
 
   const kpis = [
     { label: "Saldo atual (por pagar)", value: formatCurrency(saldoAtual, currency) },
-    { label: "A caminho", value: formatCurrency(aCaminho, currency) },
-    { label: "Recebido (30 dias)", value: formatCurrency(recebido30, currency) },
-    { label: "Taxas Shopify (30 dias)", value: formatCurrency(taxas30, currency) },
+    { label: "A caminho (período)", value: formatCurrency(aCaminho, currency) },
+    {
+      label: `Recebido (${period.label})`,
+      value: formatCurrency(recebidoPeriodo, currency),
+    },
+    {
+      label: `Taxas Shopify (${period.label})`,
+      value: formatCurrency(taxasPeriodo, currency),
+    },
   ];
 
   const rows: PayoutRow[] = payouts.map((p) => {
     const st = norm(p.status);
     const cur = p.currency ?? currency;
+    const sid = String(p.storeId);
+    const storeTz = storeTzById.get(sid) ?? tz;
+    const issuedAtKey = p.issuedAt
+      ? dateKeyInTimezone(new Date(p.issuedAt), storeTz)
+      : null;
     return {
       id: String(p._id),
-      storeId: String(p.storeId),
-      storeName: storeName.get(String(p.storeId)) ?? "—",
+      storeId: sid,
+      storeName: storeName.get(sid) ?? "—",
       issuedAt: p.issuedAt
         ? new Date(p.issuedAt).toLocaleDateString("pt-PT")
         : null,
+      issuedAtKey,
       status: p.status ?? "",
       statusLabel: statusLabel[st] ?? p.status ?? "—",
       statusCls: statusCls[st] ?? "",
@@ -132,6 +207,7 @@ export async function buildPayoutsView(
   return {
     currency,
     scopeName,
+    periodLabel: period.label,
     kpis,
     payoutErrors,
     payouts: rows,

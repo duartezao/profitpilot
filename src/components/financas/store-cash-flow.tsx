@@ -7,6 +7,7 @@ import {
   incomingDayLineReactKey,
   mergeIncomingDayLines,
 } from "@/lib/treasury-day-lines";
+import { dateKeyInPeriod, type PeriodDateKeys } from "@/lib/period-date-keys";
 import { ScopeLink } from "@/components/scope-link";
 import { CollapsibleSection } from "@/components/collapsible-section";
 
@@ -15,11 +16,13 @@ export function StoreCashFlowSection({
   settingsHref = "/definicoes",
   treasuryHref = "/tesouraria",
   embedded = false,
+  periodFilter,
 }: {
   cash: StoreTreasuryLine;
   settingsHref?: string;
   treasuryHref?: string;
   embedded?: boolean;
+  periodFilter?: PeriodDateKeys;
 }) {
   const entries = [
     { label: "Saldo inicial", value: cash.startingBalanceFmt, tone: "" },
@@ -77,6 +80,11 @@ export function StoreCashFlowSection({
         ]
       : []),
   ];
+
+  const receivedLines = mergeIncomingDayLines(cash.receivedByDay, cash.currency);
+  const receivedInPeriod = periodFilter
+    ? receivedLines.filter((line) => dateKeyInPeriod(line.date, periodFilter))
+    : receivedLines.slice(0, 8);
 
   return (
     <div className="space-y-4">
@@ -237,16 +245,22 @@ export function StoreCashFlowSection({
         </div>
       </CollapsibleSection>
 
-      {cash.receivedByDay.length > 0 && (
+      {receivedInPeriod.length > 0 && (
         <CollapsibleSection
-          title="Últimos payouts recebidos"
-          description={`${cash.receivedByDay.length} entradas recentes.`}
+          title={
+            periodFilter
+              ? `Payouts recebidos · ${periodFilter.label}`
+              : "Últimos payouts recebidos"
+          }
+          description={
+            periodFilter
+              ? `${receivedInPeriod.length} entradas no período seleccionado.`
+              : `${cash.receivedByDay.length} entradas recentes.`
+          }
           flush
         >
           <ul className="divide-y divide-border">
-            {mergeIncomingDayLines(cash.receivedByDay, cash.currency)
-              .slice(0, 8)
-              .map((line) => (
+            {receivedInPeriod.map((line) => (
               <li
                 key={incomingDayLineReactKey(line)}
                 className="flex items-center justify-between px-4 py-3 sm:px-5"
@@ -258,7 +272,7 @@ export function StoreCashFlowSection({
               </li>
             ))}
           </ul>
-          {cash.receivedByDay.length > 8 && (
+          {!periodFilter && cash.receivedByDay.length > 8 && (
             <p className="border-t border-border px-4 py-3 text-center text-xs text-muted-foreground sm:px-5">
               <Link href={treasuryHref} className="font-medium hover:underline">
                 Ver todos em Tesouraria

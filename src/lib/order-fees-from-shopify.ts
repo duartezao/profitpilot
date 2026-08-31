@@ -5,7 +5,7 @@ import {
   computeOrderFees,
   ensureFeeSchedule,
   resolveFeeConfigForDateKey,
-  shopifyCurrencyConversionPercent,
+  shopifyOrderConversionPercent,
   type FeeScheduleEntry,
 } from "@/lib/fee-schedule";
 import { convertToBaseCurrency } from "@/lib/fx";
@@ -306,10 +306,7 @@ export async function applyOrderFeesFromTransactions(
       orderDateKey,
       floorKey,
     );
-    const conversionPercent = shopifyCurrencyConversionPercent(
-      storeCurrency,
-      baseCurrency,
-    );
+    const conversionPercent = shopifyOrderConversionPercent(store);
     fees = computeOrderFees(totalPrice, feeConfig, conversionPercent);
     feesSource = "estimated";
   }
@@ -458,10 +455,7 @@ export async function applyOrderFeesFromShopify(
         orderDateKey,
         floorKey,
       );
-      const conversionPercent = shopifyCurrencyConversionPercent(
-        storeCurrency,
-        baseCurrency,
-      );
+      const conversionPercent = shopifyOrderConversionPercent(store);
       fees = computeOrderFees(totalPrice, feeConfig, conversionPercent);
       feesSource = "estimated";
       estimated++;
