@@ -1318,11 +1318,9 @@ export async function syncOrdersPage(
         currentTotalDiscountsSet { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
         refunds(first: 50) {
-          nodes {
-            id
-            createdAt
-            totalRefundedSet { shopMoney { amount } }
-          }
+          id
+          createdAt
+          totalRefundedSet { shopMoney { amount } }
         }
         totalShippingPriceSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
@@ -1353,13 +1351,11 @@ export async function syncOrdersPage(
     currentSubtotalPriceSet: Money;
     currentTotalDiscountsSet: Money;
     totalRefundedSet: Money;
-    refunds: {
-      nodes: Array<{
-        id: string;
-        createdAt: string;
-        totalRefundedSet: Money;
-      }>;
-    };
+    refunds: Array<{
+      id: string;
+      createdAt: string;
+      totalRefundedSet: Money;
+    }>;
     totalShippingPriceSet: Money;
     totalTaxSet: Money;
     shippingAddress?: { countryCodeV2?: string | null } | null;
@@ -1556,7 +1552,7 @@ export async function syncOrdersPage(
       );
 
       const refundLines = await buildRefundLines(
-        o.refunds?.nodes ?? [],
+        o.refunds ?? [],
         storeCurrency,
         baseCurrency,
         tz,

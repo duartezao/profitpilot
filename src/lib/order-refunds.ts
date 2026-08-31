@@ -36,23 +36,19 @@ const zeroAgg = (): DailyOrderAgg => ({
 export { grossRevenueSumBaseExpr };
 
 /**
- * Junta vendas (dia da encomenda) com reembolsos (dia de emissão).
- * `orderByDay.revenue` deve ser REV bruta; `refundByDay` = reembolsos emitidos nesse dia.
+ * Junta vendas (dia da encomenda, REV líquida) com reembolsos informativos (dia de emissão).
+ * A REV não é alterada — refunds já estão reflectidos no netRevenue das encomendas.
  */
 export function mergeDailyAggWithRefundIssuance(
   orderByDay: Map<string, DailyOrderAgg>,
   refundByDay: Map<string, number>,
 ): Map<string, DailyOrderAgg> {
-  const keys = new Set([...orderByDay.keys(), ...refundByDay.keys()]);
-  const out = new Map<string, DailyOrderAgg>();
-  for (const key of keys) {
-    const o = orderByDay.get(key) ?? zeroAgg();
-    const issued = refundByDay.get(key) ?? 0;
+  const out = new Map(orderByDay);
+  for (const [key, issued] of refundByDay) {
+    const o = out.get(key) ?? zeroAgg();
     out.set(key, {
       ...o,
-      revenue: o.revenue - issued,
       refunds: issued,
-      orders: o.orders ?? 0,
     });
   }
   return out;
