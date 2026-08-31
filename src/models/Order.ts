@@ -13,6 +13,17 @@ const LineItemSchema = new Schema(
   { _id: false },
 );
 
+/** Reembolso emitido na Shopify (data de emissão, não da encomenda). */
+const RefundLineSchema = new Schema(
+  {
+    shopifyId: { type: String, required: true },
+    refundedAt: { type: Date, required: true, index: true },
+    amount: { type: Number, default: 0 },
+    amountBase: { type: Number, default: null },
+  },
+  { _id: false },
+);
+
 const OrderSchema = new Schema(
   {
     workspaceId: {
@@ -80,6 +91,9 @@ const OrderSchema = new Schema(
 
     /** País de envio ISO2 (Shopify shippingAddress.countryCodeV2). */
     shippingCountryCode: { type: String, trim: true, default: null, index: true },
+
+    /** Reembolsos parciais/totais com data de emissão (Shopify refunds). */
+    refundLines: { type: [RefundLineSchema], default: [] },
 
     lineItems: { type: [LineItemSchema], default: [] },
   },

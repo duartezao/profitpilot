@@ -630,9 +630,9 @@ Principais dificuldades: 0
 |---|---|
 | DIA | Dia selecionado |
 | LOJA | URL público da loja (`displayUrl`, ex. `minhaloja.com`) |
-| REV | Vendas líquidas do dia (subtotal após descontos − reembolsos) — **só encomendas pagas** |
+| REV | Vendas líquidas do dia: vendas brutas (dia da encomenda) − reembolsos **emitidos nesse dia** — **só encomendas pagas** |
 | COGS | Custo dos produtos vendidos no dia (cost per item × unidades) |
-| REFUNDS | Reembolsos do dia (informativo — já reflectidos na REV) |
+| REFUNDS | Reembolsos emitidos nesse dia (`refund.createdAt` Shopify), não na data da encomenda — informativo (já reflectidos na REV) |
 | ADSPEND | Valor **só** quando registado em Anúncios (`manualAdSpend`); dias por preencher mostram `—` e **não** entram no lucro |
 | PROFIT | Net Profit = REV − COGS − envio − taxas − ad spend (quando registado); aviso se faltar COGS em produtos vendidos nesse dia |
 | SESSÕES | ShopifyQL (`read_reports`), filtradas pelos **países das sessões** (`analyticsSessionCountries`; vazio = mundo); com 2+ países a dashboard **soma**; o report **separa** ATC/CVR por país |
@@ -892,7 +892,8 @@ Funcionalidades:
 ## Refunds
 
 * **Total devolvido (€)** e **Refund Rate (%)** por loja, produto e período
-* Origem via webhook `refund/created` da plataforma
+* Origem via webhook `refund/created` da plataforma + sync incremental (`refunds` GraphQL → `Order.refundLines[]` com `refundedAt`)
+* **Dashboard / gráfico / KPIs diários:** reembolsos parciais e totais contam no **dia de emissão** do refund, não no dia da venda. Encomendas antigas sem `refundLines` mantêm fallback (reembolso na data da encomenda) até re-sync.
 * Distinguir reembolso parcial vs total
 * Impacto direto no Net Profit (subtrai ao revenue)
 

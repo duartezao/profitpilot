@@ -329,18 +329,27 @@ export function orderDateMatchInTimezone(
   period: Pick<ResolvedPeriod, "start" | "end" | "specificDates">,
   timeZone: string,
 ): Record<string, unknown> {
+  return zonedDateMatchInTimezone("orderDate", period, timeZone);
+}
+
+/** Match de instante num campo Date alinhado ao fuso da loja (ex. `refundLines.refundedAt`). */
+export function zonedDateMatchInTimezone(
+  field: string,
+  period: Pick<ResolvedPeriod, "start" | "end" | "specificDates">,
+  timeZone: string,
+): Record<string, unknown> {
   const tz = normalizeStoreTimezone(timeZone);
   if (period.specificDates?.length) {
     return {
       $or: period.specificDates.map((dateStr) => ({
-        orderDate: {
+        [field]: {
           $gte: zonedStartOfDay(dateStr, tz),
           $lte: zonedEndOfDay(dateStr, tz),
         },
       })),
     };
   }
-  return { orderDate: { $gte: period.start, $lte: period.end } };
+  return { [field]: { $gte: period.start, $lte: period.end } };
 }
 
 /** Chave YYYY-MM-DD da data de importação (dia civil no fuso da loja, se indicado). */

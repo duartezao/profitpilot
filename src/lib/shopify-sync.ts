@@ -63,6 +63,7 @@ import { invalidateWorkspaceMetricsCache } from "@/lib/metrics-summary-cache";
 import { Payout } from "@/models/Payout";
 import { BalanceTransaction } from "@/models/BalanceTransaction";
 import { buildOrderAmountsBase } from "@/lib/order-money";
+import { convertToBaseCurrency } from "@/lib/fx";
 import {
   assimilatesCogsOnSync,
   syncsShopifyProductCosts,
@@ -1056,6 +1057,13 @@ type OrderAmountsBaseSnapshot = {
   baseCurrency: string | null;
 };
 
+type OrderRefundLineSnapshot = {
+  shopifyId: string;
+  refundedAt: Date;
+  amount: number;
+  amountBase: number | null;
+};
+
 type OrderSetPayload = {
   name: string;
   orderDate: Date;
@@ -1072,6 +1080,7 @@ type OrderSetPayload = {
   refunded: number;
   cogs: number;
   lineItems: OrderLineSnapshot[];
+  refundLines: OrderRefundLineSnapshot[];
   amountsBase: OrderAmountsBaseSnapshot;
   shippingCountryCode: string | null;
 };
@@ -1127,6 +1136,29 @@ function amountsBaseEqual(
   );
 }
 
+function refundLinesEqual(
+  next: OrderRefundLineSnapshot[],
+  prev: Array<{
+    shopifyId?: string | null;
+    refundedAt?: Date;
+    amount?: number;
+    amountBase?: number | null;
+  }>,
+): boolean {
+  if (next.length !== prev.length) return false;
+  for (let i = 0; i < next.length; i++) {
+    const a = next[i];
+    const b = prev[i];
+    if (String(a.shopifyId) !== String(b.shopifyId ?? "")) return false;
+    if (new Date(a.refundedAt).getTime() !== new Date(b.refundedAt ?? 0).getTime()) {
+      return false;
+    }
+    if (!moneyEq(a.amount, b.amount ?? 0)) return false;
+    if (!moneyEq(a.amountBase ?? 0, b.amountBase ?? 0)) return false;
+  }
+  return true;
+}
+
 function orderSetMatchesExisting(
   existing: {
     name?: string | null;
@@ -1153,6 +1185,12 @@ function orderSetMatchesExisting(
     }>;
     amountsBase?: OrderAmountsBaseSnapshot | null;
     shippingCountryCode?: string | null;
+    refundLines?: Array<{
+      shopifyId?: string | null;
+      refundedAt?: Date;
+      amount?: number;
+      amountBase?: number | null;
+    }>;
   },
   payload: OrderSetPayload,
 ): boolean {
@@ -1191,6 +1229,9 @@ function orderSetMatchesExisting(
   if (!moneyEq(existing.refunded ?? 0, payload.refunded)) return false;
   if (!moneyEq(existing.cogs ?? 0, payload.cogs)) return false;
   if (!lineItemsEqual(payload.lineItems, existing.lineItems ?? [])) return false;
+  if (!refundLinesEqual(payload.refundLines, existing.refundLines ?? [])) {
+    return false;
+  }
   if (
     (existing.shippingCountryCode ?? null) !==
     (payload.shippingCountryCode ?? null)
@@ -1198,6 +1239,45 @@ function orderSetMatchesExisting(
     return false;
   }
   return amountsBaseEqual(payload.amountsBase, existing.amountsBase);
+}
+
+async function buildRefundLines(
+  nodes: Array<{
+    id: string;
+    createdAt: string;
+    totalRefundedSet: { shopMoney: { amount: string } } | null;
+  }>,
+  storeCurrency: string,
+  baseCurrency: string,
+  storeTimeZone: string,
+): Promise<OrderRefundLineSnapshot[]> {
+  const from = storeCurrency.toUpperCase();
+  const to = baseCurrency.toUpperCase();
+  const lines: OrderRefundLineSnapshot[] = [];
+
+  for (const node of nodes) {
+    const amount = num(node.totalRefundedSet?.shopMoney.amount);
+    if (amount <= 0) continue;
+    const refundedAt = new Date(node.createdAt);
+    let amountBase: number | null = null;
+    if (from === to) {
+      amountBase = Math.round(amount * 100) / 100;
+    } else {
+      const dateKey = dateKeyInTimezone(refundedAt, storeTimeZone);
+      const fx = await convertToBaseCurrency(1, from, to, dateKey);
+      amountBase = Math.round(amount * fx.fxRate * 100) / 100;
+    }
+    lines.push({
+      shopifyId: node.id,
+      refundedAt,
+      amount,
+      amountBase,
+    });
+  }
+
+  return lines.sort(
+    (a, b) => a.refundedAt.getTime() - b.refundedAt.getTime(),
+  );
 }
 
 /** Uma página de encomendas (50) — taxas aplicadas depois via balance transactions. */
@@ -1237,6 +1317,13 @@ export async function syncOrdersPage(
         currentSubtotalPriceSet { shopMoney { amount } }
         currentTotalDiscountsSet { shopMoney { amount } }
         totalRefundedSet { shopMoney { amount } }
+        refunds(first: 50) {
+          nodes {
+            id
+            createdAt
+            totalRefundedSet { shopMoney { amount } }
+          }
+        }
         totalShippingPriceSet { shopMoney { amount } }
         totalTaxSet { shopMoney { amount } }
         shippingAddress { countryCodeV2 }
@@ -1266,6 +1353,13 @@ export async function syncOrdersPage(
     currentSubtotalPriceSet: Money;
     currentTotalDiscountsSet: Money;
     totalRefundedSet: Money;
+    refunds: {
+      nodes: Array<{
+        id: string;
+        createdAt: string;
+        totalRefundedSet: Money;
+      }>;
+    };
     totalShippingPriceSet: Money;
     totalTaxSet: Money;
     shippingAddress?: { countryCodeV2?: string | null } | null;
@@ -1301,7 +1395,7 @@ export async function syncOrdersPage(
       shopifyId: { $in: ids },
     })
       .select(
-        "shopifyId name orderDate currency financialStatus fulfillmentStatus cancelledAt totalPrice subtotal netRevenue discounts shipping tax refunded cogs fees lineItems amountsBase manualCogs shippingCountryCode",
+        "shopifyId name orderDate currency financialStatus fulfillmentStatus cancelledAt totalPrice subtotal netRevenue discounts shipping tax refunded cogs fees lineItems amountsBase manualCogs shippingCountryCode refundLines",
       )
       .lean<Array<{
         shopifyId: string;
@@ -1328,6 +1422,12 @@ export async function syncOrdersPage(
         amountsBase?: OrderAmountsBaseSnapshot | null;
         manualCogs?: number | null;
         shippingCountryCode?: string | null;
+        refundLines?: Array<{
+          shopifyId?: string | null;
+          refundedAt?: Date;
+          amount?: number;
+          amountBase?: number | null;
+        }>;
       }>>();
     const existingByShopifyId = new Map<
       string,
@@ -1455,6 +1555,13 @@ export async function syncOrdersPage(
         o.shippingAddress?.countryCodeV2,
       );
 
+      const refundLines = await buildRefundLines(
+        o.refunds?.nodes ?? [],
+        storeCurrency,
+        baseCurrency,
+        tz,
+      );
+
       const currency =
         o.currentTotalPriceSet?.shopMoney.currencyCode ?? store.currency;
       const payload: OrderSetPayload = {
@@ -1473,6 +1580,7 @@ export async function syncOrdersPage(
         refunded,
         cogs,
         lineItems,
+        refundLines,
         amountsBase,
         shippingCountryCode,
       };
@@ -1511,6 +1619,7 @@ export async function syncOrdersPage(
               refunded: payload.refunded,
               cogs: payload.cogs,
               lineItems: payload.lineItems,
+              refundLines: payload.refundLines,
               amountsBase: payload.amountsBase,
               shippingCountryCode: payload.shippingCountryCode,
               ...(revertCogs ? { manualCogs: null } : {}),

@@ -8,15 +8,21 @@ import { Order } from "@/models/Order";
 import { Payout } from "@/models/Payout";
 import { netRevenueSumExpr, orderNetRevenue } from "@/lib/order-revenue";
 import {
-  netRevenueSumBaseExpr,
+  grossRevenueSumBaseExpr,
   shippingSumBaseExpr,
   feesSumBaseExpr,
-  refundsSumBaseExpr,
   cogsSumBaseExpr,
   orderModeCogsSumExpr,
   cogsSumExprForMode,
   orderCogsBase,
 } from "@/lib/order-money";
+import {
+  aggregateDailyRefundsIssued,
+  aggregateRefundsIssuedByStore,
+  mergeDailyAggWithRefundIssuance,
+  sumRefundsIssuedInPeriod,
+  type DailyOrderAgg,
+} from "@/lib/order-refunds";
 import {
   mergePaidOrderFilter,
 } from "@/lib/order-financial-status";
@@ -413,22 +419,42 @@ async function aggregateStoreAggs(
     {
       $group: {
         _id: "$storeId",
-        revenue: netRevenueSumBaseExpr,
+        revenue: grossRevenueSumBaseExpr,
         cogs: { $sum: 0 },
         shipping: shippingSumBaseExpr,
         fees: feesSumBaseExpr,
-        refunds: refundsSumBaseExpr,
+        refunds: { $sum: 0 },
         orders: { $sum: 1 },
       },
     },
   ]);
 
+  const refundsByStore = await aggregateRefundsIssuedByStore(
+    wsId,
+    storeOids,
+    slice,
+    sharedTimeZone,
+  );
+
   for (const r of baseRows) {
     const { _id, ...agg } = r;
-    result.set(String(_id), agg);
+    const sid = String(_id);
+    const issued = refundsByStore.get(sid) ?? 0;
+    result.set(sid, {
+      ...agg,
+      revenue: agg.revenue - issued,
+      refunds: issued,
+    });
   }
   for (const s of stores) {
-    if (!result.has(String(s._id))) result.set(String(s._id), emptyStoreAgg());
+    if (!result.has(String(s._id))) {
+      const issued = refundsByStore.get(String(s._id)) ?? 0;
+      result.set(String(s._id), {
+        ...emptyStoreAgg(),
+        revenue: -issued,
+        refunds: issued,
+      });
+    }
   }
 
   const shopifyVariantOids = stores
@@ -1136,18 +1162,18 @@ async function aggregateDailyOrders(
           : {
               $dateToString: { format: "%Y-%m-%d", date: "$orderDate" },
             },
-        revenue: netRevenueSumBaseExpr,
+        revenue: grossRevenueSumBaseExpr,
         cogs: cogsExpr,
         shipping: shippingSumBaseExpr,
         fees: feesSumBaseExpr,
-        refunds: refundsSumBaseExpr,
+        refunds: { $sum: 0 },
         orders: { $sum: 1 },
       },
     },
     { $sort: { _id: 1 } },
   ]);
 
-  const result = new Map(
+  const grossByDay = new Map(
     rows.map((r) => [
       r._id,
       {
@@ -1155,11 +1181,19 @@ async function aggregateDailyOrders(
         cogs: r.cogs,
         shipping: r.shipping,
         fees: r.fees,
-        refunds: r.refunds,
+        refunds: 0,
         orders: r.orders,
       },
     ]),
   );
+
+  const refundByDay = await aggregateDailyRefundsIssued(
+    wsId,
+    storeOids,
+    slice,
+    storeTimeZone,
+  );
+  const result = mergeDailyAggWithRefundIssuance(grossByDay, refundByDay);
 
   if (cogsMode === "day" && storeOids.length === 1) {
     const dayKeys = dayKeysInSlice(slice, storeTimeZone);
@@ -1257,23 +1291,40 @@ async function aggregateDailyOrdersByStore(
         {
           $group: {
             _id: dateExpr,
-            revenue: netRevenueSumBaseExpr,
+            revenue: grossRevenueSumBaseExpr,
             cogs: cogsExpr,
             shipping: shippingSumBaseExpr,
             fees: feesSumBaseExpr,
-            refunds: refundsSumBaseExpr,
+            refunds: { $sum: 0 },
           },
         },
       ]);
 
+      const grossByDay = new Map<
+        string,
+        Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds"> &
+          Pick<DailyOrderAgg, "orders">
+      >();
       for (const r of rows) {
-        map.set(storeDayKey(r._id, sid), {
+        grossByDay.set(r._id, {
           revenue: r.revenue,
           cogs: r.cogs,
           shipping: r.shipping,
           fees: r.fees,
-          refunds: r.refunds,
+          refunds: 0,
+          orders: 0,
         });
+      }
+
+      const refundByDay = await aggregateDailyRefundsIssued(
+        wsId,
+        [store._id],
+        slice,
+        tz,
+      );
+      const merged = mergeDailyAggWithRefundIssuance(grossByDay, refundByDay);
+      for (const [dateKey, row] of merged) {
+        map.set(storeDayKey(dateKey, sid), row);
       }
 
       if (mode === "day") {
@@ -2579,11 +2630,11 @@ export async function buildWorkspaceSummary(
       {
         $group: {
           _id: null,
-          revenue: netRevenueSumBaseExpr,
+          revenue: grossRevenueSumBaseExpr,
           cogs: cogsExpr,
           shipping: shippingSumBaseExpr,
           fees: feesSumBaseExpr,
-          refunds: refundsSumBaseExpr,
+          refunds: { $sum: 0 },
           orders: { $sum: 1 },
         },
       },
@@ -2596,6 +2647,15 @@ export async function buildWorkspaceSummary(
       refunds: 0,
       orders: 0,
     };
+
+    const issued = await sumRefundsIssuedInPeriod(
+      wsId,
+      storeOid ? [storeOid] : stores.map((s) => s._id),
+      slice,
+      storeTz,
+    );
+    agg.revenue -= issued;
+    agg.refunds = issued;
 
     if (mode === "day" && storeOid) {
       if (hybridDay && fromKey) {
