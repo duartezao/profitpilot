@@ -24,6 +24,16 @@ export const netRevenueSumBaseExpr = {
   $sum: { $ifNull: ["$amountsBase.netRevenue", "$netRevenue"] },
 } as const;
 
+/** Vendas brutas (REV + reembolsos) — dia da venda antes de deduzir reembolsos no dia de emissão. */
+export const grossRevenueSumBaseExpr = {
+  $sum: {
+    $add: [
+      { $ifNull: ["$amountsBase.netRevenue", { $ifNull: ["$netRevenue", 0] }] },
+      { $ifNull: ["$amountsBase.refunded", { $ifNull: ["$refunded", 0] }] },
+    ],
+  },
+} as const;
+
 export const shippingSumBaseExpr = {
   $sum: { $ifNull: ["$amountsBase.shipping", "$shipping"] },
 } as const;

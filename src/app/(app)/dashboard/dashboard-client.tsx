@@ -133,7 +133,8 @@ export function DashboardClient() {
     refetchInterval: LIVE_DATA_POLL_MS,
   });
 
-  const chartLoading = isFetching && !isPending;
+  /** Skeleton só no 1.º carregamento — refetch em background mantém o gráfico (preserva Lucro/Faturação + Total). */
+  const showChartSkeleton = isPending && !data;
 
   const portfolioData =
     data && "portfolioMode" in data ? (data as PortfolioSummary) : null;
@@ -230,7 +231,7 @@ export function DashboardClient() {
                   </p>
                 )}
               </div>
-              {chartLoading ? (
+              {showChartSkeleton ? (
                 <ProfitChartSkeleton />
               ) : (
                 <ProfitChart data={portfolioData?.profitChart ?? []} />
@@ -358,7 +359,7 @@ export function DashboardClient() {
                   </p>
                 )}
               </div>
-              {chartLoading ? (
+              {showChartSkeleton ? (
                 <ProfitChartSkeleton multiStore />
               ) : (
                 <ProfitChart
