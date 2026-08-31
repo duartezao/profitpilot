@@ -1518,7 +1518,7 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 ## expenses
 
-> Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário**: **pontual** só no dia indicado; **mensal** uma vez por mês no dia de início (`startDateKey`); **anual** na data de aniversário. Despesas de **workspace** contam no consolidado (não se repartem por loja); despesas com `storeId` só à loja indicada.
+> Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). **Adicionar, editar** (ícone lápis, formulário inline) e **apagar** despesas. Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário**: **pontual** só no dia indicado; **mensal** uma vez por mês no dia de início (`startDateKey`); **anual** na data de aniversário. Despesas de **workspace** contam no consolidado (não se repartem por loja); despesas com `storeId` só à loja indicada.
 
 * `_id`
 * `workspaceId` (gasto da conta) ou `storeId` (gasto de uma loja)
