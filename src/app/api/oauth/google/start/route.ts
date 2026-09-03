@@ -38,10 +38,17 @@ export async function GET(request: Request) {
   const redirectUri = resolveGoogleOAuthRedirectUri(request);
   const { searchParams } = new URL(request.url);
   const storeId = parseOAuthStoreId(searchParams.get("store"));
-  const returnTo = searchParams.get("returnTo")?.trim() ?? "";
+  const returnToParam = searchParams.get("returnTo")?.trim() ?? "";
+  const returnTo =
+    returnToParam === "definicoes" || returnToParam === "anuncios"
+      ? returnToParam
+      : storeId
+        ? "anuncios"
+        : "definicoes";
   const toDefinicoes = returnTo === "definicoes";
+  const toAnuncios = returnTo === "anuncios";
 
-  if (!storeId && !toDefinicoes) {
+  if (toAnuncios && !storeId) {
     return NextResponse.redirect(
       definicoesDest(request, { oauth_error: "store_required" }),
     );
@@ -81,6 +88,8 @@ export async function GET(request: Request) {
   }
   if (toDefinicoes) {
     jar.set(adOAuthReturnCookie("google"), "definicoes", oauthCookieOptions(600));
+  } else if (toAnuncios) {
+    jar.set(adOAuthReturnCookie("google"), "anuncios", oauthCookieOptions(600));
   } else {
     jar.delete(adOAuthReturnCookie("google"));
   }

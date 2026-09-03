@@ -154,7 +154,7 @@ export async function GET(request: Request) {
   const expectedState = jar.get(adOAuthStateCookie("google"))?.value;
   const storeId = parseOAuthStoreId(jar.get(adOAuthStoreCookie("google"))?.value);
   const returnTo = jar.get(adOAuthReturnCookie("google"))?.value ?? "";
-  const toDefinicoes = returnTo === "definicoes" || !storeId;
+  const toDefinicoes = returnTo === "definicoes";
 
   jar.delete(adOAuthStateCookie("google"));
   jar.delete(adOAuthStoreCookie("google"));
