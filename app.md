@@ -423,8 +423,8 @@ Net Profit =
 1. Criar um projeto no **Google Cloud Console** e gerar **Client ID + Client Secret** (OAuth 2.0), scopes `adwords` + `userinfo.email` + `openid` (a app pede os três no login).
 2. Obter um **developer token** no **Centro da API** de qualquer conta Google Ads a que tenhas acesso — **não é obrigatório MCC**; uma conta de ads normal chega (modo teste para começar). URL: `ads.google.com/aw/apicenter`.
 3. Redirect URI: `GOOGLE_ADS_OAUTH_REDIRECT_URI` → `/api/oauth/google/callback`.
-4. **Definições → Google Ads** — OAuth **uma vez por Gmail** (workspace).
-5. Em cada loja (`/anuncios` → tab **Contas API**) — escolher Gmail + **Customer ID** para sync opcional. **Gasto manual** (tab homónima) funciona sempre sem API.
+4. **Definições → Integrações → Google Ads** — OAuth **por workspace** (podes repetir o mesmo Gmail noutros workspaces).
+5. Em cada loja (`/anuncios` → tab **Contas API**) — botão **Autorizar Gmail** ou escolher Gmail + **Customer ID** para sync opcional. **Gasto manual** (tab homónima) funciona sempre sem API.
 6. O gasto vem em **USD** (moeda da conta) e converte para a moeda base do workspace. Query **GAQL** ao `GoogleAdsService.search` (`metrics.cost_micros` ÷ 1.000.000).
 7. **Fees na conta API** — fee fixa extra + % agência; aplicam-se em cada sync automático.
 8. **Trocar conta** — ao ligar outra conta Google na mesma loja, a anterior é desligada; o **histórico de gasto** (`manualAdSpend`) mantém-se.

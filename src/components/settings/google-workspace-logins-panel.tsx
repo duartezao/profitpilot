@@ -16,9 +16,11 @@ const inputCls =
 export function GoogleWorkspaceLoginsPanel({
   logins,
   canEdit,
+  workspaceName,
 }: {
   logins: { id: string; loginEmail: string }[];
   canEdit: boolean;
+  workspaceName?: string;
 }) {
   const searchParams = useSearchParams();
   const oauthOk = searchParams.get("google_login") === "ok";
@@ -54,13 +56,20 @@ export function GoogleWorkspaceLoginsPanel({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Autoriza cada Gmail <strong>uma vez</strong> no workspace. Nas lojas só
-        escolhes o Gmail + Customer ID — sem repetir login Google em cada loja.
+        Autoriza cada Gmail <strong>por workspace</strong>
+        {workspaceName ? (
+          <>
+            {" "}
+            (<span data-sensitive>{workspaceName}</span>)
+          </>
+        ) : null}
+        . Podes usar o <strong>mesmo Gmail</strong> em vários workspaces — autoriza
+        uma vez em cada um. Nas lojas só escolhes Gmail + Customer ID.
       </p>
 
       {oauthOk && logins.length > 0 && (
         <p className="rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-sm text-positive">
-          Gmail guardado no workspace.
+          Gmail guardado neste workspace.
         </p>
       )}
       {oauthOk && logins.length === 0 && (

@@ -51,6 +51,18 @@ export function hrefWithScopeAndStore(
   return hrefWithScope(path, params);
 }
 
+/** OAuth Google Ads — `returnTo=definicoes|anuncios` e opcionalmente `store`. */
+export function hrefGoogleOAuthStart(
+  params: URLSearchParams,
+  opts?: { storeId?: string; returnTo?: "definicoes" | "anuncios" },
+): string {
+  const q = new URLSearchParams(scopeQueryFromSearchParams(params));
+  const returnTo = opts?.returnTo ?? (opts?.storeId ? "anuncios" : "definicoes");
+  q.set("returnTo", returnTo);
+  if (opts?.storeId) q.set("store", opts.storeId);
+  return `/api/oauth/google/start?${q.toString()}`;
+}
+
 /** OAuth start — garante `store` no query string sem URLs inválidas. */
 export function hrefOAuthStart(
   apiPath: "/api/oauth/google/start" | "/api/oauth/meta/start",

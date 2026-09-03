@@ -483,13 +483,15 @@ export default async function DefinicoesPage() {
               <section id="google-ads">
                 <h3 className="text-sm font-semibold">Google Ads</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Autoriza cada Gmail uma vez — nas lojas só escolhes Gmail + Customer ID.
+                  Autoriza o Gmail por workspace — o mesmo Gmail pode servir vários
+                  workspaces; nas lojas escolhes Gmail + Customer ID.
                 </p>
                 <div className="mt-4">
                   <Suspense fallback={<div className="h-24 animate-pulse rounded-lg bg-muted" />}>
                     <GoogleWorkspaceLoginsPanel
                       logins={googleLogins}
                       canEdit={canEditAds}
+                      workspaceName={workspace?.name ?? user?.workspaceName}
                     />
                   </Suspense>
                 </div>

@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   addAdAccountAction,
   discoverGoogleCredentialAction,
@@ -9,6 +10,7 @@ import {
 } from "@/app/(app)/anuncios/ad-account-actions";
 import { DeleteAdAccountButton } from "@/components/anuncios/delete-ad-account-button";
 import type { AdAccountRow } from "@/lib/ad-accounts";
+import { hrefGoogleOAuthStart } from "@/lib/scope-query";
 import { useActionOkOnce } from "@/lib/use-action-ok-once";
 
 const inputCls =
@@ -40,6 +42,13 @@ export function GoogleAdsStoreLink({
   onChanged?: () => void;
   embedded?: boolean;
 }) {
+  const searchParams = useSearchParams();
+  const oauthOk = searchParams.get("google_login") === "ok";
+  const oauthErr = searchParams.get("oauth_error");
+  const googleOAuthStart = hrefGoogleOAuthStart(searchParams, {
+    storeId,
+    returnTo: "anuncios",
+  });
   const [credentialId, setCredentialId] = useState(
     workspaceGoogleLogins[0]?.id ?? "",
   );
@@ -55,6 +64,12 @@ export function GoogleAdsStoreLink({
   );
 
   useActionOkOnce(state.ok, onChanged);
+
+  useEffect(() => {
+    if (searchParams.get("google_login") === "ok") {
+      onChanged?.();
+    }
+  }, [searchParams, onChanged]);
 
   const loginsSignature = useMemo(
     () => workspaceGoogleLogins.map((l) => l.id).join(","),
@@ -168,16 +183,40 @@ export function GoogleAdsStoreLink({
         </p>
       )}
 
-      {workspaceGoogleLogins.length === 0 ? (
-        <p className="mt-3 text-sm">
-          <Link
-            href="/definicoes#google-ads"
-            className="font-medium text-accent underline-offset-2 hover:underline"
-          >
-            Definições → Google Ads
-          </Link>{" "}
-          — autoriza o Gmail uma vez. Depois volta aqui para escolher a conta.
+      {oauthOk && (
+        <p className="mt-3 rounded-lg border border-positive/30 bg-positive/10 px-3 py-2 text-sm text-positive">
+          Gmail autorizado neste workspace.
         </p>
+      )}
+      {oauthErr && (
+        <p className="mt-3 rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
+          OAuth falhou: {oauthErr}
+        </p>
+      )}
+
+      {workspaceGoogleLogins.length === 0 ? (
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Autoriza o Gmail neste workspace — podes usar o mesmo Gmail noutros
+            workspaces; cada um guarda o login à parte.
+          </p>
+          <Link
+            href={googleOAuthStart}
+            className="inline-flex rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
+          >
+            Autorizar Gmail (Google Ads)
+          </Link>
+          <p className="text-xs text-muted-foreground">
+            Também em{" "}
+            <Link
+              href="/definicoes#google-ads"
+              className="font-medium text-accent underline-offset-2 hover:underline"
+            >
+              Definições → Integrações
+            </Link>
+            .
+          </p>
+        </div>
       ) : (
         <div className="mt-4 space-y-3">
           {!googleAdsApiReady && (
@@ -228,6 +267,13 @@ export function GoogleAdsStoreLink({
               </div>
             )}
           </div>
+
+          <Link
+            href={googleOAuthStart}
+            className="inline-flex text-xs font-medium text-accent underline-offset-2 hover:underline"
+          >
+            Autorizar outro Gmail neste workspace
+          </Link>
 
           {discoverError && (
             <p className="text-sm text-negative">{discoverError}</p>
