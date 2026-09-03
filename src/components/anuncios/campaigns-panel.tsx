@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { RefreshCw } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import { CollapsibleSection } from "@/components/collapsible-section";
@@ -199,6 +199,26 @@ export function CampaignsPanel({
     staleTime: LIVE_DATA_POLL_MS - 10_000,
     refetchInterval: includesToday ? LIVE_DATA_POLL_MS : false,
   });
+
+  // Sync automático quando a página carrega (se período inclui hoje e há contas)
+  const didAutoSync = useRef(false);
+  useEffect(() => {
+    if (!hasLinkedAccounts || !includesToday || didAutoSync.current || syncing) {
+      return;
+    }
+    didAutoSync.current = true;
+    startSync(async () => {
+      setSyncError(null);
+      const res = await syncAdAccountsNowAction(storeId);
+      if (res.error) {
+        // Ignorar erros silenciosamente no auto-sync (ex: throttle)
+        console.info("[auto-sync] ads:", res.error);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ["ad-spend-view"] });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["ad-campaigns", storeId] });
+    });
+  }, [hasLinkedAccounts, includesToday, storeId, queryClient, syncing]);
 
   function runSync() {
     startSync(async () => {
