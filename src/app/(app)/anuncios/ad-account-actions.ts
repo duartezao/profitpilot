@@ -469,18 +469,84 @@ export async function deleteWorkspaceGoogleLoginAction(
   return { ok: true };
 }
 
+/**
+ * Sync rápido: só hoje + ontem (para o botão "Actualizar" e auto-sync).
+ * Muito mais rápido que o backfill completo (2 dias vs 45).
+ */
 export async function syncAdAccountsNowAction(
   storeId: string,
+  options?: { fullBackfill?: boolean },
 ): Promise<AdAccountActionState> {
   const user = await getCurrentUser();
   if (!user?.workspaceId) return { error: "Sessão inválida." };
   const store = await findStoreForUser(user, storeId, "_id");
   if (!store) return { error: "Loja não encontrada ou sem acesso." };
   try {
-    const { syncMissingAdMetricsForStore } = await import(
-      "@/lib/ad-metrics-backfill"
-    );
-    await syncMissingAdMetricsForStore(storeId, { force: true, maxDays: 45 });
+    if (options?.fullBackfill) {
+      // Backfill completo (45 dias) — só para cron ou pedido explícito
+      const { syncMissingAdMetricsForStore } = await import(
+        "@/lib/ad-metrics-backfill"
+      );
+      await syncMissingAdMetricsForStore(storeId, { force: true, maxDays: 45 });
+    } else {
+      // Sync rápido: só hoje (+ ontem se ainda não fechado)
+      const { syncAdAccountsSpendForStore } = await import("@/lib/ad-api-sync");
+      const { yesterdayDateKey, isApiSpendDayClosed } = await import(
+        "@/lib/ad-spend-complete"
+      );
+      const { dateKeyInTimezone, normalizeStoreTimezone } = await import(
+        "@/lib/store-timezone"
+      );
+      const { Store } = await import("@/models/Store");
+      const { ManualAdSpend } = await import("@/models/ManualAdSpend");
+      
+      const storeDoc = await Store.findById(storeId).select("ianaTimezone").lean();
+      const tz = normalizeStoreTimezone(storeDoc?.ianaTimezone);
+      const today = dateKeyInTimezone(new Date(), tz);
+      const yesterday = yesterdayDateKey(today);
+      
+      // Verificar se ontem já está fechado (sincronizado depois da meia-noite)
+      const yesterdayDoc = await ManualAdSpend.findOne({
+        storeId: store._id,
+        dateKey: yesterday,
+      })
+        .select("dateKey source amount updatedAt")
+        .lean();
+      
+      const yesterdayClosed = isApiSpendDayClosed(
+        yesterdayDoc
+          ? {
+              dateKey: yesterday,
+              source: yesterdayDoc.source as string | undefined,
+              amount: yesterdayDoc.amount,
+              updatedAt: yesterdayDoc.updatedAt,
+            }
+          : null,
+        today,
+        tz,
+      );
+      
+      // Sync hoje (sempre) + ontem (só se ainda não fechado)
+      const promises: Promise<unknown>[] = [
+        syncAdAccountsSpendForStore(storeId, {
+          dateKey: today,
+          campaignDateKeys: [today],
+        }),
+      ];
+      
+      if (!yesterdayClosed) {
+        promises.push(
+          syncAdAccountsSpendForStore(storeId, {
+            dateKey: yesterday,
+            campaignDateKeys: [yesterday],
+            forceOverwrite: Boolean(yesterdayDoc),
+            skipDailyNote: true,
+          }),
+        );
+      }
+      
+      await Promise.all(promises);
+    }
     revalidatePath("/anuncios");
     revalidatePath("/definicoes");
     return { ok: true };

@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, ChevronDown, ChevronUp, Copy, Link2, Target } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import type { CollectionRoasReport, CollectionRoasRow } from "@/lib/collection-roas";
 import { periodQueryFromSearchParams } from "@/lib/period";
 import { cn } from "@/lib/utils";
+import { syncAdAccountsNowAction } from "@/app/(app)/anuncios/ad-account-actions";
 
 type RevenueFilter = "all" | "with_rev" | "no_sales";
 
@@ -234,17 +235,45 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const periodQs = periodQueryFromSearchParams(searchParams);
   const activePreset = searchParams.get("period");
   const hasCustomRange =
     Boolean(searchParams.get("from") && searchParams.get("to")) ||
     Boolean(searchParams.get("dates"));
   const [revenueFilter, setRevenueFilter] = useState<RevenueFilter>("all");
+  const [autoSyncing, setAutoSyncing] = useState(false);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["collection-roas", storeId, periodQs],
     queryFn: () => fetchCollectionRoas(storeId, searchParams, false),
   });
+
+  // Sync automático: 1) sync ads da API, 2) refresh landing URLs
+  const didAutoSync = useRef(false);
+  useEffect(() => {
+    if (didAutoSync.current || autoSyncing) return;
+    didAutoSync.current = true;
+    setAutoSyncing(true);
+
+    (async () => {
+      try {
+        // 1) Sync campanhas da API (inclui spend de hoje)
+        const syncRes = await syncAdAccountsNowAction(storeId);
+        if (!syncRes.error) {
+          await queryClient.invalidateQueries({ queryKey: ["ad-spend-view"] });
+          await queryClient.invalidateQueries({ queryKey: ["ad-campaigns"] });
+        }
+        // 2) Refresh landing URLs das campanhas
+        await fetchCollectionRoas(storeId, searchParams, true);
+        await refetch();
+      } catch {
+        // Ignorar erros silenciosamente no auto-sync
+      } finally {
+        setAutoSyncing(false);
+      }
+    })();
+  }, [storeId, searchParams, refetch, queryClient, autoSyncing]);
 
   const filterCounts = useMemo(() => {
     const rows = data?.collections ?? [];
@@ -325,10 +354,10 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
           <button
             type="button"
             onClick={() => void refreshUrls()}
-            disabled={isFetching}
+            disabled={isFetching || autoSyncing}
             className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
           >
-            {isFetching ? "A actualizar…" : "Actualizar URLs"}
+            {autoSyncing ? "A sincronizar…" : isFetching ? "A actualizar…" : "Actualizar URLs"}
           </button>
         </div>
       </div>
