@@ -5,7 +5,7 @@ import { AdCampaignDay } from "@/models/AdCampaignDay";
 import { AdCampaignTarget } from "@/models/AdCampaignTarget";
 import { Store } from "@/models/Store";
 import { Workspace } from "@/models/Workspace";
-import { buildCollectionMembershipRevenue } from "@/lib/collection-sales";
+import { buildCollectionMembershipRevenue, buildProductRevenue } from "@/lib/collection-sales";
 import { AD_PLATFORM_LABELS, type AdPlatform } from "@/lib/ad-spend-platforms";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -22,7 +22,10 @@ import {
 } from "@/lib/store-timezone";
 import { NON_ARCHIVED_STORE_FILTER } from "@/lib/store-scope";
 import { syncAdCampaignLandingsForStore } from "@/lib/ad-campaign-landing-sync";
-import { extractCollectionHandlesFromUrls } from "@/lib/collection-url-match";
+import {
+  extractCollectionHandlesFromUrls,
+  extractProductHandlesFromUrls,
+} from "@/lib/collection-url-match";
 import { buildCollectionBriefingMessage, joinStoreBriefingMessages } from "@/lib/collection-briefing";
 import { getStoreDisplayUrl } from "@/lib/store-display";
 import { loadSyncAdAccountsForStore } from "@/lib/ad-accounts";
@@ -90,6 +93,30 @@ export type CollectionRoasRow = {
   briefingText: string;
 };
 
+/** ROAS por produto (campanhas com URL /products/...). */
+export type ProductRoasRow = {
+  productHandle: string;
+  productTitle: string;
+  units: number;
+  revenue: number;
+  revenueFmt: string;
+  adSpend: number;
+  adSpendFmt: string;
+  realRoas: number | null;
+  realRoasFmt: string;
+  impressions: number;
+  clicks: number;
+  cpc: number | null;
+  cpcFmt: string;
+  cpm: number | null;
+  cpmFmt: string;
+  ctr: number | null;
+  ctrFmt: string;
+  campaigns: CollectionRoasCampaign[];
+  activeDays: number;
+  activeDaysLabel: string;
+};
+
 export type CollectionRoasReport = {
   storeName: string;
   storeDomain: string;
@@ -100,6 +127,8 @@ export type CollectionRoasReport = {
   periodKey: string;
   currency: string;
   collections: CollectionRoasRow[];
+  /** ROAS por produto (campanhas com URL /products/...). */
+  products: ProductRoasRow[];
   /** Todos os briefings da loja juntos (um bloco para copiar). */
   storeBriefingText: string;
   unmatchedCampaigns: CollectionRoasCampaign[];
@@ -207,6 +236,7 @@ export async function buildCollectionRoasReport(
     periodKey: "",
     currency: "EUR",
     collections: [],
+    products: [],
     storeBriefingText: "",
     unmatchedCampaigns: [],
     targetsSynced: 0,
@@ -360,6 +390,7 @@ export async function buildCollectionRoasReport(
     "activeDays" | "activeDaysLabel"
   > & { key: string };
   const campaignsByHandle = new Map<string, PendingCampaign[]>();
+  const campaignsByProductHandle = new Map<string, PendingCampaign[]>();
   const matchedCampaignKeys = new Set<string>();
   const allRelevantKeys = new Set<string>();
 
@@ -397,15 +428,30 @@ export async function buildCollectionRoasReport(
     const collectionHandles = new Set(
       extractCollectionHandlesFromUrls(t.landingUrls ?? []),
     );
+    const productHandles = new Set(
+      extractProductHandlesFromUrls(t.landingUrls ?? []),
+    );
 
-    if (!collectionHandles.size) continue;
+    // Processar coleções
+    if (collectionHandles.size) {
+      matchedCampaignKeys.add(key);
+      allRelevantKeys.add(key);
+      for (const h of collectionHandles) {
+        const list = campaignsByHandle.get(h) ?? [];
+        list.push(campaign);
+        campaignsByHandle.set(h, list);
+      }
+    }
 
-    matchedCampaignKeys.add(key);
-    allRelevantKeys.add(key);
-    for (const h of collectionHandles) {
-      const list = campaignsByHandle.get(h) ?? [];
-      list.push(campaign);
-      campaignsByHandle.set(h, list);
+    // Processar produtos
+    if (productHandles.size) {
+      matchedCampaignKeys.add(key);
+      allRelevantKeys.add(key);
+      for (const h of productHandles) {
+        const list = campaignsByProductHandle.get(h) ?? [];
+        list.push(campaign);
+        campaignsByProductHandle.set(h, list);
+      }
     }
   }
 
@@ -609,6 +655,83 @@ export async function buildCollectionRoasReport(
   }
   unmatchedCampaigns.sort((a, b) => b.spend - a.spend);
 
+  // === ROAS por produto (campanhas com URL /products/...) ===
+  const productHandlesWithCampaigns = [...campaignsByProductHandle.keys()];
+  const productRev = productHandlesWithCampaigns.length
+    ? await buildProductRevenue(
+        workspaceId,
+        storeId,
+        { from: periodFromKey, to: periodToKey },
+        productHandlesWithCampaigns,
+      )
+    : new Map();
+
+  const products: ProductRoasRow[] = productHandlesWithCampaigns
+    .map((handle) => {
+      const campaigns = campaignsByProductHandle.get(handle) ?? [];
+      const seen = new Set<string>();
+      const uniquePending = campaigns.filter((cam) => {
+        if (seen.has(cam.key)) return false;
+        seen.add(cam.key);
+        return true;
+      });
+      if (!uniquePending.length) return null;
+
+      const uniqueCampaigns = uniquePending
+        .map(withStreak)
+        .sort((a, b) => b.spend - a.spend);
+
+      // Streak do produto: dias com spend agregado > 0
+      const productDaily = new Map<string, number>();
+      for (const cam of uniquePending) {
+        const byDate = dailySpendByCampaign.get(cam.key);
+        if (!byDate) continue;
+        for (const [dk, spend] of byDate) {
+          productDaily.set(dk, (productDaily.get(dk) ?? 0) + spend);
+        }
+      }
+      const activeDays = computeActiveSpendStreak(productDaily, todayKey);
+
+      const sales = productRev.get(handle);
+      const revenue = sales?.revenue ?? 0;
+      const units = sales?.units ?? 0;
+      const adSpend = uniqueCampaigns.reduce((s, cam) => s + cam.spend, 0);
+      const impressions = uniqueCampaigns.reduce(
+        (s, cam) => s + cam.impressions,
+        0,
+      );
+      const clicks = uniqueCampaigns.reduce((s, cam) => s + cam.clicks, 0);
+      const productAdMetrics = metricsFromSpend(
+        adSpend,
+        impressions,
+        clicks,
+        fmtMoney,
+      );
+      const realRoas = adSpend > 0 ? revenue / adSpend : null;
+      const realRoasFmt = fmtRoas(realRoas);
+      const productTitle = sales?.productTitle ?? handle;
+
+      return {
+        productHandle: handle,
+        productTitle,
+        units,
+        revenue,
+        revenueFmt: fmtMoney(revenue),
+        adSpend,
+        adSpendFmt: fmtMoney(adSpend),
+        realRoas,
+        realRoasFmt,
+        impressions,
+        clicks,
+        ...productAdMetrics,
+        campaigns: uniqueCampaigns,
+        activeDays,
+        activeDaysLabel: fmtActiveDays(activeDays),
+      };
+    })
+    .filter((row): row is ProductRoasRow => row != null)
+    .sort((a, b) => b.adSpend - a.adSpend || b.revenue - a.revenue);
+
   return {
     storeName: store.name,
     storeDomain,
@@ -619,6 +742,7 @@ export async function buildCollectionRoasReport(
     periodKey: period.key,
     currency,
     collections,
+    products,
     storeBriefingText: joinStoreBriefingMessages(
       collections.map((c) => c.briefingText),
     ),

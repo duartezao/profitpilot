@@ -115,6 +115,7 @@ export async function loadProductCatalogMap(
     string,
     {
       title: string;
+      handle: string | null;
       primaryCollectionId: string | null;
       primaryCollectionTitle: string | null;
       primaryCollectionHandle: string | null;
@@ -129,7 +130,7 @@ export async function loadProductCatalogMap(
 
   const rows = await ProductCatalog.find(filter)
     .select(
-      "productId title primaryCollectionId primaryCollectionTitle primaryCollectionHandle collections",
+      "productId title handle primaryCollectionId primaryCollectionTitle primaryCollectionHandle collections",
     )
     .lean();
 
@@ -138,6 +139,7 @@ export async function loadProductCatalogMap(
       String(r.productId),
       {
         title: r.title ?? "",
+        handle: r.handle ? (r.handle as string).trim().toLowerCase() : null,
         primaryCollectionId: r.primaryCollectionId ?? null,
         primaryCollectionTitle: r.primaryCollectionTitle ?? null,
         primaryCollectionHandle: r.primaryCollectionHandle ?? null,
