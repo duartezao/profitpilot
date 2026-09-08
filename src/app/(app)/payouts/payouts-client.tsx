@@ -17,7 +17,8 @@ async function fetchPayouts(
   const base = storeId
     ? `/api/payouts?store=${encodeURIComponent(storeId)}`
     : "/api/payouts";
-  const url = periodQs ? `${base}&${periodQs}` : base;
+  const separator = base.includes("?") ? "&" : "?";
+  const url = periodQs ? `${base}${separator}${periodQs}` : base;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error("Falha ao carregar payouts.");
   return res.json();
