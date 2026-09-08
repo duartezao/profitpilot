@@ -487,3 +487,127 @@ export async function buildCollectionMembershipRevenue(
   return out;
 }
 
+export type ProductRevenue = {
+  productHandle: string;
+  productTitle: string;
+  units: number;
+  revenue: number;
+};
+
+/**
+ * REV Shopify por produto (para cruzar com URLs /products/{handle}).
+ * A REV de cada line item é a fatia do netRevenue da encomenda.
+ */
+export async function buildProductRevenue(
+  workspaceId: string,
+  storeId: string,
+  periodInput: PeriodInput,
+  productHandles: string[],
+): Promise<Map<string, ProductRevenue>> {
+  const out = new Map<string, ProductRevenue>();
+  const wanted = new Set(
+    productHandles.map((h) => h.trim().toLowerCase()).filter(Boolean),
+  );
+  if (!wanted.size) return out;
+
+  await connectToDatabase();
+  const wsId = new mongoose.Types.ObjectId(workspaceId);
+  const store = await Store.findOne({
+    _id: storeId,
+    workspaceId: wsId,
+    deletedAt: null,
+    ...NON_ARCHIVED_STORE_FILTER,
+  })
+    .select("ianaTimezone")
+    .lean();
+  if (!store) return out;
+
+  const storeTz = normalizeStoreTimezone(store.ianaTimezone);
+  const period = resolvePeriodForStore(periodInput, storeTz);
+  const slice: PeriodSlice = {
+    start: period.start,
+    end: period.end,
+    specificDates: period.specificDates,
+  };
+
+  const orders = (await Order.find(
+    mergePaidOrderFilter({
+      storeId: store._id,
+      ...orderDateMatchInTimezone(slice, storeTz),
+    }),
+  )
+    .select(
+      "orderDate lineItems netRevenue subtotal totalPrice refunded amountsBase.netRevenue amountsBase.fxRate",
+    )
+    .lean()) as OrderForCollectionSales[];
+
+  const soldProductIds = new Set<string>();
+  for (const order of orders) {
+    for (const li of order.lineItems ?? []) {
+      if (li.productId) soldProductIds.add(String(li.productId));
+    }
+  }
+
+  const catalog = await loadProductCatalogMap(store._id, [...soldProductIds]);
+
+  // Mapa productId → handle para lookup rápido
+  const productIdToHandle = new Map<string, string>();
+  const productHandleToTitle = new Map<string, string>();
+  for (const [productId, cat] of catalog) {
+    const handle = cat.handle?.toLowerCase();
+    if (handle && wanted.has(handle)) {
+      productIdToHandle.set(productId, handle);
+      if (cat.title && !productHandleToTitle.has(handle)) {
+        productHandleToTitle.set(handle, cat.title);
+      }
+    }
+  }
+
+  // Inicializar output para todos os handles pedidos
+  for (const handle of wanted) {
+    out.set(handle, {
+      productHandle: handle,
+      productTitle: productHandleToTitle.get(handle) ?? handle,
+      units: 0,
+      revenue: 0,
+    });
+  }
+
+  for (const order of orders) {
+    const storeBasis =
+      orderLineRevenueBasis(order) ||
+      order.netRevenue ||
+      orderNetRevenue(order);
+    const netRevBase = order.amountsBase?.netRevenue;
+
+    for (const li of order.lineItems ?? []) {
+      const qty = li.quantity ?? 0;
+      if (qty <= 0) continue;
+
+      const productId = li.productId ? String(li.productId) : "";
+      const handle = productIdToHandle.get(productId);
+      if (!handle) continue;
+
+      const lineRevStore = lineStoreRevenue(li);
+      const rev = allocateBaseFromOrder(
+        order,
+        lineRevStore,
+        netRevBase,
+        storeBasis,
+      );
+
+      const row = out.get(handle)!;
+      row.units += qty;
+      row.revenue += rev;
+
+      // Actualizar título se encontrado
+      const cat = catalog.get(productId);
+      if (cat?.title && row.productTitle === handle) {
+        row.productTitle = cat.title;
+      }
+    }
+  }
+
+  return out;
+}
+
