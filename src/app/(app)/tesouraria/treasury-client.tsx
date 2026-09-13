@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Wallet, Settings, AlertTriangle } from "lucide-react";
+import { Wallet, AlertTriangle } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
 import { ScopeLink } from "@/components/scope-link";
 import type { WorkspaceTreasury } from "@/lib/treasury";
@@ -160,47 +160,30 @@ export function TreasuryClient() {
   return (
     <div
       className={cn(
-        "mx-auto max-w-5xl space-y-6",
+        "mx-auto max-w-5xl space-y-4",
         Boolean(data) && isFetching && "opacity-[0.92] transition-opacity duration-150",
       )}
     >
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {scopeStore ? (
-              <Sensitive as="span">{scopeStore.storeName}</Sensitive>
-            ) : (
-              "Tesouraria"
-            )}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Caixa real — o que tens, o que vem e o que já recebeste.
-            {scopeStore?.startingBalanceDate && (
-              <>
-                {" "}
-                Saldo inicial desde{" "}
-                {new Date(scopeStore.startingBalanceDate).toLocaleDateString(
-                  "pt-PT",
-                )}
-                .
-              </>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {scopeStore ? (
+            <Sensitive as="span">{scopeStore.storeName}</Sensitive>
+          ) : (
+            "Tesouraria"
+          )}
+        </h1>
+        <div className="flex flex-wrap items-center gap-3">
           <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
           <ScopeLink
             href="/definicoes#capital-negocio"
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
-            <Wallet className="h-4 w-4" />
             Capital no negócio
           </ScopeLink>
           <ScopeLink
             href="/definicoes"
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
-            <Settings className="h-4 w-4" />
             Saldo inicial
           </ScopeLink>
         </div>

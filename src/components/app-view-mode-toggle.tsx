@@ -42,6 +42,7 @@ export function AppViewModeToggle({
     <div
       className={cn(
         "inline-flex rounded-lg border border-border p-0.5",
+        className?.includes("w-full") && "w-full",
         pending && "opacity-80",
         className,
       )}

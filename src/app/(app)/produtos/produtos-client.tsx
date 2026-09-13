@@ -37,7 +37,7 @@ function productsExportUrl(storeId: string, params: URLSearchParams): string {
 
 function ProdutosSkeleton() {
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-4">
       <div className="h-14 w-56 animate-pulse rounded-lg bg-muted" />
       <div className="h-72 animate-pulse rounded-lg border border-border bg-muted" />
     </div>
@@ -66,23 +66,16 @@ export function ProdutosClient({ storeId }: { storeId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Produtos ·{" "}
-            <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {data.mode === "units"
-              ? `Top produtos por unidades · ${data.periodLabel}`
-              : `Top produtos por lucro · ${data.periodLabel}`}
-          </p>
-        </div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Produtos ·{" "}
+          <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
+        </h1>
         <div className="flex flex-wrap items-center gap-3">
           <Link
             href={`/produtos/precos?store=${encodeURIComponent(storeId)}`}
-            className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
             Preço & COGS
           </Link>
@@ -92,7 +85,6 @@ export function ProdutosClient({ storeId }: { storeId: string }) {
 
       <CollapsibleSection
         title="Ranking de produtos"
-        description={`${data.products.length} produtos no período.`}
         badge={
           <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
             {data.products.length}

@@ -50,16 +50,10 @@ export function StoreMetricsView({
 
       {tab === "lucro" && (
         <PageTabCard>
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold">Lucro / faturação por dia</h2>
-            <p className="text-sm text-muted-foreground">
-              {dashboard?.periodLabel ?? "Período seleccionado"}
-              {data.profitWindowStatus !== "consolidated" && (
-                <span className="mt-1 block text-xs">{data.profitWindowNote}</span>
-              )}
-            </p>
-          </div>
-          <ProfitChart data={data.profitChart} />
+          <ProfitChart
+            data={data.profitChart}
+            title="Faturação / lucro por dia"
+          />
         </PageTabCard>
       )}
 

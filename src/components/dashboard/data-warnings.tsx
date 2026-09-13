@@ -28,33 +28,33 @@ function DataWarningsContent({
   const cogsText =
     missingCogsMessage ||
     (missingCogsCount === 1
-      ? "1 entrada de COGS em falta neste período."
-      : `${missingCogsCount} entradas de COGS em falta neste período.`);
+      ? "1 COGS em falta"
+      : `${missingCogsCount} COGS em falta`);
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
       {cogsIncomplete && (
-        <p className="text-sm text-muted-foreground">
-          {cogsText}{" "}
+        <p>
+          <span className="text-warning">·</span> {cogsText}{" "}
           <Link
             href={cogsHref}
-            className="font-medium text-accent hover:underline"
+            className="font-medium text-foreground underline-offset-2 hover:underline"
           >
-            Gerir custos
+            Custos
           </Link>
         </p>
       )}
-
       {missingAdSpendDays > 0 && (
-        <p className="text-sm text-muted-foreground">
+        <p>
+          <span className="text-warning">·</span>{" "}
           {missingAdSpendDays === 1
-            ? "1 dia sem ad spend registado."
-            : `${missingAdSpendDays} dias sem ad spend registado.`}{" "}
+            ? "1 dia sem ad spend"
+            : `${missingAdSpendDays} dias sem ad spend`}{" "}
           <Link
             href={adsHref}
-            className="font-medium text-accent hover:underline"
+            className="font-medium text-foreground underline-offset-2 hover:underline"
           >
-            Preencher anúncios
+            Anúncios
           </Link>
         </p>
       )}

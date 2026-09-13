@@ -33,17 +33,10 @@ export default async function AlertasPage({
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {store ? `Alertas · ${store.name}` : "Alertas"}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {store
-            ? "Sync, COGS, ad spend e lucro desta loja."
-            : "Problemas de dados e operação em todas as lojas acessíveis."}
-        </p>
-      </div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {store ? `Alertas · ${store.name}` : "Alertas"}
+      </h1>
       <AlertsList alerts={alerts} />
     </div>
   );

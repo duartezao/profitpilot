@@ -34,18 +34,15 @@ import { DashboardLiveActions } from "@/components/dashboard/dashboard-live-acti
 import { hrefWithScopeAndStore } from "@/lib/scope-query";
 import { cn } from "@/lib/utils";
 
-function DashboardSkeleton({ multiStoreChart = true }: { multiStoreChart?: boolean }) {
+function DashboardSkeleton() {
   return (
-    <div className="mx-auto max-w-7xl animate-pulse space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-2">
-          <div className="h-8 w-40 rounded-lg bg-muted" />
-          <div className="h-4 w-56 rounded bg-muted/80" />
-        </div>
+    <div className="mx-auto max-w-7xl animate-pulse space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="h-8 w-40 rounded-lg bg-muted" />
         <div className="h-5 w-28 rounded bg-muted/70" />
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
             className="h-[88px] rounded-lg border border-border bg-muted/80"
@@ -53,14 +50,10 @@ function DashboardSkeleton({ multiStoreChart = true }: { multiStoreChart?: boole
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
-          <div className="mb-4 space-y-2">
-            <div className="h-6 w-28 rounded bg-muted" />
-            <div className="h-4 w-44 rounded bg-muted/70" />
-          </div>
-          <ProfitChartSkeleton multiStore={multiStoreChart} />
+        <div className="min-w-0 p-1 lg:col-span-2 sm:p-0">
+          <ProfitChartSkeleton />
         </div>
-        <div className="h-64 rounded-lg border border-border bg-muted/50" />
+        <div className="h-64 rounded-lg bg-muted/40" />
       </div>
     </div>
   );
@@ -144,15 +137,8 @@ export function DashboardClient() {
   const isStoreView = Boolean(workspaceData?.scopeName);
   const headerTitle =
     workspaceData?.scopeDomain ?? workspaceData?.scopeName ?? "Dashboard";
-  const periodLabel =
-    workspaceData?.storeDashboard?.periodLabel ?? period.label;
 
-  const lastSyncedAt =
-    portfolioData?.lastSyncedAt ?? workspaceData?.lastSyncedAt ?? null;
-
-  const liveActions = (
-    <DashboardLiveActions lastSyncedAt={lastSyncedAt} fetching={isFetching} />
-  );
+  const liveActions = <DashboardLiveActions />;
 
   const fetchingDim =
     Boolean(data) && isFetching && !isPending
@@ -161,28 +147,23 @@ export function DashboardClient() {
 
   if (!mounted || isPending) {
     return (
-      <DashboardSkeleton multiStoreChart={!isPortfolio && !storeId} />
+      <DashboardSkeleton />
     );
   }
 
   if (isPortfolio) {
     return (
-      <div className={cn("mx-auto max-w-7xl space-y-6", fetchingDim)}>
-        <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className={cn("mx-auto max-w-7xl space-y-4", fetchingDim)}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
               Portfolio
             </h1>
-            <p className="text-sm text-muted-foreground">
-              <Sensitive as="span">
-                {portfolioData?.portfolioLabel ?? "Workspaces"}
-              </Sensitive>
-              {" · "}
-              {periodLabel}
-              {portfolioData?.displayCurrency
-                ? ` · ${portfolioData.displayCurrency}`
-                : ""}
-            </p>
+            {portfolioData?.portfolioLabel ? (
+              <p className="text-sm text-muted-foreground">
+                <Sensitive as="span">{portfolioData.portfolioLabel}</Sensitive>
+              </p>
+            ) : null}
           </div>
           {liveActions}
         </div>
@@ -218,19 +199,8 @@ export function DashboardClient() {
           emphasizeLabel="Net Profit"
         />
 
-        <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
-              <div className="mb-4 min-w-0">
-                <h2 className="text-lg font-semibold">Lucro / faturação</h2>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Total agregado em {periodLabel}.
-                </p>
-                {portfolioData?.profitWindowStatus !== "consolidated" && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {portfolioData?.profitWindowNote}
-                  </p>
-                )}
-              </div>
+        <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
+            <div className="min-w-0 lg:col-span-2">
               {showChartSkeleton ? (
                 <ProfitChartSkeleton />
               ) : (
@@ -252,13 +222,11 @@ export function DashboardClient() {
   }
 
   return (
-    <div className={cn("mx-auto max-w-7xl space-y-6", fetchingDim)}>
+    <div className={cn("mx-auto max-w-7xl space-y-4", fetchingDim)}>
       {isStoreView && workspaceData ? (
         <>
           <StoreDashboardHeader
             title={headerTitle}
-            periodLabel={periodLabel}
-            prevPeriodLabel={workspaceData.storeDashboard?.prevPeriodLabel}
             actions={liveActions}
           />
           {isError && (
@@ -294,15 +262,10 @@ export function DashboardClient() {
         </>
       ) : (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Dashboard
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Visão consolidada de todas as lojas · {periodLabel}
-              </p>
-            </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Dashboard
+            </h1>
             {liveActions}
           </div>
 
@@ -344,23 +307,10 @@ export function DashboardClient() {
             emphasizeLabel="Net Profit"
           />
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-lg border border-border bg-surface p-4 sm:p-5 lg:col-span-2">
-              <div className="mb-4 min-w-0">
-                <h2 className="text-lg font-semibold">Lucro / faturação</h2>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  {(workspaceData?.profitChart?.length ?? 0) <= 1
-                    ? `Valores em ${periodLabel}.`
-                    : `Evolução em ${periodLabel}.`}
-                </p>
-                {workspaceData?.profitWindowStatus !== "consolidated" && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {workspaceData?.profitWindowNote}
-                  </p>
-                )}
-              </div>
+          <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
+            <div className="min-w-0 lg:col-span-2">
               {showChartSkeleton ? (
-                <ProfitChartSkeleton multiStore />
+                <ProfitChartSkeleton />
               ) : (
                 <ProfitChart
                   data={workspaceData?.profitChart ?? []}

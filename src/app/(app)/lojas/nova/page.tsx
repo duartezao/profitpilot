@@ -13,7 +13,7 @@ export default async function NovaLojaPage() {
     : [];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-4">
       <div>
         <Link
           href="/lojas"
@@ -25,10 +25,6 @@ export default async function NovaLojaPage() {
         <h1 className="mt-2 text-2xl font-semibold tracking-tight">
           Adicionar loja
         </h1>
-        <p className="text-sm text-muted-foreground">
-          Liga uma loja Shopify com o ID de cliente e a Chave secreta da tua app
-          (Dev Dashboard). Escolhe o workspace onde a loja fica.
-        </p>
       </div>
 
       <AddStoreForm

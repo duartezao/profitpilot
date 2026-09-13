@@ -1,33 +1,55 @@
-import {
-  ArrowDownRight,
-  ArrowUpRight,
-  Euro,
-  Percent,
-  Target,
-  TrendingUp,
-} from "lucide-react";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import { Sparkline } from "@/components/ui/sparkline";
-import type { KpiIcon, SummaryKpi } from "@/lib/metrics";
+import type { SummaryKpi } from "@/lib/metrics";
 
-const iconMap: Record<KpiIcon, typeof Euro> = {
-  euro: Euro,
-  percent: Percent,
-  target: Target,
-  trending: TrendingUp,
-};
+/** Labels onde a cor do delta importa mesmo com variação pequena. */
+const CRITICAL_DELTA_LABELS = new Set([
+  "Net Profit",
+  "ROAS",
+  "Margem %",
+  "POAS",
+]);
+
+/** Limiar (%) acima do qual o delta ganha cor (evita semáforo em tudo). */
+const DELTA_COLOR_THRESHOLD = 10;
 
 function formatDelta(delta: number, isPoints?: boolean) {
   const abs = Math.abs(delta).toFixed(1).replace(".", ",");
   return isPoints ? `${abs} pp` : `${abs}%`;
 }
 
+/** Extrai só o período de comparação (ex. "1–7 Set 2026"). */
+function periodFromDeltaLabel(label?: string): string | null {
+  if (!label) return null;
+  const cleaned = label
+    .replace(/^var\.?\s*%?\s*vs\s+/i, "")
+    .replace(/^vs\s+/i, "")
+    .trim();
+  return cleaned || null;
+}
+
+function deltaTone(
+  delta: number,
+  label: string,
+  inverted?: boolean,
+): "positive" | "negative" | "muted" {
+  const rawPositive = delta >= 0;
+  const businessPositive = inverted ? !rawPositive : rawPositive;
+  const significant =
+    CRITICAL_DELTA_LABELS.has(label) ||
+    Math.abs(delta) >= DELTA_COLOR_THRESHOLD;
+  if (!significant) return "muted";
+  return businessPositive ? "positive" : "negative";
+}
+
 type DashboardKpiCardProps = SummaryKpi & {
-  /** Vista loja — ícone canto superior direito + comparação com período anterior */
   layout?: "store" | "workspace";
-  /** Realça o card (borda accent + valor maior) — usado no KPI principal. */
+  /** Realça o card (KPI principal). */
   emphasis?: boolean;
+  /** Variante compacta para métricas secundárias. */
+  density?: "primary" | "secondary";
 };
 
 export function DashboardKpiCard({
@@ -38,50 +60,55 @@ export function DashboardKpiCard({
   deltaLabel,
   deltaIsPoints,
   deltaInverted,
-  icon,
   trend,
   layout = "workspace",
   emphasis = false,
+  density = "primary",
 }: DashboardKpiCardProps) {
-  const Icon = icon ? iconMap[icon] : null;
   const isStore = layout === "store";
+  const isSecondary = density === "secondary";
   const rawPositive = (delta ?? 0) >= 0;
-  const positive = deltaInverted ? !rawPositive : rawPositive;
-  const showSparkline = Boolean(trend?.length) && !Icon;
+  const tone =
+    delta !== undefined ? deltaTone(delta, label, deltaInverted) : "muted";
+  const period = periodFromDeltaLabel(deltaLabel);
 
   const deltaTitle =
     delta !== undefined
-      ? [
-          `${rawPositive ? "+" : "−"} ${formatDelta(delta, deltaIsPoints)}`,
-          deltaLabel,
-        ]
+      ? [`${rawPositive ? "+" : "−"}${formatDelta(delta, deltaIsPoints)}`, period]
           .filter(Boolean)
-          .join(" ")
+          .join(" · ")
       : undefined;
 
   const deltaBlock = delta !== undefined && (
     <Sensitive
       title={deltaTitle}
       className={cn(
-        "mt-1.5 text-xs font-medium tabular-nums sm:text-sm",
-        positive ? "text-positive" : "text-negative",
+        "mt-1.5 text-xs tabular-nums sm:text-sm",
+        tone === "positive" && "text-positive",
+        tone === "negative" && "text-negative",
+        tone === "muted" && "text-muted-foreground",
         isStore ? "block leading-snug" : "inline-flex max-w-full items-center gap-0.5 truncate",
       )}
     >
-      <span className={cn(isStore ? "inline-flex items-center gap-0.5" : "inline-flex items-center gap-0.5 truncate")}>
+      <span className="inline-flex items-center gap-0.5">
         {rawPositive ? (
           <ArrowUpRight className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
         ) : (
           <ArrowDownRight className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
         )}
-        <span className={isStore ? "" : "truncate"}>
-          {rawPositive ? "+" : "−"} {formatDelta(delta, deltaIsPoints)}
+        <span>
+          {rawPositive ? "+" : "−"}
+          {formatDelta(delta, deltaIsPoints)}
         </span>
       </span>
-      {isStore && deltaLabel && (
-        <span className="mt-0.5 block truncate font-normal text-muted-foreground">
-          {deltaLabel}
-          <span className="hidden sm:inline"> — não é euros</span>
+      {period && (
+        <span
+          className={cn(
+            "font-normal text-muted-foreground",
+            isStore ? "mt-0.5 block truncate" : "ml-1 truncate",
+          )}
+        >
+          {isStore ? `vs ${period}` : `· vs ${period}`}
         </span>
       )}
     </Sensitive>
@@ -89,51 +116,25 @@ export function DashboardKpiCard({
 
   const valueClassName = cn(
     "mt-1 block font-semibold tabular-nums leading-tight",
-    emphasis
-      ? "text-xl sm:text-2xl"
-      : "text-lg sm:text-xl",
+    isSecondary
+      ? "text-base sm:text-lg"
+      : emphasis
+        ? "text-2xl sm:text-3xl"
+        : "text-xl sm:text-2xl",
   );
 
-  if (Icon) {
-    return (
-      <div
-        className={cn(
-          "relative flex h-full flex-col rounded-lg border bg-surface p-4 sm:p-5",
-          emphasis ? "border-accent/40 ring-1 ring-accent/15" : "border-border",
-        )}
-      >
-        <div className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-accent/10 sm:right-5 sm:top-5 sm:h-10 sm:w-10">
-          <Icon className="h-4 w-4 text-accent sm:h-5 sm:w-5" />
-        </div>
-        <div className="pr-11 sm:pr-12">
-          <p
-            className={cn(
-              "truncate text-xs font-medium sm:text-[13px]",
-              emphasis ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {label}
-          </p>
-          <Sensitive title={title ?? value} className={valueClassName}>
-            {value}
-          </Sensitive>
-          {deltaBlock}
-        </div>
-      </div>
-    );
-  }
-
+  // `emphasis` só aumenta tipografia — sem borda accent (accent raro).
   return (
     <div
       className={cn(
-        "flex h-full flex-col rounded-lg border bg-surface p-3.5 sm:p-4 lg:p-5",
-        emphasis ? "border-accent/40 ring-1 ring-accent/15" : "border-border",
+        "flex h-full flex-col rounded-lg border border-border bg-surface",
+        isSecondary ? "p-3.5 sm:p-4" : "p-4 sm:p-5",
       )}
     >
       <p
         className={cn(
-          "truncate text-xs font-medium sm:text-[13px]",
-          emphasis ? "text-foreground" : "text-muted-foreground",
+          "truncate font-medium text-muted-foreground",
+          isSecondary ? "text-xs" : "text-xs sm:text-[13px]",
         )}
       >
         {label}
@@ -141,11 +142,11 @@ export function DashboardKpiCard({
       <Sensitive title={title ?? value} className={valueClassName}>
         {value}
       </Sensitive>
-      {!isStore && deltaBlock}
+      {deltaBlock}
 
-      {showSparkline && trend && (
+      {Boolean(trend?.length) && !isSecondary && (
         <div className="mt-2 flex justify-end sm:mt-3" data-sensitive-chart>
-          <Sparkline data={trend} width={80} height={22} />
+          <Sparkline data={trend!} width={80} height={22} />
         </div>
       )}
     </div>

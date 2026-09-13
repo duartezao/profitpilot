@@ -126,7 +126,7 @@ function CollectionRow({ row }: { row: CollectionSalesRow }) {
 
 function PageSkeleton() {
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-4">
       <div className="h-14 w-64 animate-pulse rounded-lg bg-muted" />
       <div className="h-96 animate-pulse rounded-lg border border-border bg-muted" />
     </div>
@@ -154,55 +154,28 @@ export function ColecoesVendasClient({ storeId }: { storeId: string }) {
     );
   }
 
-  const lastSync = data.lastCatalogSyncAt
-    ? new Date(data.lastCatalogSyncAt).toLocaleString("pt-PT", {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    : null;
-
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Vendas por coleção ·{" "}
-            <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Top coleções Shopify · {data.periodLabel}
-          </p>
-        </div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Vendas por coleção ·{" "}
+          <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
+        </h1>
         <ExportFormatLinks href={exportUrl(storeId, searchParams)} />
       </div>
 
-      <div className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted-foreground sm:px-5">
-        <p>
-          Cada venda conta na <span className="font-medium text-foreground">coleção principal</span>{" "}
-          do produto (primeira coleção manual da Shopify, excluindo «All»). Cruza estes
-          números com as campanhas Google Ads pelo nome da coleção.
+      {data.unmappedProductCount > 0 && (
+        <p className="text-xs text-warning">
+          {data.unmappedProductCount}{" "}
+          {data.unmappedProductCount === 1
+            ? "produto vendido ainda sem coleção mapeada"
+            : "produtos vendidos ainda sem coleção mapeada"}
+          — corre um sync da loja para actualizar o catálogo.
         </p>
-        {lastSync && (
-          <p className="mt-2 text-xs">
-            Coleções actualizadas no último sync de produtos: {lastSync}.
-          </p>
-        )}
-        {data.unmappedProductCount > 0 && (
-          <p className="mt-2 text-xs text-warning">
-            {data.unmappedProductCount}{" "}
-            {data.unmappedProductCount === 1
-              ? "produto vendido ainda sem coleção mapeada"
-              : "produtos vendidos ainda sem coleção mapeada"}
-            — corre um sync da loja para actualizar o catálogo.
-          </p>
-        )}
-      </div>
+      )}
 
       <CollapsibleSection
         title="Top coleções"
-        description="Unidades e receita no período. Expande para ver vendas por dia."
         badge={
           data.collections.length > 0 ? (
             <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
@@ -233,7 +206,6 @@ export function ColecoesVendasClient({ storeId }: { storeId: string }) {
 
       <CollapsibleSection
         title="Produtos vendidos"
-        description="Cada produto com a coleção principal associada."
         badge={
           data.products.length > 0 ? (
             <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">

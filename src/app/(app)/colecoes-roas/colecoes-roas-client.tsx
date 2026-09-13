@@ -464,18 +464,15 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
   const quick7 = !hasCustomRange && activePreset === "7d";
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
             ROAS por coleção
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             <Sensitive>{storeName}</Sensitive>
-            {" — "}
-            URL de destino das ads → coleção Shopify. ROAS real = REV ÷ spend.
-            Seletor de datas no topo ou atalhos 5/7. Briefing EN da loja no
-            fundo (todas as coleções juntas).
+            {" — URL ads → coleção. ROAS = REV ÷ spend."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -527,14 +524,21 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
 
       {data && (
         <>
-          <p className="text-xs text-muted-foreground">
-            {data.periodLabel}
-            {data.storeDomain ? ` · ${data.storeDomain}` : null}
-            {data.adAccountLabel ? ` · ${data.adAccountLabel}` : null}
-            {data.lastLandingSyncAt
-              ? ` · URLs sync ${new Date(data.lastLandingSyncAt).toLocaleString("pt-PT")}`
-              : null}
-          </p>
+          {(data.storeDomain ||
+            data.adAccountLabel ||
+            data.lastLandingSyncAt) && (
+            <p className="text-xs text-muted-foreground">
+              {[
+                data.storeDomain,
+                data.adAccountLabel,
+                data.lastLandingSyncAt
+                  ? `URLs sync ${new Date(data.lastLandingSyncAt).toLocaleString("pt-PT")}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
           {data.landingSyncErrors.length > 0 && (
             <p className="text-xs text-muted-foreground">
               Aviso sync URLs: {data.landingSyncErrors[0]}

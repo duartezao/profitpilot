@@ -17,7 +17,6 @@ import {
   listOrdersForCogsPanel,
 } from "@/lib/manual-cogs";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
-import { appliesAutoEuCustomsFees } from "@/lib/eu-category-fees";
 import {
   COGS_MODE_LABELS,
   tracksVariantCogs,
@@ -125,9 +124,6 @@ export default async function CogsPage({
     }
   }
 
-  const showEuCustomsFeeInfo =
-    scoped && activeMode && appliesAutoEuCustomsFees(activeMode);
-
   const showVariantTable = variantStoreIds.length > 0;
 
   const soldMissing = showVariantTable
@@ -166,7 +162,7 @@ export default async function CogsPage({
   });
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           {scoped ? (
@@ -186,31 +182,6 @@ export default async function CogsPage({
             {baseCurrency !== (scoped.currency ?? "EUR")
               ? ` · dashboard em ${baseCurrency}`
               : ""}
-          </p>
-        )}
-        <p className="mt-1 text-sm text-muted-foreground">
-          {activeMode === "order"
-            ? "Preenche o custo total de cada encomenda. O lucro usa estes valores."
-            : activeMode === "day"
-              ? "Preenche o COGS total por dia civil (fuso da loja)."
-              : scoped
-                ? "Produtos vendidos nesta loja sem custo definido."
-                : showVariantTable
-                  ? "Produtos vendidos sem custo (lojas Shopify ou por variante)."
-                  : "Selecciona uma loja para gerir COGS por dia ou por encomenda."}
-        </p>
-        {showEuCustomsFeeInfo && scoped && (
-          <p className="mt-2 text-sm text-muted-foreground">
-            A taxa alfandegária UE (3 € por encomenda paga para
-            destinos UE) conta no dia e é corrigida no sync se for
-            cancelada sem envio — vê o detalhe no{" "}
-            <a
-              href={`/metricas?store=${String(scoped._id)}`}
-              className="text-accent hover:underline"
-            >
-              overview de Métricas
-            </a>{" "}
-            ou na dashboard da loja.
           </p>
         )}
       </div>

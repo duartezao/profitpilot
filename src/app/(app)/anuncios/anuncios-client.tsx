@@ -84,15 +84,9 @@ export function AnunciosClient() {
   if (data.mode === "overview") {
     const { summaries } = data.overview;
     return (
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Anúncios</h1>
-            <p className="text-sm text-muted-foreground">
-              Ad spend manual por loja e plataforma — selecciona uma loja no topo
-              para preencher.
-            </p>
-          </div>
+      <div className="mx-auto max-w-4xl space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">Anúncios</h1>
           <LastSyncBadge
             lastSyncedAt={data.lastSyncedAt}
             fetching={isFetching}

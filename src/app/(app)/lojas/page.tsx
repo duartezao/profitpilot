@@ -35,14 +35,9 @@ export default async function LojasPage() {
   const syncIntervalLabel = formatGlobalSyncInterval();
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Lojas</h1>
-          <p className="text-sm text-muted-foreground">
-            Liga e gere as tuas lojas Shopify.
-          </p>
-        </div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Lojas</h1>
         <Link
           href="/lojas/nova"
           className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"

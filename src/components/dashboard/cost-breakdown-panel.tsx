@@ -11,7 +11,7 @@ export function CostBreakdownPanel({ data }: { data: CostBreakdown }) {
   const profitPositive = data.netProfit >= 0;
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-border bg-surface p-4 sm:p-5">
+    <div className="flex h-full flex-col p-1 sm:p-0">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold">Repartição de custos</h2>
         <Sensitive className="text-xs tabular-nums text-muted-foreground">
@@ -72,7 +72,7 @@ export function CostBreakdownPanel({ data }: { data: CostBreakdown }) {
         </Sensitive>
       </div>
 
-      <div className="mt-3 flex items-baseline justify-between gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+      <div className="mt-3 flex items-baseline justify-between gap-2 bg-muted/40 px-3 py-2.5 rounded-lg">
         <span className="text-[13px] font-medium">Lucro líquido</span>
         <Sensitive
           className={cn(

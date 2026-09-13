@@ -26,7 +26,7 @@ async function fetchPayouts(
 
 function PayoutsSkeleton() {
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-4">
       <div className="h-14 w-48 animate-pulse rounded-lg bg-muted" />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -71,9 +71,8 @@ export function PayoutsClient() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">
           {data.scopeName ? (
             <>
@@ -83,17 +82,6 @@ export function PayoutsClient() {
             "Payouts"
           )}
         </h1>
-        <p className="text-sm text-muted-foreground">
-          {data.scopeName ? (
-            <>
-              Payouts de <Sensitive as="span">{data.scopeName}</Sensitive> ·{" "}
-              {data.periodLabel}.
-            </>
-          ) : (
-            <>Payouts no período seleccionado · {data.periodLabel}.</>
-          )}
-        </p>
-        </div>
         {data.payouts.length > 0 && (
           <ExportFormatLinks
             href={
@@ -148,11 +136,6 @@ export function PayoutsClient() {
 
       <CollapsibleSection
         title="Histórico de payouts"
-        description={
-          data.scopeName
-            ? `${data.payouts.length} payouts de ${data.scopeName} · ${data.periodLabel}.`
-            : `${data.payouts.length} payouts · ${data.periodLabel}.`
-        }
         badge={
           data.payouts.length > 0 ? (
             <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">

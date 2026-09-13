@@ -7,6 +7,30 @@ import type { SummaryKpi } from "@/lib/metrics";
 import { combineKpisForPanel, orderKpisForPanel } from "@/lib/metric-panel";
 import { DashboardKpiCard } from "@/components/dashboard/dashboard-kpi-card";
 
+/** Ordem e conjunto dos KPIs primários (dashboard limpo). */
+const PRIMARY_KPI_ORDER = [
+  "Net Profit",
+  "Faturamento",
+  "Revenue",
+  "Ad Spend",
+  "ROAS",
+] as const;
+
+function splitPrimarySecondary(kpis: SummaryKpi[]): {
+  primary: SummaryKpi[];
+  secondaryFromPrimary: SummaryKpi[];
+} {
+  const byLabel = new Map(kpis.map((k) => [k.label, k]));
+  const primary: SummaryKpi[] = [];
+  for (const label of PRIMARY_KPI_ORDER) {
+    const row = byLabel.get(label);
+    if (row) primary.push(row);
+  }
+  const primaryLabels = new Set(primary.map((k) => k.label));
+  const secondaryFromPrimary = kpis.filter((k) => !primaryLabels.has(k.label));
+  return { primary, secondaryFromPrimary };
+}
+
 export function DashboardKpiSection({
   kpis,
   extendedKpis = [],
@@ -43,15 +67,20 @@ export function DashboardKpiSection({
     return orderKpisForPanel(allPanelKpis, orderedMetricIds, { strict: true });
   }, [customPanel, orderedMetricIds, allPanelKpis]);
 
+  const { primary, secondaryFromPrimary } = useMemo(
+    () => splitPrimarySecondary(kpis),
+    [kpis],
+  );
+
+  const secondaryKpis = useMemo(
+    () => [...secondaryFromPrimary, ...extendedKpis],
+    [secondaryFromPrimary, extendedKpis],
+  );
+
   const hasMore =
-    !customPanel && extendedKpis.length > 0 && (showExtended ?? !isStore);
-
-  const primaryCols = isStore
-    ? "grid-cols-2 lg:grid-cols-3"
-    : "grid-cols-2 lg:grid-cols-3";
-
-  const extendedCols =
-    "grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5";
+    !customPanel &&
+    secondaryKpis.length > 0 &&
+    (showExtended ?? true);
 
   if (customPanel) {
     const hasFunnelInPanel = customDisplayed.some((k) =>
@@ -77,7 +106,7 @@ export function DashboardKpiSection({
           {missingCount > 0 &&
             ` ${missingCount} seleccionada(s) sem dados disponíveis neste período.`}
         </p>
-        <div className={cn("grid gap-3 sm:gap-4", extendedCols)}>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
           {customDisplayed.map((k) => (
             <DashboardKpiCard key={k.label} {...k} layout="workspace" />
           ))}
@@ -102,102 +131,73 @@ export function DashboardKpiSection({
 
   return (
     <div className="space-y-4">
-      {!isStore ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            KPIs principais do período
-          </p>
-          {hasMore && (
+      <div className="space-y-3">
+        {hasMore && (
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               {open ? (
                 <>
-                  <ChevronUp className="h-4 w-4" />
+                  <ChevronUp className="h-3.5 w-3.5" />
                   Ver menos
                 </>
               ) : (
                 <>
-                  <ChevronDown className="h-4 w-4" />
-                  Ver mais métricas
+                  <ChevronDown className="h-3.5 w-3.5" />
+                  Mais métricas
                 </>
               )}
             </button>
-          )}
-        </div>
-      ) : hasMore ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
-          >
-            {open ? (
-              <>
-                <ChevronUp className="h-4 w-4" />
-                Ver menos
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-4 w-4" />
-                Ver mais métricas
-              </>
-            )}
-          </button>
-        </div>
-      ) : null}
+          </div>
+        )}
 
-      <div className={cn("grid gap-3 sm:gap-4", primaryCols)}>
-        {kpis.map((k) => (
-          <DashboardKpiCard
-            key={k.label}
-            {...k}
-            layout={isStore ? "store" : "workspace"}
-            emphasis={emphasizeLabel === k.label}
-          />
-        ))}
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          {primary.map((k) => (
+            <DashboardKpiCard
+              key={k.label}
+              {...k}
+              layout={isStore ? "store" : "workspace"}
+              emphasis={emphasizeLabel === k.label}
+              density="primary"
+            />
+          ))}
+        </div>
       </div>
 
       {open && hasMore && (
-        <div className="space-y-3 rounded-lg border border-border bg-surface p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-semibold">Todas as métricas</h2>
-              <p className="text-xs text-muted-foreground">
-                Custos, encomendas, funil Shopify e eficiência de ads.
-              </p>
+        <div className="space-y-3">
+          {(sessionCountryLabel || funnelError) && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {sessionCountryLabel ? (
+                <div
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                  data-sensitive
+                >
+                  <Globe className="h-3.5 w-3.5 shrink-0" />
+                  Sessões: {sessionCountryLabel}
+                </div>
+              ) : (
+                <span />
+              )}
+              {funnelError && (
+                <p className="text-xs text-muted-foreground">{funnelError}</p>
+              )}
             </div>
-            {sessionCountryLabel && (
-              <div
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-muted-foreground"
-                data-sensitive
-              >
-                <Globe className="h-3.5 w-3.5 shrink-0" />
-                Sessões: {sessionCountryLabel}
-              </div>
-            )}
-          </div>
-
-          {funnelError && (
-            <p className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-              {funnelError}
-            </p>
           )}
 
-          <div className={cn("grid gap-3 sm:gap-4", extendedCols)}>
-            {extendedKpis.map((k) => (
-              <DashboardKpiCard key={k.label} {...k} layout="workspace" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {secondaryKpis.map((k) => (
+              <DashboardKpiCard
+                key={k.label}
+                {...k}
+                layout="workspace"
+                density="secondary"
+              />
             ))}
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            <strong className="font-medium text-foreground">BER</strong> =
-            Break-even ROAS — o ROAS mínimo para não perderes dinheiro depois
-            de COGS, envio e taxas. Se o ROAS real estiver abaixo do BER, estás
-            em prejuízo.
-          </p>
         </div>
       )}
     </div>

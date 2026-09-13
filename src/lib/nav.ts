@@ -118,33 +118,29 @@ export function navGroupsForStoreScope(
   }
   const pick = (...hrefs: string[]) =>
     storeNavItems.filter((i) => hrefs.includes(i.href));
+  // Sidebar curta: diário primeiro; análise e custos agrupados e mais abaixo.
   return [
     {
       label: "Resumo",
-      items: pick("/dashboard", "/metricas", "/financas", "/decisao"),
+      items: pick("/dashboard", "/anuncios", "/financas", "/decisao"),
     },
     {
       label: "Operação",
+      items: pick("/pedidos", "/cogs", "/payouts", "/reembolsos", "/chargebacks"),
+    },
+    {
+      label: "Análise",
       items: pick(
-        "/pesquisa",
+        "/metricas",
         "/produtos",
         "/colecoes-vendas",
         "/colecoes-roas",
-        "/pedidos",
-        "/anuncios",
-        "/payouts",
-        "/reembolsos",
-        "/chargebacks",
-        "/cogs",
+        "/pesquisa",
       ),
     },
     {
-      label: "Relatórios",
-      items: pick("/notas", "/alertas"),
-    },
-    {
       label: "Conta",
-      items: pick("/definicoes"),
+      items: pick("/notas", "/alertas", "/definicoes"),
     },
   ].filter((g) => g.items.length > 0);
 }

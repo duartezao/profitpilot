@@ -1428,7 +1428,7 @@ async function buildConsolidatedDailyProfitSeries(
     return {
       storeId: sid,
       name: s.name,
-      color: colorByStoreId.get(sid) ?? "#7C6BC4",
+      color: colorByStoreId.get(sid) ?? "#5B5EA6",
       key: `s_${sid}`,
       revenueKey: `r_${sid}`,
     };
@@ -2840,7 +2840,7 @@ export async function buildWorkspaceSummary(
       return {
         storeId: String(s._id),
         name: s.name,
-        color: storeColorMap.get(String(s._id)) ?? "#7C6BC4",
+        color: storeColorMap.get(String(s._id)) ?? "#5B5EA6",
         revenue: fmtMoney(a.revenue),
         profit: fmtMoney(profit),
         margin: fmtMargin(a.revenue, profit),

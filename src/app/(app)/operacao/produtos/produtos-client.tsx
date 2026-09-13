@@ -55,15 +55,13 @@ export function ProdutosTesteClient({
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Produtos em teste</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Acompanha produtos a testar, já testados, que performaram ou falharam.
-          </p>
-        </div>
-        <Link href="/operacao" className="text-sm text-accent hover:underline">
+    <div className="mx-auto max-w-7xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Produtos em teste</h1>
+        <Link
+          href="/operacao"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
           Voltar a Hoje
         </Link>
       </div>
