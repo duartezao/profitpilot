@@ -75,13 +75,6 @@ export function MetricasClient({
     refetchInterval: 60 * 1000,
   });
 
-  const periodLabel =
-    clientReady && data?.storeDashboard?.periodLabel
-      ? data.storeDashboard.periodLabel
-      : period.label;
-  const prevPeriodLabel = clientReady
-    ? data?.storeDashboard?.prevPeriodLabel
-    : undefined;
   const headerTitle =
     clientReady && data
       ? (data.scopeDomain ?? data.scopeName ?? "Métricas")
@@ -100,13 +93,9 @@ export function MetricasClient({
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <StoreDashboardHeader
-          title={headerTitle}
-          periodLabel={periodLabel}
-          prevPeriodLabel={prevPeriodLabel}
-        />
+    <div className="mx-auto max-w-7xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <StoreDashboardHeader title={headerTitle} />
         <div className="flex flex-wrap items-center gap-2">
           <MetricsPanelConfig
             prefs={prefs}

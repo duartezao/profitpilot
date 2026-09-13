@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { Megaphone, Boxes } from "lucide-react";
 import { ExportFormatLinks } from "@/components/export-format-links";
 import { ScopeLink } from "@/components/scope-link";
 import { getCurrentUser } from "@/lib/auth";
@@ -393,9 +392,8 @@ export default async function FinancasPage({
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">
           {scopeName ? (
             <>
@@ -405,13 +403,7 @@ export default async function FinancasPage({
             "Lucro & Finanças"
           )}
         </h1>
-        <p className="text-sm text-muted-foreground">
-          {scopeName
-            ? `Caixa acumulada e P&L do período · ${pnl.periodLabel}.`
-            : `P&L do período · ${pnl.periodLabel}. Banca projectada no Resumo e em Caixa.`}
-        </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           {!storeId && (
             <Suspense fallback={null}>
               <FinancasModeToggle />
@@ -420,16 +412,14 @@ export default async function FinancasPage({
           <ExportFormatLinks href={pnlExportHref} />
           <ScopeLink
             href="/cogs"
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
-            <Boxes className="h-4 w-4" />
             COGS
           </ScopeLink>
           <Link
             href={adsHref}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted"
+            className="text-sm text-muted-foreground hover:text-foreground"
           >
-            <Megaphone className="h-4 w-4" />
             Ad Spend
           </Link>
         </div>

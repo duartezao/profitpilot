@@ -73,14 +73,14 @@ export function WorkspacesComparisonTable({
   }, [workspaces, sortKey, sortDir]);
 
   return (
-    <div className="rounded-lg border border-border bg-surface">
-      <div className="border-b border-border p-5">
+    <div className="min-w-0 space-y-3">
+      <div>
         <h2 className="text-lg font-semibold">Workspaces</h2>
         <p className="text-sm text-muted-foreground">
           Comparação de rentabilidade · valores em {displayCurrency}.
         </p>
         {top && (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <Trophy className="h-3.5 w-3.5 text-positive" />
             Mais rentável:{" "}
             <Sensitive as="span" className="font-medium text-foreground">
@@ -89,10 +89,10 @@ export function WorkspacesComparisonTable({
           </p>
         )}
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
-            <tr className="text-left text-xs font-medium text-muted-foreground">
+            <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
               <th className="px-5 py-3">Workspace</th>
               <th className="px-5 py-3 text-right">Lojas</th>
               <th className="px-5 py-3 text-right">

@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useMemo } from "react";
 import {
   Area,
-  AreaChart,
   CartesianGrid,
+  ComposedChart,
+  Line,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -14,11 +14,6 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
-import { useWorkspace } from "@/components/workspace-context";
-import {
-  hrefDashboardStore,
-  persistActiveStore,
-} from "@/lib/scope-query";
 import type {
   ProfitChartPoint,
   ProfitChartSeries,
@@ -32,23 +27,12 @@ import {
   type ChartAxisGranularity,
 } from "@/lib/period";
 
-type MultiStoreView = "stores" | "total";
-type ChartMetric = "profit" | "revenue";
-
 /** Altura do gráfico — mais área vertical para ler tendências. */
 const CHART_FRAME_CLASS = "h-72 w-full min-w-0 sm:h-80 lg:h-96";
 const CHART_EMPTY_CLASS =
   "mt-4 flex h-72 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-80 lg:h-96";
 const CHART_SINGLE_DAY_CLASS =
   "flex min-h-72 w-full min-w-0 flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed border-border px-3 py-6 sm:min-h-80 sm:px-4 lg:min-h-96";
-
-type BarRow = {
-  storeId: string;
-  name: string;
-  color: string;
-  value: number;
-  valueFmt: string;
-};
 
 function compactAxisValue(v: number): string {
   const abs = Math.abs(v);
@@ -272,21 +256,10 @@ function aggregateProfitChartByMonth(
   });
 }
 
-function collectChartMetricValues(
+function collectKeyValues(
   chartData: Array<ProfitChartPoint & Record<string, unknown>>,
-  metric: ChartMetric,
-  series: ProfitChartSeries[] | undefined,
-  showPerStore: boolean,
+  keys: string[],
 ): number[] {
-  const keys: string[] = [];
-  if (showPerStore && series?.length) {
-    for (const s of series) {
-      keys.push(metric === "revenue" ? s.revenueKey || `r_${s.storeId}` : s.key);
-    }
-  } else {
-    keys.push(metric === "revenue" ? "revenue" : "profit");
-  }
-
   const out: number[] = [];
   for (const row of chartData) {
     for (const key of keys) {
@@ -297,6 +270,7 @@ function collectChartMetricValues(
   return out;
 }
 
+
 function compactBarLabel(v: number): string {
   const abs = Math.abs(v);
   const sign = v < 0 ? "−" : "";
@@ -305,47 +279,8 @@ function compactBarLabel(v: number): string {
   return `${sign}${Math.round(abs)}`;
 }
 
-function metricValue(
-  point: ProfitChartPoint,
-  metric: ChartMetric,
-): { value: number | null; fmt: string } {
-  if (metric === "revenue") {
-    const v = point.revenue;
-    return {
-      value: v,
-      fmt:
-        point.revenueFmt ??
-        (v != null ? compactBarLabel(v) : "—"),
-    };
-  }
-  return {
-    value: point.profit,
-    fmt: point.profitFmt ?? (point.profit != null ? compactBarLabel(point.profit) : "—"),
-  };
-}
 
-function sliceValue(
-  slice: ProfitChartStoreSlice,
-  metric: ChartMetric,
-): { value: number; fmt: string } {
-  if (metric === "revenue") {
-    return {
-      value: slice.revenue ?? 0,
-      fmt: slice.revenueFmt ?? compactBarLabel(slice.revenue ?? 0),
-    };
-  }
-  return { value: slice.profit, fmt: slice.profitFmt };
-}
 
-function seriesDataKey(
-  s: ProfitChartSeries,
-  metric: ChartMetric,
-): string {
-  if (metric === "revenue") {
-    return s.revenueKey || `r_${s.storeId}`;
-  }
-  return s.key;
-}
 
 function chartMetricValue(
   sliceVal: number | undefined,
@@ -356,328 +291,58 @@ function chartMetricValue(
   return typeof rowVal === "number" ? rowVal : 0;
 }
 
-function areaGradientId(storeId: string): string {
-  return `profit-area-${storeId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
-}
 
-function useOpenStoreDashboard() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const { workspaceId } = useWorkspace();
 
-  return useCallback(
-    (storeId: string) => {
-      if (workspaceId) persistActiveStore(workspaceId, storeId);
-      router.push(hrefDashboardStore(storeId, searchParams));
-    },
-    [router, searchParams, workspaceId],
-  );
-}
-
-function SegmentToggle<T extends string>({
-  value,
-  onChange,
-  options,
-  ariaLabel,
-}: {
-  value: T;
-  onChange: (next: T) => void;
-  options: { id: T; label: string }[];
-  ariaLabel: string;
-}) {
-  return (
-    <div
-      className="inline-flex shrink-0 rounded-lg border border-border p-0.5"
-      role="group"
-      aria-label={ariaLabel}
-    >
-      {options.map((opt) => (
-        <button
-          key={opt.id}
-          type="button"
-          aria-pressed={value === opt.id}
-          onClick={() => onChange(opt.id)}
-          className={cn(
-            "rounded-md px-2.5 py-1.5 text-xs font-medium sm:px-3 sm:text-sm",
-            value === opt.id
-              ? "bg-accent/10 text-accent"
-              : "text-muted-foreground hover:bg-muted",
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** Placeholder com a mesma altura do gráfico (evita salto de layout). */
 export function ProfitChartSkeleton({
-  multiStore = false,
+  title = "Faturação / lucro",
 }: {
-  multiStore?: boolean;
+  title?: string;
 }) {
   return (
-    <div className="mt-4 min-w-0 animate-pulse" aria-hidden>
-      <div className="mb-3 flex justify-end gap-2">
-        <div className="h-8 w-36 rounded-lg bg-muted sm:h-9 sm:w-40" />
-        {multiStore && (
-          <div className="h-8 w-32 rounded-lg bg-muted sm:h-9 sm:w-40" />
-        )}
-      </div>
-      <div className={cn(CHART_FRAME_CLASS, "animate-pulse rounded-lg bg-muted/70")} />
-      {multiStore && (
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-3 w-16 rounded bg-muted" />
-          ))}
+    <div className="min-w-0 animate-pulse" aria-hidden>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="h-7 w-40 rounded-md bg-muted" />
+        <div className="flex gap-4">
+          <div className="h-3 w-16 rounded bg-muted" />
+          <div className="h-3 w-12 rounded bg-muted" />
         </div>
-      )}
+      </div>
+      <span className="sr-only">{title}</span>
+      <div className={cn(CHART_FRAME_CLASS, "animate-pulse rounded-lg bg-muted/70")} />
     </div>
   );
 }
 
-/** Um dia: lista no mobile (sem overflow), barras no desktop. */
-function SingleDayProfitView({
-  point,
-  series,
-  multiStore,
-  showPerStore,
-  metric,
-  onStoreClick,
-}: {
-  point: ProfitChartPoint;
-  series?: ProfitChartSeries[];
-  multiStore: boolean;
-  showPerStore: boolean;
-  metric: ChartMetric;
-  onStoreClick?: (storeId: string) => void;
-}) {
-  const bars = useMemo((): BarRow[] => {
-    if (point.byStore?.length) {
-      return point.byStore.map((s) => {
-        const { value, fmt } = sliceValue(s, metric);
-        return {
-          storeId: s.storeId,
-          name: s.name,
-          color: s.color,
-          value,
-          valueFmt: fmt,
-        };
-      });
-    }
-    if (!series?.length) return [];
-    return series.map((s) => {
-      const key = seriesDataKey(s, metric);
-      const raw = (point as ProfitChartPoint & Record<string, unknown>)[key];
-      const value = typeof raw === "number" ? raw : 0;
-      return {
-        storeId: s.storeId,
-        name: s.name,
-        color: s.color,
-        value,
-        valueFmt: compactBarLabel(value),
-      };
-    });
-  }, [point, series, metric]);
-
-  if (multiStore && showPerStore && bars.length > 0) {
-    const maxAbs = Math.max(...bars.map((b) => Math.abs(b.value)), 1);
-
-    return (
-      <>
-        {/* Mobile: ranking horizontal — cabe no ecrã */}
-        <div className="space-y-2 sm:hidden">
-          {bars.map((b) => {
-            const widthPct = Math.max(4, (Math.abs(b.value) / maxAbs) * 100);
-            const negative = b.value < 0;
-            const rowCls =
-              "flex w-full min-w-0 items-center gap-2 rounded-lg px-1 py-1.5 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-accent";
-            const body = (
-              <>
-                <Sensitive
-                  as="span"
-                  className="w-[5.5rem] shrink-0 truncate text-xs text-muted-foreground"
-                >
-                  {b.name}
-                </Sensitive>
-                <div className="min-w-0 flex-1">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${widthPct}%`,
-                        backgroundColor: b.color,
-                        opacity: negative ? 0.55 : 0.9,
-                      }}
-                    />
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    "w-14 shrink-0 text-right text-[11px] tabular-nums font-medium",
-                    negative ? "text-negative" : "text-foreground",
-                  )}
-                  title={b.valueFmt}
-                >
-                  {compactBarLabel(b.value)}
-                </span>
-              </>
-            );
-            if (!onStoreClick) {
-              return (
-                <div key={b.storeId} className={rowCls}>
-                  {body}
-                </div>
-              );
-            }
-            return (
-              <button
-                key={b.storeId}
-                type="button"
-                onClick={() => onStoreClick(b.storeId)}
-                title={`Abrir ${b.name}`}
-                className={rowCls}
-              >
-                {body}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Desktop: barras verticais */}
-        <div className="hidden h-64 min-w-0 items-end gap-3 overflow-x-auto pb-1 sm:flex">
-          {bars.map((b) => {
-            const heightPct = Math.max(4, (Math.abs(b.value) / maxAbs) * 100);
-            const negative = b.value < 0;
-            const inner = (
-              <>
-                <span
-                  className={cn(
-                    "text-[11px] tabular-nums font-medium",
-                    negative ? "text-negative" : "text-foreground",
-                  )}
-                  title={b.valueFmt}
-                >
-                  {compactBarLabel(b.value)}
-                </span>
-                <div className="flex h-44 w-full max-w-[3.5rem] items-end justify-center">
-                  <div
-                    className="w-full max-w-[2.75rem] rounded-t-md"
-                    style={{
-                      height: `${heightPct}%`,
-                      backgroundColor: b.color,
-                      opacity: negative ? 0.55 : 0.9,
-                    }}
-                  />
-                </div>
-                <Sensitive
-                  as="span"
-                  className="max-w-full truncate text-center text-[11px] text-muted-foreground"
-                >
-                  {b.name}
-                </Sensitive>
-              </>
-            );
-            if (!onStoreClick) {
-              return (
-                <div
-                  key={b.storeId}
-                  className="flex min-w-[3.25rem] flex-1 flex-col items-center justify-end gap-2"
-                  title={`${b.name}: ${b.valueFmt}`}
-                >
-                  {inner}
-                </div>
-              );
-            }
-            return (
-              <button
-                key={b.storeId}
-                type="button"
-                onClick={() => onStoreClick(b.storeId)}
-                title={`Abrir ${b.name}`}
-                className="flex min-w-[3.25rem] flex-1 flex-col items-center justify-end gap-2 rounded-lg outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                {inner}
-              </button>
-            );
-          })}
-        </div>
-      </>
-    );
-  }
-
-  const { value, fmt } = metricValue(point, metric);
-  const positive = (value ?? 0) >= 0;
-  const slices = point.byStore ?? [];
+/** Um dia: totais de lucro + faturação. */
+function SingleDayDualView({ point }: { point: ProfitChartPoint }) {
+  const profit = point.profit;
+  const revenue = point.revenue;
+  const profitFmt =
+    point.profitFmt ?? (profit != null ? compactBarLabel(profit) : "—");
+  const revenueFmt =
+    point.revenueFmt ?? (revenue != null ? compactBarLabel(revenue) : "—");
 
   return (
-    <div className={CHART_SINGLE_DAY_CLASS}>
-      <p className="text-xs text-muted-foreground">{point.dateLabel}</p>
-      <p
-        className={cn(
-          "max-w-full truncate text-3xl font-semibold tabular-nums tracking-tight sm:text-4xl",
-          metric === "profit"
-            ? positive
-              ? "text-positive"
-              : "text-negative"
-            : "text-foreground",
-        )}
-      >
-        {fmt}
-      </p>
-      {multiStore && slices.length > 0 && (
-        <ul className="mt-1 w-full max-w-sm space-y-1.5 border-t border-border pt-3">
-          {slices.map((s) => {
-            const sv = sliceValue(s, metric);
-            const row = (
-              <>
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: s.color }}
-                    aria-hidden
-                  />
-                  <Sensitive as="span" className="truncate">
-                    {s.name}
-                  </Sensitive>
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 tabular-nums font-medium",
-                    metric === "profit" && sv.value < 0
-                      ? "text-negative"
-                      : "text-foreground",
-                  )}
-                >
-                  {sv.fmt}
-                </span>
-              </>
-            );
-            if (!onStoreClick) {
-              return (
-                <li
-                  key={s.storeId}
-                  className="flex items-center justify-between gap-3 text-xs"
-                >
-                  {row}
-                </li>
-              );
-            }
-            return (
-              <li key={s.storeId}>
-                <button
-                  type="button"
-                  onClick={() => onStoreClick(s.storeId)}
-                  className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-accent"
-                >
-                  {row}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+    <div className="grid grid-cols-2 gap-3 sm:gap-4">
+      <div className="rounded-lg border border-border px-3 py-3 sm:px-4">
+        <p className="text-[11px] text-muted-foreground">Faturação</p>
+        <p className="mt-0.5 text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
+          <Sensitive>{revenueFmt}</Sensitive>
+        </p>
+      </div>
+      <div className="rounded-lg border border-border px-3 py-3 sm:px-4">
+        <p className="text-[11px] text-muted-foreground">Lucro</p>
+        <p
+          className={cn(
+            "mt-0.5 text-xl font-semibold tabular-nums sm:text-2xl",
+            profit != null && profit < 0 ? "text-negative" : "text-foreground",
+          )}
+        >
+          <Sensitive>{profitFmt}</Sensitive>
+        </p>
+      </div>
     </div>
   );
 }
@@ -685,125 +350,46 @@ function SingleDayProfitView({
 function ProfitTooltip({
   active,
   payload,
-  multiStore,
-  metric,
-  onStoreClick,
 }: {
   active?: boolean;
   payload?: Array<{ payload: ProfitChartPoint }>;
-  multiStore?: boolean;
-  metric: ChartMetric;
-  onStoreClick?: (storeId: string) => void;
 }) {
   if (!active || !payload?.length) return null;
   const point = payload[0].payload as ProfitChartPoint;
-  const { value, fmt } = metricValue(point, metric);
-  if (value == null) return null;
-  const positive = value >= 0;
-  const slices = point.byStore ?? [];
-  const totalLabel = metric === "revenue" ? "Faturação" : "Lucro";
+  const profit = point.profit;
+  const revenue = point.revenue;
+  if (profit == null && revenue == null) return null;
+  const profitFmt =
+    point.profitFmt ?? (profit != null ? compactBarLabel(profit) : "—");
+  const revenueFmt =
+    point.revenueFmt ?? (revenue != null ? compactBarLabel(revenue) : "—");
 
   return (
     <div className="max-w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-border bg-surface px-3 py-2 text-sm">
       <p className="text-xs text-muted-foreground">{point.dateLabel}</p>
-      {multiStore ? (
-        <>
-          <p className="mt-1 text-xs font-medium text-muted-foreground">
-            {totalLabel}
-          </p>
+      <div className="mt-1.5 grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-[11px] text-muted-foreground">Faturação</p>
+          <p className="font-semibold tabular-nums text-foreground">{revenueFmt}</p>
+        </div>
+        <div>
+          <p className="text-[11px] text-muted-foreground">Lucro</p>
           <p
             className={cn(
               "font-semibold tabular-nums",
-              metric === "profit"
-                ? positive
-                  ? "text-positive"
-                  : "text-negative"
-                : "text-foreground",
+              profit != null && profit < 0 ? "text-negative" : "text-foreground",
             )}
           >
-            {fmt}
+            {profitFmt}
           </p>
-          {slices.length > 0 && (
-            <ul className="mt-2 space-y-1.5 border-t border-border pt-2">
-              {slices.map((s) => {
-                const sv = sliceValue(s, metric);
-                const row = (
-                  <>
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: s.color }}
-                        aria-hidden
-                      />
-                      <Sensitive as="span" className="truncate">
-                        {s.name}
-                      </Sensitive>
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 tabular-nums font-medium",
-                        metric === "profit" && sv.value < 0
-                          ? "text-negative"
-                          : "text-foreground",
-                      )}
-                    >
-                      {sv.fmt}
-                    </span>
-                  </>
-                );
-                if (!onStoreClick) {
-                  return (
-                    <li
-                      key={s.storeId}
-                      className="flex items-center justify-between gap-3 text-xs"
-                    >
-                      {row}
-                    </li>
-                  );
-                }
-                return (
-                  <li key={s.storeId}>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onStoreClick(s.storeId);
-                      }}
-                      className="flex w-full items-center justify-between gap-3 rounded-md text-left text-xs outline-none hover:bg-muted"
-                    >
-                      {row}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </>
-      ) : (
-        <p
-          className={cn(
-            "mt-0.5 font-semibold tabular-nums",
-            metric === "profit"
-              ? positive
-                ? "text-positive"
-                : "text-negative"
-              : "text-foreground",
-          )}
-        >
-          {fmt}
-        </p>
-      )}
-      {metric === "profit" && point.hasNote && point.notePreview && (
+        </div>
+      </div>
+      {point.hasNote && point.notePreview && (
         <p className="mt-2 border-t border-border pt-2 text-xs text-muted-foreground">
           {point.didScale && (
             <span className="mr-1 font-medium text-accent">Scale ·</span>
           )}
           {point.notePreview}
-        </p>
-      )}
-      {metric === "profit" && point.consolidated === false && (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Lucro provisório (janela de refunds)
         </p>
       )}
     </div>
@@ -829,82 +415,15 @@ function NoteDot(props: {
   );
 }
 
-function seriesLayerOrder(
-  series: ProfitChartSeries[],
-  chartData: Array<ProfitChartPoint & Record<string, unknown>>,
-  dataKey: (s: ProfitChartSeries) => string,
-): ProfitChartSeries[] {
-  const avgAbs = (s: ProfitChartSeries) => {
-    const key = dataKey(s);
-    const total = chartData.reduce(
-      (sum, p) => sum + Math.abs(Number(p[key] ?? 0)),
-      0,
-    );
-    return total / Math.max(chartData.length, 1);
-  };
-  return [...series].sort((a, b) => avgAbs(b) - avgAbs(a));
-}
-
-function ChartLegend({
-  series,
-  onStoreClick,
-}: {
-  series: ProfitChartSeries[];
-  onStoreClick?: (storeId: string) => void;
-}) {
-  return (
-    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-      {series.map((s) => {
-        const body = (
-          <>
-            <span
-              className="h-2 w-2 shrink-0 rounded-full"
-              style={{ backgroundColor: s.color }}
-              aria-hidden
-            />
-            <Sensitive>{s.name}</Sensitive>
-          </>
-        );
-        if (!onStoreClick) {
-          return (
-            <div
-              key={s.storeId}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground"
-            >
-              {body}
-            </div>
-          );
-        }
-        return (
-          <button
-            key={s.storeId}
-            type="button"
-            onClick={() => onStoreClick(s.storeId)}
-            className="flex items-center gap-1.5 rounded-md text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            {body}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export function ProfitChart({
   data,
   series,
+  title = "Faturação / lucro",
 }: {
   data: ProfitChartPoint[];
   series?: ProfitChartSeries[];
+  title?: string;
 }) {
-  const multiStore = Boolean(series && series.length > 1);
-  const [multiView, setMultiView] = useState<MultiStoreView>("stores");
-  const [metric, setMetric] = useState<ChartMetric>("profit");
-  const showPerStore = multiStore && multiView === "stores";
-  const openStore = useOpenStoreDashboard();
-  const onStoreClick = multiStore ? openStore : undefined;
-  const totalDataKey = metric === "revenue" ? "revenue" : "profit";
-
   const axisGranularity: ChartAxisGranularity = useMemo(
     () => resolveChartAxisGranularity(data.length),
     [data.length],
@@ -917,7 +436,7 @@ export function ProfitChart({
     return data;
   }, [data, series, axisGranularity]);
 
-  /** Dados prontos para o Recharts: as chaves s_* levam lucro ou faturação conforme a métrica. */
+  /** Dados com lucro e faturação sempre disponíveis. */
   const chartData = useMemo(() => {
     return seriesSource.map((p) => {
       const row = { ...p } as ProfitChartPoint & Record<string, unknown>;
@@ -947,8 +466,7 @@ export function ProfitChart({
             sumRev += slice.revenue;
           }
 
-          row[s.key] =
-            metric === "revenue" ? revVal : profitVal;
+          row[s.key] = profitVal;
           row[revKey] = revVal;
         }
         if (typeof p.revenue !== "number" && hasSliceRev) {
@@ -960,7 +478,7 @@ export function ProfitChart({
       row.profit = typeof p.profit === "number" ? p.profit : null;
       return row as ProfitChartPoint & Record<string, number | string | null>;
     });
-  }, [seriesSource, series, metric]);
+  }, [seriesSource, series]);
 
   const tickInterval = useMemo(() => {
     if (chartData.length <= 10) return 0;
@@ -997,16 +515,15 @@ export function ProfitChart({
 
   const longRangeChart = axisGranularityResolved === "month";
   const chartMargin = longRangeChart
-    ? { top: 10, right: 10, left: 2, bottom: 6 }
-    : { top: 12, right: 8, left: 2, bottom: 4 };
-  const areaStrokeWidth = longRangeChart ? 1.25 : 1.5;
+    ? { top: 10, right: 12, left: 2, bottom: 6 }
+    : { top: 12, right: 12, left: 2, bottom: 4 };
 
   const yDomain = useMemo((): [number, number] | undefined => {
     return computeChartYDomain(
-      collectChartMetricValues(chartData, metric, series, showPerStore),
-      { anchorZero: metric === "profit" },
+      collectKeyValues(chartData, ["revenue", "profit"]),
+      { anchorZero: true },
     );
-  }, [chartData, metric, series, showPerStore]);
+  }, [chartData]);
 
   const zeroReference = (
     <ReferenceLine
@@ -1024,266 +541,143 @@ export function ProfitChart({
     />
   );
 
+  const legend = (
+    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-sm bg-accent/80" aria-hidden />
+        Faturação
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span
+          className="inline-block h-0 w-3.5 border-t-2 border-dashed border-foreground/70"
+          aria-hidden
+        />
+        Lucro
+      </span>
+    </div>
+  );
+
+  const header = (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h2 className="min-w-0 text-lg font-semibold">{title}</h2>
+      {legend}
+    </div>
+  );
+
   if (chartData.length === 0) {
     return (
-      <div className={CHART_EMPTY_CLASS}>
-        Sem dados no período selecionado.
+      <div className="min-w-0 overflow-hidden" data-sensitive-chart>
+        {header}
+        <div className={CHART_EMPTY_CLASS}>
+          Sem dados no período selecionado.
+        </div>
       </div>
     );
   }
 
   const singleDay = chartData.length === 1;
-  const chartRemountKey = `${metric}-${multiView}`;
-  const lineDataKey = (s: ProfitChartSeries) => s.key;
-  const layeredSeries =
-    showPerStore && series
-      ? seriesLayerOrder(series, chartData, lineDataKey)
-      : series;
 
   return (
-    <div className="mt-4 min-w-0 overflow-hidden" data-sensitive-chart>
-      <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
-        <SegmentToggle
-          ariaLabel="Métrica do gráfico"
-          value={metric}
-          onChange={setMetric}
-          options={[
-            { id: "profit", label: "Lucro" },
-            { id: "revenue", label: "Faturação" },
-          ]}
-        />
-        {multiStore && (
-          <SegmentToggle
-            ariaLabel="Vista do gráfico"
-            value={multiView}
-            onChange={setMultiView}
-            options={[
-              { id: "stores", label: "Por loja" },
-              { id: "total", label: "Total" },
-            ]}
-          />
-        )}
-      </div>
-      {multiStore && onStoreClick && (
-        <p className="mb-2 text-xs text-muted-foreground sm:mb-3">
-          Clica numa loja para abrir a dashboard.
-        </p>
-      )}
+    <div className="min-w-0 overflow-hidden" data-sensitive-chart>
+      {header}
       {singleDay ? (
-        <>
-          <SingleDayProfitView
-            point={chartData[0]}
-            series={series}
-            multiStore={multiStore}
-            showPerStore={showPerStore}
-            metric={metric}
-            onStoreClick={onStoreClick}
-          />
-          {showPerStore && series && (
-            <div className="hidden sm:block">
-              <ChartLegend series={series} onStoreClick={onStoreClick} />
-            </div>
-          )}
-        </>
+        <SingleDayDualView point={chartData[0]} />
       ) : (
         <>
           <div className={CHART_FRAME_CLASS}>
             <ResponsiveContainer width="100%" height="100%">
-              {showPerStore && layeredSeries ? (
-                <AreaChart
-                  key={chartRemountKey}
-                  data={chartData}
-                  margin={chartMargin}
-                >
-                  <defs>
-                    {layeredSeries.map((s) => (
-                      <linearGradient
-                        key={s.storeId}
-                        id={areaGradientId(s.storeId)}
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
-                      >
-                        <stop
-                          offset="0%"
-                          stopColor={s.color}
-                          stopOpacity={longRangeChart ? 0.22 : 0.32}
-                        />
-                        <stop
-                          offset="55%"
-                          stopColor={s.color}
-                          stopOpacity={longRangeChart ? 0.07 : 0.1}
-                        />
-                        <stop offset="100%" stopColor={s.color} stopOpacity={0} />
-                      </linearGradient>
-                    ))}
-                  </defs>
-                  <CartesianGrid
-                    stroke="var(--border)"
-                    strokeDasharray="3 7"
-                    vertical={false}
-                    strokeOpacity={0.45}
-                  />
-                  <XAxis
-                    dataKey="dateKey"
-                    tickLine={false}
-                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.9 }}
-                    tick={{
-                      fill: "var(--muted-foreground)",
-                      fontSize: longRangeChart ? 10 : 11,
-                    }}
-                    ticks={monthTicks}
-                    tickFormatter={formatXAxisTick}
-                    interval={longRangeChart ? 0 : tickInterval}
-                    minTickGap={longRangeChart ? 8 : 24}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.75 }}
-                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                    width={52}
-                    tickFormatter={compactAxisValue}
-                    domain={yDomain}
-                    allowDataOverflow
-                    tickCount={6}
-                  />
-                  {metric === "profit" && zeroReference}
-                  <Tooltip
-                    content={
-                      <ProfitTooltip
-                        multiStore={multiStore}
-                        metric={metric}
-                        onStoreClick={onStoreClick}
-                      />
-                    }
-                    cursor={{
-                      stroke: "var(--muted-foreground)",
-                      strokeWidth: 1,
-                      strokeOpacity: 0.25,
-                    }}
-                  />
-                  {layeredSeries.map((s) => (
-                    <Area
-                      key={`${s.storeId}-${metric}`}
-                      type="monotone"
-                      dataKey={lineDataKey(s)}
-                      name={s.name}
-                      stroke={s.color}
-                      strokeWidth={areaStrokeWidth}
-                      fill={`url(#${areaGradientId(s.storeId)})`}
-                      baseValue={0}
-                      dot={false}
-                      isAnimationActive={false}
-                      connectNulls={false}
-                      style={
-                        onStoreClick ? { cursor: "pointer" } : undefined
-                      }
-                      onClick={() => onStoreClick?.(s.storeId)}
-                      activeDot={{
-                        r: 4,
-                        fill: s.color,
-                        stroke: "var(--surface)",
-                        strokeWidth: 2,
-                        cursor: onStoreClick ? "pointer" : undefined,
-                        onClick: () => onStoreClick?.(s.storeId),
-                      }}
+              <ComposedChart data={chartData} margin={chartMargin}>
+                <defs>
+                  <linearGradient id="revenue-area-total" x1="0" y1="0" x2="0" y2="1">
+                    <stop
+                      offset="0%"
+                      stopColor="var(--accent)"
+                      stopOpacity={longRangeChart ? 0.28 : 0.36}
                     />
-                  ))}
-                </AreaChart>
-              ) : (
-                <AreaChart
-                  key={chartRemountKey}
-                  data={chartData}
-                  margin={chartMargin}
-                >
-                  <defs>
-                    <linearGradient id="profit-area-total" x1="0" y1="0" x2="0" y2="1">
-                      <stop
-                        offset="0%"
-                        stopColor="var(--accent)"
-                        stopOpacity={longRangeChart ? 0.2 : 0.28}
-                      />
-                      <stop
-                        offset="55%"
-                        stopColor="var(--accent)"
-                        stopOpacity={longRangeChart ? 0.06 : 0.08}
-                      />
-                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    stroke="var(--border)"
-                    strokeDasharray="3 7"
-                    vertical={false}
-                    strokeOpacity={0.45}
-                  />
-                  <XAxis
-                    dataKey="dateKey"
-                    tickLine={false}
-                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.9 }}
-                    tick={{
-                      fill: "var(--muted-foreground)",
-                      fontSize: longRangeChart ? 10 : 11,
-                    }}
-                    ticks={monthTicks}
-                    tickFormatter={formatXAxisTick}
-                    interval={longRangeChart ? 0 : tickInterval}
-                    minTickGap={longRangeChart ? 8 : 24}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={{ stroke: "var(--border)", strokeOpacity: 0.75 }}
-                    tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                    width={52}
-                    tickFormatter={compactAxisValue}
-                    domain={yDomain}
-                    allowDataOverflow
-                    tickCount={6}
-                  />
-                  {metric === "profit" && zeroReference}
-                  <Tooltip
-                    content={
-                      <ProfitTooltip
-                        multiStore={multiStore}
-                        metric={metric}
-                        onStoreClick={onStoreClick}
-                      />
-                    }
-                    cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey={totalDataKey}
-                    stroke="var(--accent)"
-                    strokeWidth={longRangeChart ? 2 : areaStrokeWidth}
-                    fill="url(#profit-area-total)"
-                    baseValue={0}
-                    isAnimationActive={false}
-                    connectNulls={false}
-                    dot={metric === "profit" ? <NoteDot /> : false}
-                    activeDot={{
-                      r: 4,
-                      fill: "var(--accent)",
-                      stroke: "var(--surface)",
-                      strokeWidth: 2,
-                    }}
-                  />
-                </AreaChart>
-              )}
+                    <stop
+                      offset="55%"
+                      stopColor="var(--accent)"
+                      stopOpacity={longRangeChart ? 0.08 : 0.12}
+                    />
+                    <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  stroke="var(--border)"
+                  strokeDasharray="3 7"
+                  vertical={false}
+                  strokeOpacity={0.45}
+                />
+                <XAxis
+                  dataKey="dateKey"
+                  tickLine={false}
+                  axisLine={{ stroke: "var(--border)", strokeOpacity: 0.9 }}
+                  tick={{
+                    fill: "var(--muted-foreground)",
+                    fontSize: longRangeChart ? 10 : 11,
+                  }}
+                  ticks={monthTicks}
+                  tickFormatter={formatXAxisTick}
+                  interval={longRangeChart ? 0 : tickInterval}
+                  minTickGap={longRangeChart ? 8 : 24}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={{ stroke: "var(--border)", strokeOpacity: 0.75 }}
+                  tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                  width={52}
+                  tickFormatter={compactAxisValue}
+                  domain={yDomain}
+                  allowDataOverflow
+                  tickCount={6}
+                />
+                {zeroReference}
+                <Tooltip
+                  content={<ProfitTooltip />}
+                  cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  name="Faturação"
+                  stroke="var(--accent)"
+                  strokeWidth={longRangeChart ? 1.5 : 1.75}
+                  fill="url(#revenue-area-total)"
+                  baseValue={0}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  dot={false}
+                  activeDot={{
+                    r: 3.5,
+                    fill: "var(--accent)",
+                    stroke: "var(--surface)",
+                    strokeWidth: 2,
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="profit"
+                  name="Lucro"
+                  stroke="var(--foreground)"
+                  strokeOpacity={0.85}
+                  strokeWidth={longRangeChart ? 1.75 : 2}
+                  strokeDasharray="5 4"
+                  dot={<NoteDot />}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  activeDot={{
+                    r: 4,
+                    fill: "var(--foreground)",
+                    stroke: "var(--surface)",
+                    strokeWidth: 2,
+                  }}
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
-          {showPerStore && series && (
-            <ChartLegend series={series} onStoreClick={onStoreClick} />
-          )}
+          <div className="mt-3 sm:hidden">{legend}</div>
         </>
       )}
-      {metric === "profit" &&
-        chartData.some((p) => p.consolidated === false) && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Dias recentes = lucro provisório (reembolsos ainda podem entrar).
-          </p>
-        )}
     </div>
   );
 }

@@ -66,28 +66,16 @@ export default async function NotasPage({
   const canEdit = ["owner", "admin", "editor"].includes(user.role);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {scopeName ? (
-            <>
-              Notas · <span data-sensitive>{scopeName}</span>
-            </>
-          ) : (
-            "Notas & Relatórios"
-          )}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {scopeName ? (
-            "Diário de operação desta loja."
-          ) : (
-            <>
-              Diário de operação — workspace{" "}
-              <span data-sensitive>{user.workspaceName}</span>.
-            </>
-          )}
-        </p>
-      </div>
+    <div className="mx-auto max-w-4xl space-y-4">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {scopeName ? (
+          <>
+            Notas · <span data-sensitive>{scopeName}</span>
+          </>
+        ) : (
+          "Notas & Relatórios"
+        )}
+      </h1>
 
       <NotasView
         scopeName={scopeName}

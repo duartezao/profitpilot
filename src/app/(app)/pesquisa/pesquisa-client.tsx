@@ -205,16 +205,10 @@ export function PesquisaClient({
   }, [rows]);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Product & Collection Research
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Biblioteca partilhada do workspace. A data preenche-se sozinha ao
-          criar; podes alterar depois.
-        </p>
-      </div>
+    <div className="mx-auto max-w-7xl space-y-4">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        Product & Collection Research
+      </h1>
 
       {error && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">

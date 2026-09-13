@@ -269,20 +269,14 @@ export function PrecosClient({
     );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Preço & COGS
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Só variantes com vendas. Histórico de preço e COGS, unidades por
-            período e simulador de BER.
-          </p>
-        </div>
+    <div className="mx-auto max-w-6xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Preço & COGS
+        </h1>
         <Link
           href={`/produtos?store=${encodeURIComponent(storeId)}`}
-          className="text-sm text-accent hover:underline"
+          className="text-sm text-muted-foreground hover:text-foreground"
         >
           Voltar a Produtos
         </Link>
@@ -334,7 +328,7 @@ export function PrecosClient({
           </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-4">
           {!variantId && (
             <p className="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-muted-foreground">
               Escolhe uma variante à esquerda.

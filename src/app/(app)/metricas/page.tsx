@@ -73,7 +73,7 @@ export default async function MetricasPage({
         </div>
       }
     >
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className="mx-auto max-w-7xl space-y-4">
         {showReport && storeId && <OverviewSection storeId={storeId} />}
         <MetricasClient
           initialPanelPrefs={initialPanelPrefs}

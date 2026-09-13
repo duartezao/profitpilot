@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { refreshLiveQueries } from "@/lib/refresh-live-queries";
 
-/** Mesmo refresh do pull-to-refresh mobile (`?fresh=1` + RSC). */
+/** Mesmo refresh do botão Actualizar, PTR e F5 (`?fresh=1` + RSC). */
 export function useLiveRefresh() {
   const queryClient = useQueryClient();
   const router = useRouter();

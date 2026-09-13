@@ -20,6 +20,7 @@ export function KpiCard({
   trend?: number[];
 }) {
   const positive = (delta ?? 0) >= 0;
+  const significant = Math.abs(delta ?? 0) >= 10;
 
   return (
     <div className="min-w-0 rounded-lg border border-border bg-surface p-5">
@@ -38,7 +39,11 @@ export function KpiCard({
           <Sensitive
             className={cn(
               "inline-flex items-center gap-0.5 text-sm font-medium tabular-nums",
-              positive ? "text-positive" : "text-negative",
+              significant
+                ? positive
+                  ? "text-positive"
+                  : "text-negative"
+                : "text-muted-foreground",
             )}
           >
             {positive ? (
@@ -46,7 +51,7 @@ export function KpiCard({
             ) : (
               <ArrowDownRight className="h-3.5 w-3.5" />
             )}
-            {Math.abs(delta).toFixed(1)}%
+            {Math.abs(delta).toFixed(1).replace(".", ",")}%
           </Sensitive>
         ) : (
           <span />

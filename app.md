@@ -123,9 +123,9 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 > Resumo abaixo. A **fonte completa e canónica** (cores hex, tipografia, componentes, Tailwind config e variáveis CSS) está em **`design-system.md`** — seguir esse ficheiro a 100%.
 
 * **Tipografia**: Inter (ou Geist). Números **tabulares** (`font-variant-numeric: tabular-nums`). Títulos semibold, corpo regular.
-* **Cores (light)**: fundo principal `#F7F7F9`, sidebar `#F4F3F8`, cartões `#FFFFFF` com borda `#E8E7EC`, texto principal `#111827`, texto secundário `#64748B`, muted `#F0EFF4`.
-* **Cores (dark)**: fundo quase preto `#09090B`, sidebar `#0C0C0E`, cartão `#141416`, borda `#27272A`, texto `#FAFAFA`, muted `#1A1820`. Accent lavanda `#A89AD9`.
-* **Accent** (discreto): lavanda `#7C6BC4` light / `#A89AD9` dark (item ativo, links, seleção, gráficos).
+* **Cores (light)**: fundo principal `#F2F2F4`, sidebar `#EEEEF0`, cartões `#FAFAFA` com borda `#DDDDE1`, texto principal `#18181B`, texto secundário `#71717A`, muted `#EAEAEC`.
+* **Cores (dark)**: fundo quase preto `#09090B`, sidebar `#0C0C0E`, cartão `#141416`, borda `#27272A`, texto `#FAFAFA`, muted `#1A1820`. Accent índigo `#9B9AD4`.
+* **Accent** (discreto): índigo seco `#5B5EA6` light / `#9B9AD4` dark (item ativo, links, seleção, gráficos).
 * **Semânticas**: lucro/positivo verde `#16A34A`; prejuízo/negativo vermelho `#DC2626`; aviso âmbar `#D97706`. Usadas **só** em valores e estados, nunca como decoração.
 * **Cantos**: `rounded-lg` (~8px) em cartões e botões.
 * **Sombras**: nenhuma ou muito subtil (`shadow-sm`); preferir **borda** a sombra.

@@ -22,9 +22,11 @@ function isActive(pathname: string, href: string) {
 function NavLinkInner({
   item,
   pending,
+  collapsed,
 }: {
   item: NavItem;
   pending: boolean;
+  collapsed?: boolean;
 }) {
   const Icon = item.icon;
   return (
@@ -32,17 +34,27 @@ function NavLinkInner({
       <Icon
         className={cn(
           "h-4 w-4 shrink-0 transition-opacity duration-100",
+          collapsed && "h-[18px] w-[18px]",
           pending && "opacity-40",
         )}
       />
-      <span className={cn(pending && "opacity-60")}>{item.label}</span>
+      {!collapsed && (
+        <span className={cn(pending && "opacity-60")}>{item.label}</span>
+      )}
+      {collapsed && <span className="sr-only">{item.label}</span>}
     </>
   );
 }
 
-function NavLinkStatus({ item }: { item: NavItem }) {
+function NavLinkStatus({
+  item,
+  collapsed,
+}: {
+  item: NavItem;
+  collapsed?: boolean;
+}) {
   const { pending } = useLinkStatus();
-  return <NavLinkInner item={item} pending={pending} />;
+  return <NavLinkInner item={item} pending={pending} collapsed={collapsed} />;
 }
 
 function NavLink({
@@ -50,11 +62,13 @@ function NavLink({
   pathname,
   href,
   compact,
+  collapsed,
 }: {
   item: NavItem;
   pathname: string;
   href: string;
   compact?: boolean;
+  collapsed?: boolean;
 }) {
   const active = isActive(pathname, item.href);
   return (
@@ -62,16 +76,21 @@ function NavLink({
       href={href}
       prefetch
       scroll={false}
+      title={collapsed ? item.label : undefined}
       className={cn(
         TAP_PRESS,
-        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium",
-        compact ? "px-2.5 py-1.5" : "",
+        "flex items-center gap-3 rounded-lg text-sm font-medium",
+        collapsed
+          ? "justify-center px-0 py-2.5"
+          : compact
+            ? "px-2.5 py-1.5"
+            : "px-3 py-2.5",
         active
           ? "bg-accent/10 text-accent dark:bg-muted"
           : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
       )}
     >
-      <NavLinkStatus item={item} />
+      <NavLinkStatus item={item} collapsed={collapsed} />
     </Link>
   );
 }
@@ -79,9 +98,12 @@ function NavLink({
 export function AppNavLinks({
   items,
   variant = "sidebar",
+  collapsed = false,
 }: {
   items?: NavItem[];
   variant?: "sidebar" | "horizontal";
+  /** Só ícones — sidebar estreita. */
+  collapsed?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -121,7 +143,9 @@ export function AppNavLinks({
     );
   }
 
-  const showGroups = groups.length > 1 || (groups[0]?.label ?? "").length > 0;
+  const showGroups =
+    !collapsed &&
+    (groups.length > 1 || (groups[0]?.label ?? "").length > 0);
 
   if (!showGroups) {
     return (
@@ -132,6 +156,7 @@ export function AppNavLinks({
             item={item}
             pathname={pathname}
             href={hrefWithScope(item.href, searchParams)}
+            collapsed={collapsed}
           />
         ))}
       </nav>
@@ -154,6 +179,7 @@ export function AppNavLinks({
                 item={item}
                 pathname={pathname}
                 href={hrefWithScope(item.href, searchParams)}
+                collapsed={collapsed}
               />
             ))}
           </div>

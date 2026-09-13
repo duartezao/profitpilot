@@ -28,7 +28,7 @@ export default async function ReembolsosPage({
   if (!storeId) redirect("/dashboard");
   if (!canAccessStore(user.storeAccess, storeId)) redirect("/dashboard");
 
-  const { rows, stats, storeName, periodLabel } = await listStoreRefunds(
+  const { rows, stats, storeName } = await listStoreRefunds(
     user,
     storeId,
     { period, from, to, dates },
@@ -53,16 +53,11 @@ export default async function ReembolsosPage({
     : `/api/export/refunds?store=${storeId}`;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
+    <div className="mx-auto max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">
           Reembolsos · <span data-sensitive>{storeName || "Loja"}</span>
         </h1>
-        <p className="text-sm text-muted-foreground">
-          Refunds e impacto no lucro · {periodLabel}
-        </p>
-        </div>
         {rows.length > 0 && (
         <ExportFormatLinks href={exportHref} />
         )}
@@ -95,7 +90,6 @@ export default async function ReembolsosPage({
       ) : (
         <CollapsibleSection
           title="Lista de reembolsos"
-          description={`${rows.length} encomendas com refund no período.`}
           badge={
             <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
               {rows.length}

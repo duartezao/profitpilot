@@ -27,13 +27,13 @@
 
 | Token | Hex | Uso |
 |---|---|---|
-| `background` | `#F7F7F9` | Fundo da área principal |
-| `sidebar` | `#F4F3F8` | Sidebar (lavanda muito suave sobre o fundo) |
-| `surface` / card | `#FFFFFF` | Cartões (distinguidos por borda) |
-| `muted` | `#F0EFF4` | Fundos subtis, hover de linha, item ativo |
-| `border` | `#E8E7EC` | Bordas de cartões, tabelas, inputs |
-| `foreground` | `#111827` | Texto principal |
-| `muted-foreground` | `#64748B` | Texto secundário, labels |
+| `background` | `#F2F2F4` | Fundo da área principal (slate frio, menos brilho) |
+| `sidebar` | `#EEEEF0` | Sidebar neutra (sem tom lavanda) |
+| `surface` / card | `#FAFAFA` | Cartões off-white (não puro branco) |
+| `muted` | `#EAEAEC` | Fundos subtis, hover de linha, item ativo |
+| `border` | `#DDDDE1` | Bordas de cartões, tabelas, inputs |
+| `foreground` | `#18181B` | Texto principal |
+| `muted-foreground` | `#71717A` | Texto secundário, labels |
 
 ### Dark mode
 
@@ -42,7 +42,7 @@
 | `background` | `#09090B` | Fundo quase preto (neutro, sem azul) |
 | `sidebar` | `#0C0C0E` | Sidebar ligeiramente elevada |
 | `surface` / card | `#141416` | Cartões |
-| `muted` | `#1A1820` | Fundos subtis, item ativo (tom lavanda muito suave) |
+| `muted` | `#1A1820` | Fundos subtis, item ativo |
 | `border` | `#27272A` | Bordas |
 | `foreground` | `#FAFAFA` | Texto principal |
 | `muted-foreground` | `#A1A1AA` | Texto secundário |
@@ -51,7 +51,7 @@
 
 | Token | Hex | Uso |
 |---|---|---|
-| `accent` (lavanda) | `#7C6BC4` light / `#A89AD9` dark | Item ativo, links, seleção, foco, gráficos |
+| `accent` (índigo seco) | `#5B5EA6` light / `#9B9AD4` dark | Item ativo, links, seleção, foco, gráficos |
 | `accent-foreground` | `#FFFFFF` light / `#0A0A0B` dark | Texto sobre accent |
 | `positive` (verde) | `#16A34A` | Lucro, crescimento, status "Scale" |
 | `negative` (vermelho) | `#DC2626` | Prejuízo, queda, status "Kill" |
@@ -107,7 +107,7 @@
 * **Ghost**: sem fundo, texto `foreground`, hover `muted`.
 
 ### Navegação
-* **Desktop**: sidebar fixa à esquerda, ~240–256px, fundo `sidebar` (lavanda suave no light). Espaçamento generoso entre grupos (`space-y-6`) e itens (`py-2.5`). Secções em uppercase discreto. Item ativo com fundo `accent/10` (light) ou `muted` (dark) + texto `accent`. Sem borda sob o logo.
+* **Desktop**: sidebar fixa à esquerda, colapsável (~240–256px aberta / ~68px só ícones). Fundo `sidebar`. Preferência guardada no browser. Espaçamento generoso entre grupos (`space-y-6`) e itens (`py-2.5`). Secções em uppercase discreto. Item ativo com fundo `accent/10` (light) ou `muted` (dark) + texto `accent`. Sem borda sob o logo.
 * **Mobile**: barra inferior com 4 itens (ícone + label 11–12px), item ativo a `accent`.
 * Top bar: seletor de loja, seletor de período, avatar.
 
@@ -115,7 +115,7 @@
 
 ## 6. Gráficos (Recharts / Tremor)
 
-* Linhas/áreas: cor `accent` (`#7C6BC4`); área com opacidade baixa, sem gradiente forte.
+* Linhas/áreas: cor `accent` (`#5B5EA6`); área com opacidade baixa, sem gradiente forte.
 * Waterfall: barras neutras a `chart-neutral` e barra final de lucro a `chart-positive`; passos negativos com tom neutro mais claro.
 * Eixos e grelha: cinza muito subtil; sem fundos coloridos.
 * Sparklines: 1px, sem pontos, sem eixos.
@@ -131,14 +131,14 @@
 
 ```css
 :root {
-  --background: #F7F7F9;
-  --sidebar: #F4F3F8;
-  --surface: #FFFFFF;
-  --muted: #F0EFF4;
-  --border: #E8E7EC;
-  --foreground: #111827;
-  --muted-foreground: #64748B;
-  --accent: #7C6BC4;
+  --background: #F2F2F4;
+  --sidebar: #EEEEF0;
+  --surface: #FAFAFA;
+  --muted: #EAEAEC;
+  --border: #DDDDE1;
+  --foreground: #18181B;
+  --muted-foreground: #71717A;
+  --accent: #5B5EA6;
   --accent-foreground: #FFFFFF;
   --positive: #16A34A;
   --negative: #DC2626;
@@ -156,7 +156,7 @@
   --border: #27272A;
   --foreground: #FAFAFA;
   --muted-foreground: #A1A1AA;
-  --accent: #A89AD9;
+  --accent: #9B9AD4;
   --accent-foreground: #0A0A0B;
   --chart-positive: #6B9B6B;
   --chart-neutral: #71717A;

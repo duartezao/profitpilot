@@ -362,7 +362,6 @@ function CampaignSection({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-5">
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold">{section.title}</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">{section.description}</p>
           {isPause && (
             <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
               {noSales.length > 0 && (
@@ -476,21 +475,15 @@ export function DecisaoClient() {
   ).filter((s) => s.rows.length > 0);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto max-w-6xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Decisão — Campanhas</h1>
-          <p className="text-sm text-muted-foreground">
-            {data?.scopeName ? (
-              <>
-                <Sensitive as="span">{data.scopeName}</Sensitive>
-                {" · "}
-                {data.analysisWindowDays} dias com gasto
-              </>
-            ) : (
-              "Seleciona uma loja para analisar campanhas."
-            )}
-          </p>
+          {data?.scopeName && (
+            <p className="text-sm text-muted-foreground">
+              <Sensitive as="span">{data.scopeName}</Sensitive>
+            </p>
+          )}
         </div>
 
         {storeId && (
