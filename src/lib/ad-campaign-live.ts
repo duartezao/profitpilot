@@ -46,7 +46,7 @@ async function fetchLiveForAccount(
 ): Promise<LiveCampaignRow[]> {
   if (platform === "google" && !googleAdsServerConfigStatus().apiReady) {
     throw new Error(
-      "Google Ads API indisponível — confirma GOOGLE_ADS_DEVELOPER_TOKEN.",
+      "Google Ads API indisponível — confirma GOOGLE_ADS_CLIENT_ID e GOOGLE_ADS_CLIENT_SECRET.",
     );
   }
 
