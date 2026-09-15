@@ -384,7 +384,7 @@ export async function discoverAdAccountsAction(
       if (!googleAdsServerConfigStatus().apiReady) {
         return {
           error:
-            "Pesquisa automática indisponível — falta GOOGLE_ADS_DEVELOPER_TOKEN na Vercel. Usa «Customer ID manual» com o ID da conta (ex: 962-828-5107).",
+            "Pesquisa automática indisponível — falta GOOGLE_ADS_CLIENT_ID / GOOGLE_ADS_CLIENT_SECRET no servidor. Usa «Customer ID manual» com o ID da conta (ex: 962-828-5107).",
         };
       }
       const accounts = await listGoogleAdAccounts(trimmed);

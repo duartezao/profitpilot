@@ -33,6 +33,8 @@ export function GoogleWorkspaceLoginsPanel({
 
   const [apiStatus, setApiStatus] = useState<{
     apiReady?: boolean;
+    clientIdConfigured?: boolean;
+    clientSecretConfigured?: boolean;
     developerTokenConfigured?: boolean;
     apiVersion?: string;
     apiProbe?: { ok: boolean; error?: string };
@@ -97,13 +99,14 @@ export function GoogleWorkspaceLoginsPanel({
             )}
             {apiStatus.apiVersion ? ` · ${apiStatus.apiVersion}` : ""}
           </p>
-          {!apiStatus.developerTokenConfigured && (
+          {!apiStatus.clientIdConfigured || !apiStatus.clientSecretConfigured ? (
             <p className="mt-1">
-              Falta <code className="text-foreground">GOOGLE_ADS_DEVELOPER_TOKEN</code>{" "}
-              no ambiente onde a app corre (Vercel → Settings → Environment
-              Variables → <strong>Redeploy</strong>).
+              Falta{" "}
+              <code className="text-foreground">GOOGLE_ADS_CLIENT_ID</code> /{" "}
+              <code className="text-foreground">GOOGLE_ADS_CLIENT_SECRET</code>{" "}
+              no ambiente (Vercel → Environment Variables → Redeploy).
             </p>
-          )}
+          ) : null}
           {apiStatus.apiProbe && !apiStatus.apiProbe.ok && (
             <p className="mt-1 text-negative">{apiStatus.apiProbe.error}</p>
           )}

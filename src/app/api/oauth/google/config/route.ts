@@ -49,7 +49,7 @@ export async function GET(request: Request) {
         Boolean(redirectUri),
       apiProbe,
       hint:
-        "OAuth: client id + secret + redirectUri. API: GOOGLE_ADS_DEVELOPER_TOKEN + versão (GOOGLE_ADS_API_VERSION, default v23). Na Vercel: redeploy após adicionar variáveis.",
+        "OAuth/API: GOOGLE_ADS_CLIENT_ID + GOOGLE_ADS_CLIENT_SECRET (+ redirect). Developer token opcional (sunset Google 2026-09-09). Versão: GOOGLE_ADS_API_VERSION (default v23). Na Vercel: redeploy após adicionar variáveis.",
     });
   } catch (e) {
     return authErrorResponse(e);

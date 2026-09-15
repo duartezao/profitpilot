@@ -3,7 +3,8 @@
  * @see https://developers.google.com/google-ads/api/docs/start
  *
  * Por conta: refresh token OAuth + customer ID (10 dígitos).
- * Servidor: GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET.
+ * Servidor: GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET.
+ * GOOGLE_ADS_DEVELOPER_TOKEN é opcional (sunset Google 2026-09-09 — acesso via Cloud project).
  */
 
 import {
@@ -159,13 +160,10 @@ function requireGoogleOAuthEnv() {
 }
 
 function requireGoogleApiEnv() {
-  const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim();
   const { clientId, clientSecret } = requireGoogleOAuthEnv();
-  if (!developerToken) {
-    throw new GoogleAdsApiError(
-      "Google Ads API não configurada no servidor — falta GOOGLE_ADS_DEVELOPER_TOKEN na Vercel. Podes guardar a conta com Customer ID; o sync automático só funciona depois de configurares o token.",
-    );
-  }
+  /** Opcional desde o sunset do developer token (2026-09-09). */
+  const developerToken =
+    process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim() || undefined;
   return { developerToken, clientId, clientSecret };
 }
 
@@ -174,10 +172,14 @@ function requireGoogleEnv() {
   return requireGoogleApiEnv();
 }
 
-/** Diagnóstico — OAuth pode funcionar só com client id/secret; a API exige também developer token. */
+/**
+ * Diagnóstico — API pronta com OAuth (client id + secret).
+ * Developer token é opcional (ignorado pela Google; acesso no Cloud project).
+ */
 export function googleAdsServerConfigStatus(): {
   clientIdConfigured: boolean;
   clientSecretConfigured: boolean;
+  /** @deprecated Opcional — mantido para UI/diagnóstico. */
   developerTokenConfigured: boolean;
   apiReady: boolean;
   apiVersion: string;
@@ -193,13 +195,12 @@ export function googleAdsServerConfigStatus(): {
     clientIdConfigured,
     clientSecretConfigured,
     developerTokenConfigured,
-    apiReady:
-      clientIdConfigured && clientSecretConfigured && developerTokenConfigured,
+    apiReady: clientIdConfigured && clientSecretConfigured,
     apiVersion: API_VERSION,
   };
 }
 
-/** Testa se o developer token responde (sem expor o token). */
+/** Testa se OAuth + API respondem (sem expor segredos). */
 export async function probeGoogleAdsApiAccess(
   refreshToken: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -214,6 +215,9 @@ export async function probeGoogleAdsApiAccess(
 
 export function isGoogleAdsServerConfigError(message: string): boolean {
   return (
+    message.includes("OAuth Google não configurado") ||
+    message.includes("GOOGLE_ADS_CLIENT_ID") ||
+    message.includes("GOOGLE_ADS_CLIENT_SECRET") ||
     message.includes("Google Ads API não configurada no servidor") ||
     message.includes("falta GOOGLE_ADS_DEVELOPER_TOKEN")
   );
@@ -296,24 +300,45 @@ export function humanizeGoogleAdsError(
   if (
     m.includes("caller does not have permission") ||
     m.includes("permission_denied") ||
-    m.includes("user_permission_denied")
+    m.includes("user_permission_denied") ||
+    m.includes("action_not_permitted") ||
+    m.includes("cloud_project_not_approved")
   ) {
     return (
       `Sem permissão na conta Google Ads${idHint}. Confirma: (1) o Gmail em Definições é o que aceitou o convite; ` +
-      `(2) o developer token tem acesso Basic/Standard no API Center (modo Test só acede a contas de teste); ` +
+      `(2) o projeto Google Cloud do Client ID tem acesso Explorer/Basic/Standard à Ads API (Google Cloud Console → Google Ads API); ` +
       `(3) se a conta foi partilhada via MCC, indica o Customer ID do gestor (MCC) ao ligar a conta; ` +
       `(4) o Customer ID da conta está correcto. O gasto manual continua a funcionar.`
     );
   }
   if (m.includes("test account")) {
     return (
-      "Developer token em modo Test — só acede a contas de teste. Pede acesso Basic/Standard no Google Ads API Center."
+      "O projeto Google Cloud só tem acesso de teste — não lê contas de produção. Pede Explorer/Basic/Standard em Google Cloud Console → Google Ads API."
     );
   }
   if (m.includes("unauthenticated") || m.includes("developer-token")) {
-    return `Developer token ou OAuth rejeitado pela Google: ${raw}`;
+    return `OAuth rejeitado pela Google: ${raw}`;
   }
   return raw;
+}
+
+function googleAdsAuthHeaders(
+  accessToken: string,
+  loginCustomerId?: string,
+): Record<string, string> {
+  const { developerToken } = requireGoogleApiEnv();
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+  // Opcional — Google ignora desde 2026-09-09; enviado só se ainda estiver no env.
+  if (developerToken) {
+    headers["developer-token"] = developerToken;
+  }
+  if (loginCustomerId) {
+    headers["login-customer-id"] = loginCustomerId;
+  }
+  return headers;
 }
 
 async function googleAdsSearchOnce<T>(
@@ -322,16 +347,8 @@ async function googleAdsSearchOnce<T>(
   query: string,
   loginCustomerId?: string,
 ): Promise<T[]> {
-  const { developerToken } = requireGoogleApiEnv();
   const cid = normalizeCustomerId(customerId);
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
-    "developer-token": developerToken,
-    "Content-Type": "application/json",
-  };
-  if (loginCustomerId) {
-    headers["login-customer-id"] = loginCustomerId;
-  }
+  const headers = googleAdsAuthHeaders(accessToken, loginCustomerId);
 
   const all: T[] = [];
   let pageToken: string | undefined;
@@ -501,12 +518,10 @@ export async function resolveGoogleLoginCustomerId(
 async function fetchAccessibleCustomerIds(
   accessToken: string,
 ): Promise<string[]> {
-  const { developerToken } = requireGoogleApiEnv();
+  const headers = googleAdsAuthHeaders(accessToken);
+  delete headers["Content-Type"];
   const res = await fetch(`${GOOGLE_ADS_BASE}/customers:listAccessibleCustomers`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "developer-token": developerToken,
-    },
+    headers,
     cache: "no-store",
   });
   const json = (await res.json()) as {
@@ -616,7 +631,7 @@ export async function listGoogleAdAccounts(
 
   if (directIds.length === 0) {
     throw new GoogleAdsApiError(
-      "Nenhuma conta Google Ads acessível com este Gmail. Confirma: (1) autorizaste o mesmo Gmail em Definições que aceitou o convite na conta; (2) o convite foi aceite no Google Ads; (3) o developer token não está só em modo Test. Podes ligar com Customer ID manual.",
+      "Nenhuma conta Google Ads acessível com este Gmail. Confirma: (1) autorizaste o mesmo Gmail em Definições que aceitou o convite na conta; (2) o convite foi aceite no Google Ads; (3) o projeto Cloud do Client ID tem acesso Explorer/Basic/Standard à Ads API. Podes ligar com Customer ID manual.",
     );
   }
 

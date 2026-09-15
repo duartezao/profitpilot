@@ -104,7 +104,7 @@ export function GoogleAdsStoreLink({
           {!googleAdsApiReady && (
             <span className="text-warning">
               {" "}
-              Sync automático pendente (developer token).
+              Sync automático pendente (OAuth Google no servidor).
             </span>
           )}
         </p>
@@ -126,8 +126,9 @@ export function GoogleAdsStoreLink({
             </p>
             {!googleAdsApiReady && (
               <p className="mt-2 text-xs text-warning">
-                Sync automático pendente — confirma GOOGLE_ADS_DEVELOPER_TOKEN no
-                servidor. O gasto manual na tabela abaixo funciona na mesma.
+                Sync automático pendente — confirma GOOGLE_ADS_CLIENT_ID e
+                GOOGLE_ADS_CLIENT_SECRET no servidor. O gasto manual na tabela
+                abaixo funciona na mesma.
               </p>
             )}
           </div>
@@ -223,10 +224,14 @@ export function GoogleAdsStoreLink({
             <p className="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-muted-foreground">
               O servidor ainda não tem{" "}
               <strong className="font-medium text-foreground">
-                GOOGLE_ADS_DEVELOPER_TOKEN
+                GOOGLE_ADS_CLIENT_ID
+              </strong>{" "}
+              /{" "}
+              <strong className="font-medium text-foreground">
+                GOOGLE_ADS_CLIENT_SECRET
               </strong>{" "}
               (Vercel). Podes guardar a conta com o Customer ID abaixo — o sync
-              automático só arranca quando o token estiver configurado. O gasto
+              automático só arranca quando o OAuth estiver configurado. O gasto
               manual funciona sempre.
             </p>
           )}

@@ -1,7 +1,7 @@
 /**
- * Diagnóstico Google Ads API — developer token + refresh token da BD.
+ * Diagnóstico Google Ads API — OAuth + refresh token da BD.
  * Uso:
- *   GOOGLE_ADS_DEVELOPER_TOKEN=xxx node --experimental-strip-types --import ./tests/resolve-alias.mjs --import ./tests/mock-server-only-hook.mjs scripts/probe-google-ads.ts [storeId]
+ *   node --experimental-strip-types --import ./tests/resolve-alias.mjs --import ./tests/mock-server-only-hook.mjs scripts/probe-google-ads.ts [storeId]
  */
 import { readFileSync } from "node:fs";
 import { createDecipheriv } from "node:crypto";
@@ -80,9 +80,8 @@ function loadEnv() {
 
 async function main() {
   loadEnv();
-  const devToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim();
-  if (!devToken) {
-    console.error("Falta GOOGLE_ADS_DEVELOPER_TOKEN no ambiente.");
+  if (!process.env.GOOGLE_ADS_CLIENT_ID?.trim() || !process.env.GOOGLE_ADS_CLIENT_SECRET?.trim()) {
+    console.error("Falta GOOGLE_ADS_CLIENT_ID / GOOGLE_ADS_CLIENT_SECRET no ambiente.");
     process.exit(1);
   }
   const uri = process.env.MONGODB_URI?.trim();
@@ -109,9 +108,15 @@ async function main() {
     tz,
   );
 
+  const optionalDev = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim();
   console.log("--- Google Ads probe ---");
   console.log("API version:", process.env.GOOGLE_ADS_API_VERSION?.trim() || "v23");
-  console.log("Developer token:", devToken.slice(0, 4) + "…" + devToken.slice(-4));
+  console.log(
+    "Developer token:",
+    optionalDev
+      ? `${optionalDev.slice(0, 4)}…${optionalDev.slice(-4)} (opcional)`
+      : "(não definido — OK desde sunset 2026-09-09)",
+  );
   console.log("Store:", store.name, String(store._id));
 
   const googleAccounts = await AdAccount.find({
