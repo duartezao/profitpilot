@@ -586,17 +586,30 @@ function calcProfit(
   operatingExpenses = 0,
   chargebacks = 0,
 ) {
-  return calcNetProfit(a, adSpend, operatingExpenses, chargebacks);
+  // Portes Shopify (o que o cliente paga) são margem extra, não custo de envio ao fornecedor.
+  return calcNetProfit(
+    { revenue: a.revenue, cogs: a.cogs, shipping: 0, fees: a.fees },
+    adSpend,
+    operatingExpenses,
+    chargebacks,
+  );
 }
 
-/** Lucro diário: custos habituais − reembolsos emitidos nesse dia (REV mantém-se). */
+/** Lucro diário = mesmo Net Profit dos KPIs (REV já é líquida de reembolsos). */
 function calcDailyProfit(
   a: Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">,
   adSpend = 0,
   operatingExpenses = 0,
   chargebacks = 0,
 ) {
-  return calcNetProfit(a, adSpend, operatingExpenses, chargebacks) - (a.refunds ?? 0);
+  return calcProfit(a, adSpend, operatingExpenses, chargebacks);
+}
+
+/** Inputs de margem/BER: portes cobrados ao cliente não contam como custo. */
+function marginInputsFromAgg(
+  a: Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees">,
+) {
+  return { revenue: a.revenue, cogs: a.cogs, shipping: 0, fees: a.fees };
 }
 
 function resolveDailyAdSpend(
@@ -699,8 +712,8 @@ function buildExtendedStoreKpis(
   curChargebacks = 0,
   prevChargebacks = 0,
 ): SummaryKpi[] {
-  const curCm = contributionMarginPct(cur);
-  const prevCm = contributionMarginPct(prev);
+  const curCm = contributionMarginPct(marginInputsFromAgg(cur));
+  const prevCm = contributionMarginPct(marginInputsFromAgg(prev));
   const curAov = cur.orders > 0 ? cur.revenue / cur.orders : null;
   const prevAov = prev.orders > 0 ? prev.revenue / prev.orders : null;
   const curMer =
@@ -741,7 +754,7 @@ function buildExtendedStoreKpis(
       label: "Margem contrib. %",
       value: formatPercent(curCm),
       title:
-        "Margem antes do ad spend (REV − COGS − envio − taxas) / REV",
+        "Margem antes do ad spend (REV − COGS − taxas) / REV",
       delta: curCm - prevCm,
       deltaLabel: deltaSuffix,
       deltaIsPoints: true,
@@ -756,9 +769,12 @@ function buildExtendedStoreKpis(
       icon: "euro",
     },
     {
-      label: "Envio",
+      label: "Portes cobrados",
       value: money(cur.shipping),
-      title: fmtMoney(cur.shipping),
+      title:
+        cur.shipping > 0
+          ? `${fmtMoney(cur.shipping)} — portes pagos pelo cliente (margem extra, não custo)`
+          : "Sem portes cobrados no período",
       delta: deltaPct(cur.shipping, prev.shipping),
       deltaLabel: deltaSuffix,
       icon: "euro",
@@ -867,8 +883,8 @@ function buildExtendedWorkspaceKpis(
   curChargebacks = 0,
   prevChargebacks = 0,
 ): SummaryKpi[] {
-  const curCm = contributionMarginPct(cur);
-  const prevCm = contributionMarginPct(prev);
+  const curCm = contributionMarginPct(marginInputsFromAgg(cur));
+  const prevCm = contributionMarginPct(marginInputsFromAgg(prev));
   const curAov = cur.orders > 0 ? cur.revenue / cur.orders : null;
   const prevAov = prev.orders > 0 ? prev.revenue / prev.orders : null;
   const curProfit = calcProfit(
@@ -913,9 +929,12 @@ function buildExtendedWorkspaceKpis(
       icon: "euro",
     },
     {
-      label: "Envio",
+      label: "Portes cobrados",
       value: money(cur.shipping),
-      title: fmtMoney(cur.shipping),
+      title:
+        cur.shipping > 0
+          ? `${fmtMoney(cur.shipping)} — portes pagos pelo cliente (margem extra, não custo)`
+          : "Sem portes cobrados no período",
       delta: deltaPct(cur.shipping, prev.shipping),
       deltaLabel: deltaSuffix,
       icon: "euro",
@@ -2062,12 +2081,10 @@ async function buildTopProductsByProfit(
     const netRevBase =
       order.amountsBase?.netRevenue ??
       (order.netRevenue ?? 0) * orderFxRate(order);
-    const shippingBase =
-      order.amountsBase?.shipping ??
-      (order.shipping ?? 0) * orderFxRate(order);
     const feesBase =
       order.amountsBase?.fees ?? (order.fees ?? 0) * orderFxRate(order);
-    const overheadBase = shippingBase + feesBase;
+    // Portes cobrados ao cliente são margem, não overhead do produto.
+    const overheadBase = feesBase;
 
     let orderCogsStore = 0;
     for (const li of lines) {
@@ -2393,7 +2410,6 @@ export function buildCostBreakdown(
 ): CostBreakdown {
   const items: CostBreakdownItem[] = [
     { key: "cogs", label: "Custo de produto", value: agg.cogs },
-    { key: "shipping", label: "Envio", value: agg.shipping },
     { key: "fees", label: "Taxas", value: agg.fees },
     ...(adSpendKnown
       ? [{ key: "adspend", label: "Anúncios", value: adSpend }]
@@ -2407,6 +2423,16 @@ export function buildCostBreakdown(
   ]
     .filter((i) => i.value > 0)
     .map((i) => ({ ...i, valueFmt: fmtMoney(i.value) }));
+
+  if (agg.shipping > 0) {
+    items.push({
+      key: "shipping",
+      label: "Portes cobrados",
+      value: agg.shipping,
+      valueFmt: fmtMoney(agg.shipping),
+      informative: true,
+    });
+  }
 
   if (agg.refunds > 0) {
     items.push({
@@ -2881,7 +2907,7 @@ export async function buildWorkspaceSummary(
     curChargebacks,
   );
   const margin = totals.revenue > 0 ? (netProfit / totals.revenue) * 100 : 0;
-  const curBer = berRoas(totals);
+  const curBer = berRoas(marginInputsFromAgg(totals));
 
   const money = (v: number): SummaryKpi["value"] =>
     formatCurrency(v, currency);
@@ -2953,9 +2979,9 @@ export async function buildWorkspaceSummary(
       cur.revenue > 0 ? (curProfit / cur.revenue) * 100 : 0;
     const prevMargin =
       prev.revenue > 0 ? (prevProfit / prev.revenue) * 100 : 0;
-    const curBer = berRoas(cur);
-    const prevBer = berRoas(prev);
-    const curCm = contributionMarginPct(cur);
+    const curBer = berRoas(marginInputsFromAgg(cur));
+    const prevBer = berRoas(marginInputsFromAgg(prev));
+    const curCm = contributionMarginPct(marginInputsFromAgg(cur));
     const curRoas =
       scopedAdSpendKnown && curAdSpend > 0 ? cur.revenue / curAdSpend : null;
     const prevRoas =
@@ -2964,14 +2990,12 @@ export async function buildWorkspaceSummary(
         : null;
     const totalCostsStore =
       cur.cogs +
-      cur.shipping +
       cur.fees +
       (scopedAdSpendKnown ? curAdSpend : 0) +
       curOperatingExpenses +
       scopedCurCb;
     const prevTotalCostsStore =
       prev.cogs +
-      prev.shipping +
       prev.fees +
       (scopedPrevAdSpendKnown ? prevAdSpend : 0) +
       prevOperatingExpenses +
@@ -3003,7 +3027,7 @@ export async function buildWorkspaceSummary(
       {
         label: "Custos totais",
         value: money(totalCostsStore),
-        title: `Produto + envio + taxas${scopedAdSpendKnown ? " + anúncios" : ""}${curOperatingExpenses > 0 ? " + despesas" : ""}${scopedCurCb > 0 ? " + chargebacks" : ""} = ${fmtMoney(totalCostsStore)}`,
+        title: `Produto + taxas${scopedAdSpendKnown ? " + anúncios" : ""}${curOperatingExpenses > 0 ? " + despesas" : ""}${scopedCurCb > 0 ? " + chargebacks" : ""} = ${fmtMoney(totalCostsStore)}`,
         delta: deltaPct(totalCostsStore, prevTotalCostsStore),
         deltaLabel: deltaSuffix,
         icon: "euro",
@@ -3043,7 +3067,6 @@ export async function buildWorkspaceSummary(
   } else {
     const totalCostsWorkspace =
       totals.cogs +
-      totals.shipping +
       totals.fees +
       (curAdSpendKnownWorkspace ? adSpend : 0) +
       curOperatingExpenses +
@@ -3068,7 +3091,7 @@ export async function buildWorkspaceSummary(
       {
         label: "Custos totais",
         value: money(totalCostsWorkspace),
-        title: `Produto + envio + taxas${curAdSpendKnownWorkspace ? " + anúncios" : ""}${curOperatingExpenses > 0 ? " + despesas" : ""}${curChargebacks > 0 ? " + chargebacks" : ""} = ${fmtMoney(totalCostsWorkspace)}`,
+        title: `Produto + taxas${curAdSpendKnownWorkspace ? " + anúncios" : ""}${curOperatingExpenses > 0 ? " + despesas" : ""}${curChargebacks > 0 ? " + chargebacks" : ""} = ${fmtMoney(totalCostsWorkspace)}`,
       },
       { label: "Margem %", value: formatPercent(margin) },
       {
@@ -3113,7 +3136,7 @@ export async function buildWorkspaceSummary(
         orders: 0,
       },
     );
-    const prevBerWorkspace = berRoas(prevAll);
+    const prevBerWorkspace = berRoas(marginInputsFromAgg(prevAll));
     extendedKpis = [
       {
         label: "BER",
@@ -3299,16 +3322,6 @@ export async function buildWorkspaceSummary(
       });
     }
 
-    if (cur.shipping > 0) {
-      waterfallCostSteps.push({
-        key: "shipping",
-        label: "Envio",
-        value: -cur.shipping,
-        display: fmtMoney(-cur.shipping),
-        type: "negative",
-      });
-    }
-
     const waterfall: WaterfallStep[] = [
       {
         key: "revenue",
@@ -3439,9 +3452,11 @@ export async function buildWorkspaceSummary(
         dayKeysInSlice(effectivePrevSlice, storeTz),
       ),
     ]);
-    const curBerExtended = berRoas(cur);
-    const prevBerExtended = berRoas(prevForExtended);
-    const curContributionMarginExtended = contributionMarginPct(cur);
+    const curBerExtended = berRoas(marginInputsFromAgg(cur));
+    const prevBerExtended = berRoas(marginInputsFromAgg(prevForExtended));
+    const curContributionMarginExtended = contributionMarginPct(
+      marginInputsFromAgg(cur),
+    );
     extendedKpis = [
       {
         label: "BER",

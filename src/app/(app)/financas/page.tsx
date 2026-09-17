@@ -90,10 +90,17 @@ export default async function FinancasPage({
   }> = [
     { label: "Receita líquida", value: totals.revenue, tone: "" },
     { label: "COGS", value: -totals.cogs, tone: "text-negative", share: totals.cogs },
-    { label: "Envio", value: -totals.shipping, tone: "text-negative", share: totals.shipping },
     { label: "Taxas de transação", value: -totals.fees, tone: "text-negative", share: totals.fees },
     { label: "Ad Spend", value: -totals.adSpend, tone: "text-negative", share: totals.adSpend },
   ];
+  if (totals.shipping > 0) {
+    lines.push({
+      label: "Portes cobrados (margem)",
+      value: totals.shipping,
+      tone: "text-muted-foreground",
+      share: totals.shipping,
+    });
+  }
   if (totals.operatingExpenses > 0) {
     lines.push({
       label: "Apps e fixos",
@@ -170,7 +177,6 @@ export default async function FinancasPage({
           <p className="mt-1 text-xl font-semibold tabular-nums" data-sensitive>
             {money(
               totals.cogs +
-                totals.shipping +
                 totals.fees +
                 totals.adSpend +
                 totals.operatingExpenses,

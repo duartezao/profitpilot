@@ -91,9 +91,9 @@ export const METRIC_CATALOG: MetricDefinition[] = [
   },
   {
     id: "shipping",
-    label: "Envio",
-    category: "custos",
-    description: "Custos de envio",
+    label: "Portes cobrados",
+    category: "vendas",
+    description: "Portes pagos pelo cliente (margem extra)",
   },
   {
     id: "fees",

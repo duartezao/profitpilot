@@ -6,7 +6,18 @@ export type ProfitInputs = {
   fees: number;
 };
 
-/** Net Profit = REV − COGS − envio − taxas − ad spend − opex − chargebacks. */
+/**
+ * Portes Shopify cobrados ao cliente são margem extra, não custo.
+ * Usa isto antes de calcNetProfit / berRoas / contributionMarginPct
+ * quando o `shipping` do agg vem de `totalShippingPriceSet`.
+ */
+export function withoutCustomerShipping<T extends ProfitInputs>(input: T): T {
+  return { ...input, shipping: 0 };
+}
+
+/** Net Profit = REV − COGS − envio − taxas − ad spend − opex − chargebacks.
+ * Em métricas Shopify, passar `withoutCustomerShipping(agg)`: portes cobrados
+ * são margem. Custo de envio ao fornecedor (ex. preços) conta quando shipping > 0. */
 export function calcNetProfit(
   input: ProfitInputs,
   adSpend = 0,
@@ -81,7 +92,8 @@ export function formatProfitBreakdown(
     {
       revenue: input.revenue,
       cogs: input.cogs,
-      shipping: input.shipping ?? 0,
+      // Portes Shopify (aggs) não entram no breakdown de custo.
+      shipping: 0,
       fees: input.fees ?? 0,
     },
     adForProfit,
@@ -90,9 +102,6 @@ export function formatProfitBreakdown(
   );
   const parts = [`REV ${fmtMoney(input.revenue)}`, `COGS −${fmtMoney(input.cogs)}`];
   if ((input.fees ?? 0) > 0) parts.push(`taxas −${fmtMoney(input.fees ?? 0)}`);
-  if ((input.shipping ?? 0) > 0) {
-    parts.push(`envio −${fmtMoney(input.shipping ?? 0)}`);
-  }
   if (adSpendKnown && adSpend > 0) parts.push(`ads −${fmtMoney(adSpend)}`);
   if (operatingExpenses > 0) {
     parts.push(`despesas −${fmtMoney(operatingExpenses)}`);

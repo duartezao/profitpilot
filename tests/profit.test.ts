@@ -8,6 +8,7 @@ import {
   fmtPoas,
   fmtBerRoas,
   formatProfitBreakdown,
+  withoutCustomerShipping,
 } from "../src/lib/profit.ts";
 
 describe("calcNetProfit", () => {
@@ -52,6 +53,14 @@ describe("calcNetProfit", () => {
       90,
     );
     assert.equal(profit, 510);
+  });
+});
+
+describe("withoutCustomerShipping", () => {
+  it("zera portes Shopify para o lucro tratar como margem", () => {
+    const withPortes = { revenue: 100, cogs: 20, shipping: 15, fees: 5 };
+    assert.equal(calcNetProfit(withPortes), 60);
+    assert.equal(calcNetProfit(withoutCustomerShipping(withPortes)), 75);
   });
 });
 
@@ -128,6 +137,17 @@ describe("formatProfitBreakdown", () => {
     assert.match(text, /ad spend por preencher/);
     assert.doesNotMatch(text, /ads −/);
     assert.match(text, /60\.00€/);
+  });
+
+  it("não lista portes Shopify como custo no breakdown", () => {
+    const text = formatProfitBreakdown(
+      { revenue: 100, cogs: 40, shipping: 15, fees: 5 },
+      10,
+      (v) => `${v.toFixed(2)}€`,
+    );
+    assert.doesNotMatch(text, /envio/);
+    // 100 − 40 − 5 − 10 = 45 (portes ignorados no breakdown de métricas)
+    assert.match(text, /45\.00€/);
   });
 });
 

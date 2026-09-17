@@ -59,7 +59,6 @@ export function StoreCashFlowSection({
         ]
       : []),
     { label: "COGS", value: `−${cash.outflowsCogsFmt}`, tone: "text-negative" },
-    { label: "Envio", value: `−${cash.outflowsShippingFmt}`, tone: "text-negative" },
     { label: "Ad Spend", value: `−${cash.outflowsAdSpendFmt}`, tone: "text-negative" },
     ...(cash.outflowsOpEx > 0
       ? [
