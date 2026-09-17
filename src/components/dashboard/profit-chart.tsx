@@ -31,8 +31,17 @@ import {
 const CHART_FRAME_CLASS = "h-72 w-full min-w-0 sm:h-80 lg:h-96";
 const CHART_EMPTY_CLASS =
   "mt-4 flex h-72 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground sm:h-80 lg:h-96";
-const CHART_SINGLE_DAY_CLASS =
-  "flex min-h-72 w-full min-w-0 flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed border-border px-3 py-6 sm:min-h-80 sm:px-4 lg:min-h-96";
+
+/** True quando o gráfico de um só dia tem detalhe (lojas / nota) a mostrar. */
+export function profitChartSingleDayHasContent(
+  data: ProfitChartPoint[],
+): boolean {
+  if (data.length !== 1) return false;
+  const p = data[0];
+  return (
+    (p.byStore?.length ?? 0) > 1 || Boolean(p.hasNote && p.notePreview)
+  );
+}
 
 function compactAxisValue(v: number): string {
   const abs = Math.abs(v);
@@ -315,34 +324,78 @@ export function ProfitChartSkeleton({
   );
 }
 
-/** Um dia: totais de lucro + faturação. */
-function SingleDayDualView({ point }: { point: ProfitChartPoint }) {
-  const profit = point.profit;
-  const revenue = point.revenue;
-  const profitFmt =
-    point.profitFmt ?? (profit != null ? compactBarLabel(profit) : "—");
-  const revenueFmt =
-    point.revenueFmt ?? (revenue != null ? compactBarLabel(revenue) : "—");
+/** Um dia: sem cartões de faturação/lucro (já nos KPIs). Só contexto útil. */
+function SingleDayView({ point }: { point: ProfitChartPoint }) {
+  const stores = (point.byStore ?? []).filter(
+    (s) => (s.revenue ?? 0) !== 0 || (s.profit ?? 0) !== 0,
+  );
+  const showStores = stores.length > 1;
+  const showNote = Boolean(point.hasNote && point.notePreview);
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4">
-      <div className="rounded-lg border border-border px-3 py-3 sm:px-4">
-        <p className="text-[11px] text-muted-foreground">Faturação</p>
-        <p className="mt-0.5 text-xl font-semibold tabular-nums text-foreground sm:text-2xl">
-          <Sensitive>{revenueFmt}</Sensitive>
-        </p>
+    <div className="rounded-lg border border-border px-4 py-4 sm:px-5 sm:py-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-foreground">{point.dateLabel}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Um só dia — totais nos KPIs; detalhe na repartição de custos.
+          </p>
+        </div>
+        {point.consolidated === false && (
+          <span className="text-xs text-muted-foreground">
+            Dentro da janela de reembolsos
+          </span>
+        )}
+        {point.consolidated === true && (
+          <span className="text-xs text-muted-foreground">Consolidado</span>
+        )}
       </div>
-      <div className="rounded-lg border border-border px-3 py-3 sm:px-4">
-        <p className="text-[11px] text-muted-foreground">Lucro</p>
-        <p
-          className={cn(
-            "mt-0.5 text-xl font-semibold tabular-nums sm:text-2xl",
-            profit != null && profit < 0 ? "text-negative" : "text-foreground",
+
+      {showStores && (
+        <ul className="mt-4 space-y-2.5 border-t border-border pt-4">
+          <li className="flex justify-end gap-3 text-[11px] text-muted-foreground">
+            <span className="w-16 text-right sm:w-20">Faturação</span>
+            <span className="w-16 text-right sm:w-20">Lucro</span>
+          </li>
+          {stores.map((s: ProfitChartStoreSlice) => (
+            <li
+              key={s.storeId}
+              className="flex items-baseline justify-between gap-3 text-sm"
+            >
+              <span className="flex min-w-0 items-center gap-2 truncate text-muted-foreground">
+                <span
+                  className="h-2 w-2 shrink-0 rounded-sm"
+                  style={{ backgroundColor: s.color }}
+                  aria-hidden
+                />
+                <span className="truncate">{s.name}</span>
+              </span>
+              <span className="flex shrink-0 items-baseline gap-3 tabular-nums">
+                <Sensitive className="w-16 text-right text-muted-foreground sm:w-20">
+                  {s.revenueFmt}
+                </Sensitive>
+                <Sensitive
+                  className={cn(
+                    "w-16 text-right font-medium sm:w-20",
+                    s.profit < 0 ? "text-negative" : "text-foreground",
+                  )}
+                >
+                  {s.profitFmt}
+                </Sensitive>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {showNote && (
+        <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
+          {point.didScale && (
+            <span className="mr-1 font-medium text-accent">Scale ·</span>
           )}
-        >
-          <Sensitive>{profitFmt}</Sensitive>
+          {point.notePreview}
         </p>
-      </div>
+      )}
     </div>
   );
 }
@@ -557,17 +610,20 @@ export function ProfitChart({
     </div>
   );
 
-  const header = (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h2 className="min-w-0 text-lg font-semibold">{title}</h2>
-      {legend}
-    </div>
-  );
+  const singleDay = chartData.length === 1;
+  const singlePoint = singleDay ? chartData[0] : null;
+  const singleDayHasDetail =
+    singlePoint != null &&
+    ((singlePoint.byStore?.length ?? 0) > 1 ||
+      Boolean(singlePoint.hasNote && singlePoint.notePreview));
 
   if (chartData.length === 0) {
     return (
       <div className="min-w-0 overflow-hidden" data-sensitive-chart>
-        {header}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="min-w-0 text-lg font-semibold">{title}</h2>
+          {legend}
+        </div>
         <div className={CHART_EMPTY_CLASS}>
           Sem dados no período selecionado.
         </div>
@@ -575,13 +631,25 @@ export function ProfitChart({
     );
   }
 
-  const singleDay = chartData.length === 1;
+  /** Um dia sem detalhe extra: KPIs + repartição bastam — não ocupar espaço. */
+  if (singleDay && singlePoint && !singleDayHasDetail) {
+    return null;
+  }
+
+  const header = (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h2 className="min-w-0 text-lg font-semibold">
+        {singleDay ? "Detalhe do dia" : title}
+      </h2>
+      {!singleDay && legend}
+    </div>
+  );
 
   return (
     <div className="min-w-0 overflow-hidden" data-sensitive-chart>
       {header}
-      {singleDay ? (
-        <SingleDayDualView point={chartData[0]} />
+      {singleDay && singlePoint ? (
+        <SingleDayView point={singlePoint} />
       ) : (
         <>
           <div className={CHART_FRAME_CLASS}>

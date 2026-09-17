@@ -33,7 +33,10 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
             <WaterfallChart steps={dashboard.waterfall} />
           </section>
 
-          <CostBreakdownPanel data={data.costBreakdown} />
+          <CostBreakdownPanel
+            data={data.costBreakdown}
+            omitAnchors={data.profitChart.length === 1}
+          />
         </div>
       )}
 

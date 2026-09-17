@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ProfitChart, ProfitChartSkeleton } from "@/components/dashboard/profit-chart";
+import { ProfitChart, ProfitChartSkeleton, profitChartSingleDayHasContent } from "@/components/dashboard/profit-chart";
 import { MonthlyGoalsCard } from "@/components/dashboard/monthly-goals-card";
 import { CostBreakdownPanel } from "@/components/dashboard/cost-breakdown-panel";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
@@ -81,6 +81,48 @@ async function fetchSummary(
   });
   if (!res.ok) throw new Error("Falha ao carregar os dados.");
   return res.json();
+}
+
+function ChartAndCostsSection({
+  showSkeleton,
+  chartData,
+  chartSeries,
+  costBreakdown,
+}: {
+  showSkeleton: boolean;
+  chartData: NonNullable<DashboardSummary["profitChart"]>;
+  chartSeries?: DashboardSummary["profitChartSeries"];
+  costBreakdown?: DashboardSummary["costBreakdown"] | null;
+}) {
+  const singleDay = chartData.length === 1;
+  const showChart =
+    showSkeleton ||
+    chartData.length === 0 ||
+    chartData.length > 1 ||
+    profitChartSingleDayHasContent(chartData);
+
+  if (!showChart && costBreakdown) {
+    return (
+      <div className="max-w-xl">
+        <CostBreakdownPanel data={costBreakdown} omitAnchors />
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
+      <div className="min-w-0 lg:col-span-2">
+        {showSkeleton ? (
+          <ProfitChartSkeleton />
+        ) : (
+          <ProfitChart data={chartData} series={chartSeries} />
+        )}
+      </div>
+      {costBreakdown && (
+        <CostBreakdownPanel data={costBreakdown} omitAnchors={singleDay} />
+      )}
+    </div>
+  );
 }
 
 async function fetchPortfolio(
@@ -199,19 +241,11 @@ export function DashboardClient() {
           emphasizeLabel="Net Profit"
         />
 
-        <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
-            <div className="min-w-0 lg:col-span-2">
-              {showChartSkeleton ? (
-                <ProfitChartSkeleton />
-              ) : (
-                <ProfitChart data={portfolioData?.profitChart ?? []} />
-              )}
-            </div>
-
-          {portfolioData?.costBreakdown && (
-            <CostBreakdownPanel data={portfolioData.costBreakdown} />
-          )}
-        </div>
+        <ChartAndCostsSection
+          showSkeleton={showChartSkeleton}
+          chartData={portfolioData?.profitChart ?? []}
+          costBreakdown={portfolioData?.costBreakdown}
+        />
 
         <WorkspacesComparisonTable
           workspaces={portfolioData?.workspaces ?? []}
@@ -307,22 +341,12 @@ export function DashboardClient() {
             emphasizeLabel="Net Profit"
           />
 
-          <div className="grid gap-4 lg:grid-cols-3 lg:gap-6">
-            <div className="min-w-0 lg:col-span-2">
-              {showChartSkeleton ? (
-                <ProfitChartSkeleton />
-              ) : (
-                <ProfitChart
-                  data={workspaceData?.profitChart ?? []}
-                  series={workspaceData?.profitChartSeries}
-                />
-              )}
-            </div>
-
-            {workspaceData?.costBreakdown && (
-              <CostBreakdownPanel data={workspaceData.costBreakdown} />
-            )}
-          </div>
+          <ChartAndCostsSection
+            showSkeleton={showChartSkeleton}
+            chartData={workspaceData?.profitChart ?? []}
+            chartSeries={workspaceData?.profitChartSeries}
+            costBreakdown={workspaceData?.costBreakdown}
+          />
 
           {workspaceData?.monthlyGoals && (
             <MonthlyGoalsCard goals={workspaceData.monthlyGoals} />
