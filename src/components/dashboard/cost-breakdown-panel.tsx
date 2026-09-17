@@ -4,7 +4,14 @@ import { Sensitive } from "@/components/privacy-mode";
 import { cn } from "@/lib/utils";
 import type { CostBreakdown } from "@/lib/metrics";
 
-export function CostBreakdownPanel({ data }: { data: CostBreakdown }) {
+export function CostBreakdownPanel({
+  data,
+  /** Esconde faturamento/lucro já mostrados nos KPIs (vista de um dia). */
+  omitAnchors = false,
+}: {
+  data: CostBreakdown;
+  omitAnchors?: boolean;
+}) {
   const base = Math.max(data.revenue, data.totalCosts, 1);
   const realCosts = data.items.filter((i) => !i.informative);
   const informative = data.items.filter((i) => i.informative);
@@ -19,19 +26,21 @@ export function CostBreakdownPanel({ data }: { data: CostBreakdown }) {
         </Sensitive>
       </div>
 
-      <div className="mt-3 flex items-baseline justify-between gap-2 border-b border-border pb-3">
-        <span className="text-[13px] text-muted-foreground">Faturamento</span>
-        <Sensitive className="text-sm font-semibold tabular-nums">
-          {data.revenueFmt}
-        </Sensitive>
-      </div>
+      {!omitAnchors && (
+        <div className="mt-3 flex items-baseline justify-between gap-2 border-b border-border pb-3">
+          <span className="text-[13px] text-muted-foreground">Faturamento</span>
+          <Sensitive className="text-sm font-semibold tabular-nums">
+            {data.revenueFmt}
+          </Sensitive>
+        </div>
+      )}
 
       {realCosts.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">
+        <p className={cn("text-sm text-muted-foreground", omitAnchors ? "mt-3" : "mt-4")}>
           Sem custos registados neste período.
         </p>
       ) : (
-        <ul className="mt-4 space-y-3">
+        <ul className={cn("space-y-3", omitAnchors ? "mt-3" : "mt-4")}>
           {realCosts.map((item) => {
             const pct = Math.min(100, (item.value / base) * 100);
             const ofRevenue =
@@ -72,17 +81,19 @@ export function CostBreakdownPanel({ data }: { data: CostBreakdown }) {
         </Sensitive>
       </div>
 
-      <div className="mt-3 flex items-baseline justify-between gap-2 bg-muted/40 px-3 py-2.5 rounded-lg">
-        <span className="text-[13px] font-medium">Lucro líquido</span>
-        <Sensitive
-          className={cn(
-            "text-base font-semibold tabular-nums",
-            profitPositive ? "text-positive" : "text-negative",
-          )}
-        >
-          {data.netProfitFmt}
-        </Sensitive>
-      </div>
+      {!omitAnchors && (
+        <div className="mt-3 flex items-baseline justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2.5">
+          <span className="text-[13px] font-medium">Lucro líquido</span>
+          <Sensitive
+            className={cn(
+              "text-base font-semibold tabular-nums",
+              profitPositive ? "text-positive" : "text-negative",
+            )}
+          >
+            {data.netProfitFmt}
+          </Sensitive>
+        </div>
+      )}
 
       {informative.length > 0 && (
         <div className="mt-3 space-y-1.5 border-t border-border pt-3">

@@ -3,7 +3,10 @@
 import { useState } from "react";
 import type { DashboardSummary } from "@/lib/metrics";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
-import { ProfitChart } from "@/components/dashboard/profit-chart";
+import {
+  ProfitChart,
+  profitChartSingleDayHasContent,
+} from "@/components/dashboard/profit-chart";
 import { StoreDailyMetricsTable } from "@/components/dashboard/store-daily-metrics-table";
 import { PageTabCard, PageTabs } from "@/components/page-tabs";
 
@@ -18,6 +21,9 @@ export function StoreMetricsView({
 }) {
   const dashboard = data.storeDashboard;
   const [tab, setTab] = useState<"lucro" | "dias">("lucro");
+  const showChart =
+    data.profitChart.length !== 1 ||
+    profitChartSingleDayHasContent(data.profitChart);
 
   return (
     <div className="space-y-5">
@@ -48,14 +54,23 @@ export function StoreMetricsView({
         ariaLabel="Secções da dashboard"
       />
 
-      {tab === "lucro" && (
-        <PageTabCard>
-          <ProfitChart
-            data={data.profitChart}
-            title="Faturação / lucro por dia"
-          />
-        </PageTabCard>
-      )}
+      {tab === "lucro" &&
+        (showChart ? (
+          <PageTabCard>
+            <ProfitChart
+              data={data.profitChart}
+              title="Faturação / lucro por dia"
+            />
+          </PageTabCard>
+        ) : (
+          <PageTabCard>
+            <p className="text-sm text-muted-foreground">
+              Um só dia seleccionado — os totais estão nos KPIs acima. Abre
+              «Métricas por dia» para o breakdown, ou alarga o período para ver o
+              gráfico.
+            </p>
+          </PageTabCard>
+        ))}
 
       {tab === "dias" && (
         <div className="overflow-hidden rounded-lg border border-border bg-surface">
