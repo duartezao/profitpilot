@@ -8,7 +8,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 
 * **Visão consolidada** — ver todas as lojas ao mesmo tempo num único dashboard, e fazer drill-down loja a loja.
 * **Histórico permanente** — guardar todos os dados (mesmo de lojas removidas ou de plataformas que cancelaste), sem depender da retenção limitada da Shopify/WooCommerce.
-* **Lucro real (Net Profit)** — não apenas revenue bruto, mas o lucro depois de COGS, envio, taxas de pagamento, ad spend, chargebacks, custos de apps e impostos. **REV** nas métricas = vendas líquidas (Shopify Net sales) de encomendas **já pagas** (`paid`, parcialmente pagas/reembolsadas), usando `currentSubtotalPriceSet` / total actual (reflete edições de encomenda). **Pendentes** (ex. Multibanco à espera) ficam em `/pedidos` mas **não entram** em REV/lucro até pagarem; **expiradas/anuladas** são removidas no sync.
+* **Lucro real (Net Profit)** — não apenas revenue bruto, mas o lucro depois de COGS, taxas de pagamento, ad spend, chargebacks, custos de apps e impostos. Portes Shopify cobrados ao cliente são **margem extra** (não custo). **REV** nas métricas = vendas líquidas (Shopify Net sales) de encomendas **já pagas** (`paid`, parcialmente pagas/reembolsadas), usando `currentSubtotalPriceSet` / total actual (reflete edições de encomenda). **Pendentes** (ex. Multibanco à espera) ficam em `/pedidos` mas **não entram** em REV/lucro até pagarem; **expiradas/anuladas** são removidas no sync.
 
 > Alternativa própria ao **Triple Whale** e **Polar Analytics**, focada em dropshipping, com controlo total dos dados.
 
@@ -278,7 +278,7 @@ Organização orientada ao lucro (alinhada com o design system — sóbria, sem 
    * Com **2+ lojas** no consolidado: toggle **Por loja** / **Total**. Períodos longos (≥45 dias) agregam por **mês** com eixo jan, fev, mar…; meses **sem actividade = 0** para a linha crescer desde zero. Escala Y do lucro ancora em **0**. Dia em curso excluído do gráfico.
    * O painel mostra Faturamento, cada custo real (custo de produto, envio, taxas, anúncios, despesas operacionais) com barra proporcional e % da receita, **Custos totais** e **Lucro líquido** em destaque. Reembolsos aparecem em rodapé como informativo (já estão na receita líquida).
 3. **Metas do mês** (se configuradas) e **tabela comparativa loja a loja**.
-4. **Ver mais métricas** (painel expansível): BER, Margem contrib. %, COGS, Envio, Taxas, Refunds, Encomendas, AOV, MER, POAS, etc.
+4. **Ver mais métricas** (painel expansível): BER, Margem contrib. %, COGS, Portes cobrados, Taxas, Refunds, Encomendas, AOV, MER, POAS, etc.
 
 `costBreakdown` no `DashboardSummary` traz os valores brutos + formatados (respeita modo apresentação e moeda base).
 
@@ -335,7 +335,7 @@ Net Profit =
 |---|---|
 | Revenue | Webhooks de orders da plataforma |
 | COGS | Custo definido por produto/variante (manual, CSV ou API do fornecedor) |
-| Envio | Custo real do fornecedor por order/produto |
+| Envio (portes Shopify) | Portes cobrados ao cliente (`totalShippingPriceSet`) — **margem extra**, não custo. O custo de envio ao fornecedor, quando existir, entra no COGS. |
 | Ad Spend | Meta / TikTok / Google Ads API |
 | Taxas de pagamento | Stripe / PayPal API (ou % estimada por gateway) |
 | Refunds | Webhook `refund/created` |
@@ -375,7 +375,7 @@ Net Profit =
 
 * Net Profit ao longo do tempo (gráfico diário na dashboard consolidada)
 * **Waterfall do lucro**: Revenue → menos cada custo → Net Profit (mostra para onde vai o dinheiro)
-* **P&L em `/financas`** — demonstração de resultados com COGS, envio, taxas, ad spend e reembolsos; avisos de COGS/ad spend em falta. No **overview (todas as lojas)**: cartão **Saldo em conta (banca)** no Resumo + tab **Caixa** com soma e detalhe por loja (`cashOnHand` = inicial + entradas + capital − COGS − envio − ads − levantamentos). Entradas e saídas usam a **mesma data de início** (saldo inicial, ou importação/criação da loja).
+* **P&L em `/financas`** — demonstração de resultados com COGS, taxas, ad spend e reembolsos; portes cobrados como linha informativa (margem); avisos de COGS/ad spend em falta. No **overview (todas as lojas)**: cartão **Saldo em conta (banca)** no Resumo + tab **Caixa** com soma e detalhe por loja (`cashOnHand` = inicial + entradas + capital − COGS − ads − levantamentos). Entradas e saídas usam a **mesma data de início** (saldo inicial, ou importação/criação da loja).
 * **Gateway externo** (Stripe/PayPal/MB): com `externalGatewayPayoutBusinessDays` definido, entradas de caixa = estimativa por encomenda (total − reembolsos − taxas estimadas/reais). O payout cai tipicamente **~07:00** no fuso da loja; no **dia de payout** só entra em «recebido» **depois das 07:00** (antes fica em «a receber»). **Saldo em conta** mostra o valor **exacto em euros** (ex.: 20.587,32 €), não arredondado a «mil €». Loja **mista**: payouts Shopify = `feesSource: real`; gateway externo = taxa estimada e gateway ≠ `shopify_payments` (inclui `paymentGateway` null até sync). Continua a ser **projecção**, não o extracto Stripe/PayPal.
 * Lucro por loja, por produto, por país, por canal de aquisição
 * **Profit por order** (margem média por encomenda)
@@ -467,18 +467,18 @@ Net Profit =
 
 ## O que é
 
-O **BER (Break-Even ROAS)** é o ROAS mínimo a que precisas de vender para **não perder dinheiro** depois de pagar produto, envio e taxas. Acima do BER tens lucro; abaixo, prejuízo.
+O **BER (Break-Even ROAS)** é o ROAS mínimo a que precisas de vender para **não perder dinheiro** depois de pagar produto e taxas. Acima do BER tens lucro; abaixo, prejuízo.
 
 ## Fórmula
 
 ```
 Margem de contribuição (%) =
-   (Preço de venda − COGS − Envio − Taxas de pagamento) / Preço de venda
+   (Preço de venda − COGS − Taxas de pagamento) / Preço de venda
 
 BER (Break-Even ROAS) = 1 / Margem de contribuição
 
 Exemplo:
-   Produto vendido a 40€, com 15€ de custos (COGS+envio+taxas)
+   Produto vendido a 40€, com 15€ de custos (COGS+taxas)
    Margem = (40 − 15) / 40 = 0,625 (62,5%)
    BER = 1 / 0,625 = 1,6
    → Precisas de ROAS ≥ 1,6 para teres lucro.
@@ -499,7 +499,7 @@ Cada loja deve ter:
 
 * A mesma linguagem visual da **Dashboard Consolidada**: KPIs principais em grelha responsiva, `Net Profit` destacado, cards sóbrios com borda e sem fundos coloridos.
 * KPIs principais: **Faturamento**, **Net Profit**, **Custos totais**, **Margem %**, **Ad Spend** e **ROAS**.
-* Painel «Ver mais métricas» com BER, POAS, MER, COGS, envio, taxas, encomendas, AOV, funil Shopify e métricas de ads.
+* Painel «Ver mais métricas» com BER, POAS, MER, COGS, portes cobrados, taxas, encomendas, AOV, funil Shopify e métricas de ads.
 * Grid financeiro principal sempre visível: **Waterfall «Para onde vai o dinheiro»** à esquerda e, à direita, **Repartição de custos** + **A receber (payout)**.
 * O waterfall mostra a passagem de faturamento/custos até Net Profit; a repartição de custos mostra o peso de cada custo na receita.
 * **Top sellers / produtos mais vendidos** (por revenue **e** por lucro) — com seletor de período (ver secção dedicada)
@@ -633,7 +633,7 @@ Principais dificuldades: 0
 | COGS | Custo dos produtos vendidos no dia (cost per item × unidades) |
 | REFUNDS | Reembolsos **emitidos** nesse dia (`refund.createdAt` Shopify) — informativo; a REV já é líquida |
 | ADSPEND | Valor **só** quando registado em Anúncios (`manualAdSpend`); dias por preencher mostram `—` e **não** entram no lucro |
-| PROFIT | Net Profit = REV − COGS − envio − taxas − ad spend − **reembolsos emitidos nesse dia** (quando registado); aviso se faltar COGS em produtos vendidos nesse dia |
+| PROFIT | Net Profit = REV − COGS − envio − taxas − ad spend − opex − chargebacks. **Reembolsos** já estão na REV líquida (informativo no dia de emissão; não se voltam a subtrair). Aviso se faltar COGS em produtos vendidos nesse dia |
 | SESSÕES | ShopifyQL (`read_reports`), filtradas pelos **países das sessões** (`analyticsSessionCountries`; vazio = mundo); com 2+ países a dashboard **soma**; o report **separa** ATC/CVR por país |
 | ATC % | `sessões com add to cart / sessões` — mesma origem e **mesmo filtro de país(es)** que SESSÕES |
 | REACHED CHECKOUT % | `sessões que chegaram ao checkout / sessões` — mesma origem e **mesmo filtro de país(es)** |
@@ -892,7 +892,7 @@ Funcionalidades:
 
 * **Total devolvido (€)** e **Refund Rate (%)** por loja, produto e período
 * Origem via webhook `refund/created` da plataforma + sync incremental (`refunds` GraphQL → `Order.refundLines[]` com `refundedAt`)
-* **Dashboard / gráfico / KPIs diários:** linha **REFUNDS** no **dia de emissão**; **REV** mantém-se líquida (dia da venda). **Lucro do dia** desconta reembolsos emitidos nesse dia.
+* **Dashboard / gráfico / KPIs diários:** linha **REFUNDS** informativa no **dia de emissão**; **REV** líquida no dia da venda. **Lucro do dia** = mesmo Net Profit dos KPIs (não volta a descontar reembolsos).
 * Distinguir reembolso parcial vs total
 * Impacto direto no Net Profit (subtrai ao revenue)
 
@@ -945,12 +945,13 @@ Funcionalidades:
 ```
 Lucro após taxas =
    Revenue
- − COGS − Envio
+ − COGS
  − TODAS as taxas de transação (processamento + transaction fee + conversão + payout + chargeback)
  − Ad Spend
- − Refunds
  − Apps / custos fixos
  = Net Profit
+
+(Portes cobrados ao cliente = margem extra, não custo. Reembolsos já estão na REV líquida.)
 ```
 
 * Os valores de taxa usam `feesSource: real | estimated` por encomenda.
@@ -1140,8 +1141,8 @@ Lucro após taxas =
 | **Revenue (bruto)** | Total vendido antes de custos |
 | **Net Revenue** | Revenue − refunds − descontos |
 | **COGS** | Custo dos produtos vendidos |
-| **Gross Profit** | Revenue − COGS − envio |
-| **Net Profit (lucro real)** | Depois de TODOS os custos (COGS, envio, ads, taxas, refunds, chargebacks, apps, impostos) |
+| **Gross Profit** | Revenue − COGS |
+| **Net Profit (lucro real)** | Depois de TODOS os custos (COGS, ads, taxas, chargebacks, apps, impostos). Portes Shopify = margem. |
 | **Margem bruta (%)** | Gross Profit / Revenue |
 | **Margem líquida (%)** | Net Profit / Revenue |
 | **Margem de contribuição** | (Preço − custos variáveis) / Preço |
@@ -1946,7 +1947,7 @@ Pipeline operacional de dropshipping.
 
 * **Header**: URL público da loja + período (seletor na topbar).
 * **KPIs**: Net Profit, Margem %, ROAS, BER (com comparação ao período anterior).
-* **Waterfall "Para onde vai o dinheiro"**: Revenue → −COGS → −EU TAX (taxa Win-Win, se aplicável) → −Envio (se houver) → −Taxas → −Ad Spend → −Refunds → = Net Profit (barra final verde). A taxa UE conta no **Custo de produto** da repartição de custos.
+* **Waterfall "Para onde vai o dinheiro"**: Revenue → −COGS → −EU TAX (taxa Win-Win, se aplicável) → −Taxas → −Ad Spend → = Net Profit (barra final verde). Portes cobrados ao cliente e reembolsos são informativos (não passos de custo). A taxa UE conta no **Custo de produto** da repartição de custos.
 * **Waterfall** + **Repartição de custos** (sem card de payout na dashboard).
 * **Tabela "Produtos por lucro"**: vendas, margem (vermelho se negativa), lucro.
 

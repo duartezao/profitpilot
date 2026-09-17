@@ -740,7 +740,7 @@ export async function buildWorkspaceTreasury(
       }
     }
 
-    const outflowsOps = out.cogs + out.shipping + out.adSpend;
+    const outflowsOps = out.cogs + out.adSpend;
     const expenseSlice = { start: since, end: endOfDay(new Date()) };
     const storeOpEx = sumLoadedExpenses(expenseRows, expenseSlice, sid);
     /** Numa loja isolada, contas partilhadas do workspace também saem da banca. */
@@ -789,8 +789,9 @@ export async function buildWorkspaceTreasury(
         : null,
       outflowsCogs: out.cogs,
       outflowsCogsFmt: fmtBase(out.cogs),
-      outflowsShipping: out.shipping,
-      outflowsShippingFmt: fmtBase(out.shipping),
+      // Portes Shopify = margem do cliente, não saída de caixa.
+      outflowsShipping: 0,
+      outflowsShippingFmt: fmtBase(0),
       outflowsAdSpend: out.adSpend,
       outflowsAdSpendFmt: fmtBase(out.adSpend),
       outflowsOpEx,

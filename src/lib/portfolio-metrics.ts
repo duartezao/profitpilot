@@ -16,7 +16,7 @@ import { getCachedWorkspaceSummary } from "@/lib/metrics-summary-cache";
 import { parsePortfolioParam } from "@/lib/portfolio-scope";
 import { resolvePeriod, formatDateInput, type PeriodInput } from "@/lib/period";
 import { convertToBaseCurrency } from "@/lib/fx";
-import { berRoas, calcNetProfit } from "@/lib/profit";
+import { berRoas, calcNetProfit, withoutCustomerShipping } from "@/lib/profit";
 import {
   formatCurrency,
   formatPercent,
@@ -275,7 +275,10 @@ export async function buildPortfolioSummary(
         fxDateKey,
       );
 
-      const profit = calcNetProfit(converted, converted.adSpend);
+      const profit = calcNetProfit(
+        withoutCustomerShipping(converted),
+        converted.adSpend,
+      );
       const marginPct =
         converted.revenue > 0 ? (profit / converted.revenue) * 100 : 0;
       const roasNum =
@@ -340,12 +343,15 @@ export async function buildPortfolioSummary(
     row.profitRank = i + 1;
   });
 
-  const netProfit = calcNetProfit(totalAgg, totalAgg.adSpend);
+  const netProfit = calcNetProfit(
+    withoutCustomerShipping(totalAgg),
+    totalAgg.adSpend,
+  );
   const margin =
     totalAgg.revenue > 0 ? (netProfit / totalAgg.revenue) * 100 : 0;
   const roas =
     totalAgg.adSpend > 0 ? totalAgg.revenue / totalAgg.adSpend : null;
-  const ber = berRoas(totalAgg);
+  const ber = berRoas(withoutCustomerShipping(totalAgg));
 
   const kpis: SummaryKpi[] = [
     {
@@ -363,7 +369,6 @@ export async function buildPortfolioSummary(
       label: "Custos totais",
       value: money(
         totalAgg.cogs +
-          totalAgg.shipping +
           totalAgg.fees +
           totalAgg.adSpend,
       ),

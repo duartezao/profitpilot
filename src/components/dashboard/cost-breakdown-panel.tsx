@@ -91,7 +91,11 @@ export function CostBreakdownPanel({ data }: { data: CostBreakdown }) {
               key={item.key}
               className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground"
             >
-              <span>{item.label} (já na receita líquida)</span>
+              <span>
+                {item.key === "shipping"
+                  ? `${item.label} (margem extra)`
+                  : `${item.label} (já na receita líquida)`}
+              </span>
               <Sensitive className="tabular-nums">{item.valueFmt}</Sensitive>
             </div>
           ))}

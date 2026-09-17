@@ -1,5 +1,5 @@
 import "server-only";
-import { berRoas } from "@/lib/profit";
+import { berRoas, withoutCustomerShipping } from "@/lib/profit";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import {
   buildStoreProductRanking,
@@ -88,7 +88,7 @@ function buildStoreRows(
   adSpendByStore: Map<string, number>,
 ): DecisionRow[] {
   return stores.map((s) => {
-    const ber = berRoas(s);
+    const ber = berRoas(withoutCustomerShipping(s));
     const roas = s.adSpend > 0 ? s.revenue / s.adSpend : null;
     const status = storeStatus(s.margin, s.netProfit, roas, ber);
     return {
@@ -248,7 +248,9 @@ export async function buildDecisionSummary(
 
   if (storeId) {
     const storeLine = pnl.stores[0];
-    const storeBer = storeLine ? berRoas(storeLine) : berRoas(pnl.totals);
+    const storeBer = storeLine
+      ? berRoas(withoutCustomerShipping(storeLine))
+      : berRoas(withoutCustomerShipping(pnl.totals));
     const storeName =
       productRanking?.storeName ?? storeLine?.name ?? "Loja";
     const accounts = await loadSyncAdAccountsForStore(

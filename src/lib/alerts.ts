@@ -37,7 +37,7 @@ import {
   refundsSumBaseExpr,
   cogsSumExprForMode,
 } from "@/lib/order-money";
-import { calcNetProfit, calcPoas } from "@/lib/profit";
+import { calcNetProfit, calcPoas, withoutCustomerShipping } from "@/lib/profit";
 import { sumAdSpendForPeriod } from "@/lib/ad-spend";
 import {
   normalizeStoreTimezone,
@@ -320,7 +320,7 @@ export async function buildWorkspaceAlerts(
       healthSlice,
       storeTz,
     );
-    const profit = calcNetProfit(row, adSpend);
+    const profit = calcNetProfit(withoutCustomerShipping(row), adSpend);
     const margin = (profit / row.revenue) * 100;
     const refundRate = (row.refunds / row.revenue) * 100;
     const poas = adSpend > 0 ? calcPoas(profit, adSpend) : null;
