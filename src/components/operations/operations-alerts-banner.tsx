@@ -3,7 +3,7 @@ import type { CollectionReminder } from "@/lib/collection-schedule";
 import { cn } from "@/lib/utils";
 
 export function OperationsAlertsBanner({
-  exclusionNote,
+  exclusionNote: _exclusionNote,
   scopedStoreStatus,
   collectionReminders,
   className,
@@ -15,8 +15,7 @@ export function OperationsAlertsBanner({
 }) {
   const reminders = collectionReminders ?? [];
   const hasScopedWarning = scopedStoreStatus === "killed";
-  const hasContent =
-    Boolean(exclusionNote) || reminders.length > 0 || hasScopedWarning;
+  const hasContent = reminders.length > 0 || hasScopedWarning;
 
   if (!hasContent) return null;
 
@@ -27,14 +26,6 @@ export function OperationsAlertsBanner({
         className,
       )}
     >
-      {exclusionNote && (
-        <p className="text-muted-foreground">
-          {exclusionNote}{" "}
-          <Link href="/operacao" className="font-medium text-accent hover:underline">
-            Modo operação
-          </Link>
-        </p>
-      )}
       {hasScopedWarning && (
         <p className="text-warning">
           Loja matada — métricas limitadas aos dias até à data de matança. «Em
