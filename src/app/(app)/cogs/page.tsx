@@ -249,21 +249,13 @@ export default async function CogsPage({
               </PageTabCard>
             )}
             {scoped && activeMode === "day" && (
-              <PageTabCard>
-                <div className="mb-4">
-                  <h2 className="text-lg font-semibold">COGS por dia</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Dias com vendas sem custo aparecem primeiro.
-                  </p>
-                </div>
-                <DayCogsPanel
-                  storeId={String(scoped._id)}
-                  storeName={scoped.name}
-                  baseCurrency={baseCurrency}
-                  inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
-                  rows={dayRows}
-                />
-              </PageTabCard>
+              <DayCogsPanel
+                storeId={String(scoped._id)}
+                storeName={scoped.name}
+                baseCurrency={baseCurrency}
+                inputCurrency={scoped.cogsInputCurrency ?? "EUR"}
+                rows={dayRows}
+              />
             )}
           </>
         }
