@@ -12,7 +12,11 @@ import {
   orderDateMatch,
 } from "@/lib/period";
 import { convertToBaseCurrency } from "@/lib/fx";
-import { buildOrderAmountsBase } from "@/lib/order-money";
+import {
+  buildOrderAmountsBase,
+  feesSumBaseExpr,
+  netRevenueSumBaseExpr,
+} from "@/lib/order-money";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import {
   COGS_INPUT_CURRENCIES,
@@ -28,6 +32,7 @@ import {
 } from "@/lib/store-timezone";
 import type { PeriodSlice } from "@/lib/ad-spend";
 import { countSoldVariantsMissingCost } from "@/lib/cogs";
+import { storeBerRoas, fmtBerRoas } from "@/lib/profit";
 
 export { COGS_INPUT_CURRENCIES, isCogsInputCurrency };
 export type { CogsInputCurrency };
@@ -42,6 +47,13 @@ export type CogsDayRow = {
   inputCurrency: string | null;
   fxRate: number | null;
   baseCurrency: string;
+  /** REV líquida do dia (moeda base) — para BER. */
+  revenue: number;
+  /** Taxas de pagamento do dia (moeda base). */
+  fees: number;
+  /** BER com o COGS registado; null se sem COGS ou margem ≤ 0. */
+  ber: number | null;
+  berFmt: string;
   hasOrders: boolean;
   isYesterday: boolean;
   note?: string;
@@ -223,8 +235,15 @@ export async function buildCogsDayRows(
 
   const [manualRows, orderDays] = await Promise.all([
     ManualCogsDay.find({ storeId: store._id, dateKey: { $in: dayKeys } }).lean(),
-    Order.aggregate<{ _id: string }>([
-      { $match: { storeId: store._id } },
+    Order.aggregate<{
+      _id: string;
+      revenue: number;
+      fees: number;
+      orders: number;
+    }>([
+      {
+        $match: mergePaidOrderFilter({ storeId: store._id }),
+      },
       {
         $group: {
           _id: {
@@ -234,25 +253,45 @@ export async function buildCogsDayRows(
               timezone: tz,
             },
           },
+          revenue: netRevenueSumBaseExpr,
+          fees: feesSumBaseExpr,
+          orders: { $sum: 1 },
         },
       },
     ]),
   ]);
 
   const manualMap = new Map(manualRows.map((r) => [r.dateKey, r]));
-  const orderDaySet = new Set(orderDays.map((r) => r._id));
+  const dayStats = new Map(
+    orderDays.map((r) => [
+      r._id,
+      { revenue: r.revenue ?? 0, fees: r.fees ?? 0, orders: r.orders ?? 0 },
+    ]),
+  );
 
   return dayKeys.map((dateKey) => {
     const m = manualMap.get(dateKey);
+    const stats = dayStats.get(dateKey);
+    const amount = m?.amount ?? null;
+    const revenue = stats?.revenue ?? 0;
+    const fees = stats?.fees ?? 0;
+    const ber =
+      amount != null
+        ? storeBerRoas({ revenue, cogs: amount, fees })
+        : null;
     return {
       dateKey,
       label: formatDayLabel(dateKey),
-      amount: m?.amount ?? null,
+      amount,
       inputAmount: m?.inputAmount ?? null,
       inputCurrency: m?.inputCurrency ?? null,
       fxRate: m?.fxRate ?? null,
       baseCurrency,
-      hasOrders: orderDaySet.has(dateKey),
+      revenue,
+      fees,
+      ber,
+      berFmt: fmtBerRoas(ber),
+      hasOrders: (stats?.orders ?? 0) > 0,
       isYesterday: dateKey === yesterdayKey,
       note: m?.note ?? "",
       revisionAt: m?.updatedAt ? new Date(m.updatedAt).toISOString() : null,

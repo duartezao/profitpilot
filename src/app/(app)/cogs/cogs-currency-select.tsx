@@ -1,5 +1,6 @@
 "use client";
 
+import type { ChangeEventHandler } from "react";
 import { COGS_INPUT_CURRENCIES } from "@/lib/cogs-modes";
 
 const selectCls =
@@ -9,16 +10,19 @@ export function CogsCurrencySelect({
   name = "inputCurrency",
   defaultValue = "EUR",
   disabled,
+  onChange,
 }: {
   name?: string;
   defaultValue?: string;
   disabled?: boolean;
+  onChange?: ChangeEventHandler<HTMLSelectElement>;
 }) {
   return (
     <select
       name={name}
       defaultValue={defaultValue}
       disabled={disabled}
+      onChange={onChange}
       className={selectCls}
       aria-label="Moeda do COGS"
     >

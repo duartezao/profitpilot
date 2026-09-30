@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import type { CogsDayRow } from "@/lib/manual-cogs";
+import { storeBerRoas, fmtBerRoas } from "@/lib/profit";
 import { saveManualCogsDayAction, type ManualCogsState } from "./actions";
 import { CogsCurrencySelect } from "./cogs-currency-select";
 import { Sensitive } from "@/components/privacy-mode";
@@ -17,6 +18,30 @@ function fmt(v: number, currency: string) {
   } catch {
     return v.toFixed(2);
   }
+}
+
+function parseLocaleAmount(raw: string): number | null {
+  const t = raw.trim().replace(/\s/g, "").replace(",", ".");
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** COGS em moeda base a partir do valor digitado (preview). */
+function previewCogsBase(
+  draftAmount: string,
+  draftCurrency: string,
+  row: CogsDayRow,
+): number | null {
+  const input = parseLocaleAmount(draftAmount);
+  if (input == null) return null;
+  const cur = draftCurrency.toUpperCase();
+  const base = row.baseCurrency.toUpperCase();
+  if (cur === base) return input;
+  if (row.fxRate != null && row.fxRate > 0 && cur === (row.inputCurrency ?? "").toUpperCase()) {
+    return input * row.fxRate;
+  }
+  return null;
 }
 
 function DayCogsRowForm({
@@ -41,10 +66,30 @@ function DayCogsRowForm({
         ? { amount: String(row.amount), currency: row.baseCurrency }
         : { amount: "", currency: defaultCurrency };
 
+  const [draftAmount, setDraftAmount] = useState(defaults.amount);
+  const [draftCurrency, setDraftCurrency] = useState(defaults.currency);
+
+  const liveBer = useMemo(() => {
+    const cogsBase = previewCogsBase(draftAmount, draftCurrency, row);
+    if (cogsBase == null) return row.ber;
+    return storeBerRoas({
+      revenue: row.revenue,
+      cogs: cogsBase,
+      fees: row.fees,
+    });
+  }, [draftAmount, draftCurrency, row]);
+
+  const previewCogs = previewCogsBase(draftAmount, draftCurrency, row);
+  const berIsPreview =
+    previewCogs != null &&
+    (row.amount == null || Math.abs(previewCogs - (row.amount ?? 0)) > 0.005);
+  const liveBerFmt = fmtBerRoas(liveBer);
+
   if (!row.hasOrders) {
     return (
       <tr className="border-t border-border align-middle text-muted-foreground">
         <td className="px-4 py-3 tabular-nums">{row.label}</td>
+        <td className="px-4 py-3 text-right">—</td>
         <td className="px-4 py-3 text-right">—</td>
         <td className="px-4 py-3 text-right">—</td>
         <td className="px-4 py-3 text-xs">Sem vendas</td>
@@ -81,6 +126,36 @@ function DayCogsRowForm({
           "—"
         )}
       </td>
+      <td className="px-4 py-3 text-right">
+        {liveBer != null ? (
+          <span
+            className="tabular-nums font-medium"
+            title={
+              berIsPreview
+                ? "Pré-visualização com o COGS que estás a escrever (REV − COGS − taxas)"
+                : "Break-even ROAS do dia com este COGS (REV − COGS − taxas)"
+            }
+          >
+            <Sensitive>{liveBerFmt}</Sensitive>
+            {berIsPreview && (
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                prev.
+              </span>
+            )}
+          </span>
+        ) : (
+          <span
+            className="text-xs text-muted-foreground"
+            title={
+              row.revenue <= 0
+                ? "Sem receita neste dia"
+                : "Preenche o COGS para ver o BER"
+            }
+          >
+            —
+          </span>
+        )}
+      </td>
       <td className="px-4 py-3">
         <form action={doSave} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="storeId" value={storeId} />
@@ -91,8 +166,12 @@ function DayCogsRowForm({
             defaultValue={defaults.amount}
             className={inputCls}
             data-sensitive
+            onChange={(e) => setDraftAmount(e.target.value)}
           />
-          <CogsCurrencySelect defaultValue={defaults.currency} />
+          <CogsCurrencySelect
+            defaultValue={defaults.currency}
+            onChange={(e) => setDraftCurrency(e.target.value)}
+          />
           <button
             type="submit"
             disabled={saving}
@@ -138,7 +217,8 @@ export function DayCogsPanel({
         <p className="mt-1 text-sm text-muted-foreground">
           Custo total dos produtos vendidos em cada dia em{" "}
           <Sensitive as="span">{storeName}</Sensitive>. Converte para{" "}
-          {baseCurrency} na dashboard.
+          {baseCurrency} na dashboard. O BER actualiza com o COGS desse dia
+          (REV − COGS − taxas).
         </p>
         {missingCount > 0 && (
           <p className="mt-2 text-sm text-warning">
@@ -148,12 +228,13 @@ export function DayCogsPanel({
         )}
       </div>
       <div className="max-h-[520px] overflow-x-auto overflow-y-auto">
-        <table className="w-full min-w-[680px] text-sm">
+        <table className="w-full min-w-[760px] text-sm">
           <thead className="sticky top-0 bg-surface">
             <tr className="text-left text-xs font-medium text-muted-foreground">
               <th className="px-4 py-3">Dia</th>
               <th className="px-4 py-3 text-right">COGS ({baseCurrency})</th>
               <th className="px-4 py-3 text-right">Entrada</th>
+              <th className="px-4 py-3 text-right">BER</th>
               <th className="px-4 py-3">Registar</th>
             </tr>
           </thead>
