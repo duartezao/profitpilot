@@ -2,7 +2,7 @@
 export const LIVE_DATA_POLL_MS = 60 * 1000;
 
 /** Intervalo mínimo entre syncs automáticos de ads (cron Vercel). */
-export const DEFAULT_AD_CRON_SYNC_INTERVAL_MINUTES = 30;
+export const DEFAULT_AD_CRON_SYNC_INTERVAL_MINUTES = 15;
 
 const MIN_AD_INTERVAL_MINUTES = 15;
 const MAX_AD_INTERVAL_MINUTES = 24 * 60;
