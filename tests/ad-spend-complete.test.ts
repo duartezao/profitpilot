@@ -31,7 +31,7 @@ describe("ad-spend-complete", () => {
     assert.equal(closed, true);
   });
 
-  it("API com amount 0 nunca fechado", () => {
+  it("API com amount 0 fecha após meia-noite (dia sem gasto confirmado)", () => {
     assert.equal(
       isApiSpendDayClosed(
         {
@@ -41,6 +41,22 @@ describe("ad-spend-complete", () => {
           updatedAt: "2026-07-14T10:00:00.000Z",
         },
         "2026-07-15",
+        "Europe/Brussels",
+      ),
+      true,
+    );
+  });
+
+  it("API com amount 0 no mesmo dia civil = parcial", () => {
+    assert.equal(
+      isApiSpendDayClosed(
+        {
+          dateKey: "2026-07-13",
+          source: "api",
+          amount: 0,
+          updatedAt: "2026-07-13T21:00:00.000Z",
+        },
+        "2026-07-14",
         "Europe/Brussels",
       ),
       false,

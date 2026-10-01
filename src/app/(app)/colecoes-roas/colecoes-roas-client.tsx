@@ -174,7 +174,7 @@ function CollectionRoasCard({ row }: { row: CollectionRoasRow }) {
                 <tr className="text-left text-xs text-muted-foreground">
                   <th className="pb-2 pr-3 font-medium">Campanha</th>
                   <th className="pb-2 pr-3 font-medium">Plataforma</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Activo</th>
+                  <th className="pb-2 pr-3 text-right font-medium">A correr</th>
                   <th className="pb-2 pr-3 text-right font-medium">Spend</th>
                   <th className="pb-2 pr-3 text-right font-medium">CPC</th>
                   <th className="pb-2 pr-3 text-right font-medium">CPM</th>
@@ -328,7 +328,7 @@ function ProductRoasCard({ row }: { row: ProductRoasRow }) {
                 <tr className="text-left text-xs text-muted-foreground">
                   <th className="pb-2 pr-3 font-medium">Campanha</th>
                   <th className="pb-2 pr-3 font-medium">Plataforma</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Activo</th>
+                  <th className="pb-2 pr-3 text-right font-medium">A correr</th>
                   <th className="pb-2 pr-3 text-right font-medium">Spend</th>
                   <th className="pb-2 pr-3 text-right font-medium">CPC</th>
                   <th className="pb-2 pr-3 text-right font-medium">CPM</th>
