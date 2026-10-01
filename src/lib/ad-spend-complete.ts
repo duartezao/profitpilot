@@ -12,6 +12,7 @@ export function yesterdayDateKey(today: string): string {
  * Gasto/campanhas de um dia civil só ficam «fechados» quando foram gravados
  * **depois** desse dia (1.º sync após 00:00 no fuso da loja).
  * Se updatedAt cai no mesmo dateKey, foi sync intraday — valor parcial.
+ * Amount 0 da API (dia sem gasto confirmado) também fecha após meia-noite.
  */
 export function isAdDayClosedAfterMidnight(
   dateKey: string,
@@ -42,8 +43,10 @@ export function isApiSpendDayClosed(
   if (!record) return false;
   if (record.source === "manual") return true;
   if (record.source !== "api") return false;
-  const amount = Number(record.amount ?? 0);
-  if (amount <= 0) return false;
+  if (record.amount == null || !Number.isFinite(Number(record.amount))) {
+    return false;
+  }
+  // amount 0 = dia confirmado sem gasto pela API — fecha após meia-noite
   return isAdDayClosedAfterMidnight(
     record.dateKey,
     record.updatedAt,

@@ -59,7 +59,7 @@ export type CollectionRoasCampaign = {
   landingUrls: string[];
   platformRoas: number | null;
   platformRoasFmt: string;
-  /** Dias seguidos com spend > 0; 0 se a conta/campanha «caiu». */
+  /** Dias a correr desde o 1.º spend; 0 se a conta/campanha está parada. */
   activeDays: number;
   activeDaysLabel: string;
 };
@@ -86,7 +86,7 @@ export type CollectionRoasRow = {
   ctrFmt: string;
   campaigns: CollectionRoasCampaign[];
   unmatched: boolean;
-  /** Dias seguidos com spend > 0 em pelo menos uma campanha ligada. */
+  /** Dias a correr desde o 1.º spend (coleção); 0 se parada. */
   activeDays: number;
   activeDaysLabel: string;
   /** Mensagem EN desta coleção (também incluída em storeBriefingText). */
@@ -175,8 +175,8 @@ function metricsFromSpend(
 }
 
 function fmtActiveDays(n: number): string {
-  if (n <= 0) return "0 dias activos";
-  return n === 1 ? "1 dia activo" : `${n} dias activos`;
+  if (n <= 0) return "0 dias a correr";
+  return n === 1 ? "1 dia a correr" : `${n} dias a correr`;
 }
 
 function prevDateKey(dateKey: string): string {
@@ -184,25 +184,40 @@ function prevDateKey(dateKey: string): string {
   return formatDateInput(addDays(d, -1));
 }
 
+function inclusiveDaysBetween(fromKey: string, toKey: string): number {
+  const from = startOfDay(new Date(`${fromKey}T12:00:00`));
+  const to = startOfDay(new Date(`${toKey}T12:00:00`));
+  if (to < from) return 0;
+  return Math.floor((to.getTime() - from.getTime()) / 86_400_000) + 1;
+}
+
 /**
- * Conta dias seguidos com spend > 0 a partir de hoje (ou ontem se hoje ainda
- * não tem spend). Um dia sem spend = conta «caiu» → streak = 0.
+ * Dias a correr desde o 1.º dia com spend > 0 até à data de referência
+ * (fim do período ou hoje). Se na referência a campanha/conta está parada
+ * (esse dia e o anterior sem spend) → 0.
+ *
+ * Pausas curtas a meio NÃO reiniciam a contagem — só o estado actual.
+ * (Antes era streak consecutivo, que zerava com 1 dia sem gasto / lacuna de sync.)
  */
 export function computeActiveSpendStreak(
   spendByDate: Map<string, number>,
-  todayKey: string,
+  referenceKey: string,
 ): number {
-  let cursor = todayKey;
-  if ((spendByDate.get(todayKey) ?? 0) <= 0) {
-    cursor = prevDateKey(todayKey);
+  const refSpend = spendByDate.get(referenceKey) ?? 0;
+  const yKey = prevDateKey(referenceKey);
+  const ySpend = spendByDate.get(yKey) ?? 0;
+  if (refSpend <= 0 && ySpend <= 0) return 0;
+
+  const endKey = refSpend > 0 ? referenceKey : yKey;
+  let first: string | null = null;
+  for (const [dk, spend] of spendByDate) {
+    if (spend > 0 && dk <= endKey && (!first || dk < first)) first = dk;
   }
-  let streak = 0;
-  for (let i = 0; i < ACTIVE_STREAK_LOOKBACK_DAYS; i++) {
-    if ((spendByDate.get(cursor) ?? 0) <= 0) break;
-    streak += 1;
-    cursor = prevDateKey(cursor);
-  }
-  return streak;
+  if (!first) return 0;
+  return Math.min(
+    ACTIVE_STREAK_LOOKBACK_DAYS,
+    inclusiveDaysBetween(first, endKey),
+  );
 }
 
 /**
@@ -460,10 +475,15 @@ export async function buildCollectionRoasReport(
     allRelevantKeys.add(key);
   }
 
-  // Spend diário para streaks (lookback independente do período seleccionado)
+  // Spend diário para dias a correr (lookback independente do período seleccionado)
   const todayKey = dateKeyInTimezone(new Date(), storeTz);
+  /** Referência = fim do período (não além de hoje) — o «dia certo» do intervalo. */
+  const referenceKey = periodToKey <= todayKey ? periodToKey : todayKey;
   const lookbackStart = formatDateInput(
-    addDays(startOfDay(new Date(`${todayKey}T12:00:00`)), -(ACTIVE_STREAK_LOOKBACK_DAYS - 1)),
+    addDays(
+      startOfDay(new Date(`${referenceKey}T12:00:00`)),
+      -(ACTIVE_STREAK_LOOKBACK_DAYS - 1),
+    ),
   );
   const dailyRows = allRelevantKeys.size
     ? await AdCampaignDay.aggregate<{
@@ -473,7 +493,7 @@ export async function buildCollectionRoasReport(
         {
           $match: {
             storeId: storeOid,
-            dateKey: { $gte: lookbackStart, $lte: todayKey },
+            dateKey: { $gte: lookbackStart, $lte: referenceKey },
           },
         },
         {
@@ -508,7 +528,7 @@ export async function buildCollectionRoasReport(
       key,
       computeActiveSpendStreak(
         dailySpendByCampaign.get(key) ?? new Map(),
-        todayKey,
+        referenceKey,
       ),
     );
   }
@@ -555,7 +575,7 @@ export async function buildCollectionRoasReport(
           collectionDaily.set(dk, (collectionDaily.get(dk) ?? 0) + spend);
         }
       }
-      const activeDays = computeActiveSpendStreak(collectionDaily, todayKey);
+      const activeDays = computeActiveSpendStreak(collectionDaily, referenceKey);
 
       const sales = membershipRev.get(handle);
       const revenue = sales?.revenue ?? 0;
@@ -690,7 +710,7 @@ export async function buildCollectionRoasReport(
           productDaily.set(dk, (productDaily.get(dk) ?? 0) + spend);
         }
       }
-      const activeDays = computeActiveSpendStreak(productDaily, todayKey);
+      const activeDays = computeActiveSpendStreak(productDaily, referenceKey);
 
       const sales = productRev.get(handle);
       const revenue = sales?.revenue ?? 0;

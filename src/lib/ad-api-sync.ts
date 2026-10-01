@@ -110,9 +110,29 @@ async function upsertApiAdSpendForDay(
 
   const allLines = [...preserved, ...apiLines];
   if (!allLines.length) {
-    if (existing) {
-      await ManualAdSpend.deleteOne({ storeId, dateKey });
-    }
+    // API confirmou 0 gasto — grava o dia para fechar a lacuna no backfill
+    // (sem isto, dias a zero ficavam eternamente «em falta»).
+    await ManualAdSpend.findOneAndUpdate(
+      { storeId, dateKey },
+      {
+        $set: {
+          workspaceId,
+          storeId,
+          dateKey,
+          amount: 0,
+          extraFee: 0,
+          inputAmount: 0,
+          inputCurrency: baseCurrency,
+          fxRate: 1,
+          inputExtraFee: 0,
+          lines: [],
+          currency: baseCurrency,
+          source: "api",
+          note: existing?.note ?? "",
+        },
+      },
+      { upsert: true },
+    );
     return true;
   }
 
