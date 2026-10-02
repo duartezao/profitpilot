@@ -28,6 +28,7 @@ import {
 } from "@/lib/tiktok-ads";
 import { recordCampaignBudgetScaleIfNeeded } from "@/lib/campaign-scale";
 import { recordCampaignPauseIfNeeded } from "@/lib/campaign-pause";
+import { isGoogleAdAccountSyncDue } from "@/lib/ad-sync-constants";
 
 type CampaignRow = MetaCampaignRow | GoogleCampaignRow | TiktokCampaignRow;
 
@@ -209,7 +210,7 @@ export type CampaignSyncResult = {
 export async function syncAdCampaignMetricsForStoreDay(
   storeId: string,
   dateKey: string,
-  options?: { platforms?: AdPlatform[] },
+  options?: { platforms?: AdPlatform[]; force?: boolean },
 ): Promise<CampaignSyncResult> {
   await ensureAdCampaignDayIndexes();
 
@@ -231,6 +232,13 @@ export async function syncAdCampaignMetricsForStoreDay(
   for (const acc of accounts) {
     const platform = acc.platform as AdPlatform;
     if (options?.platforms && !options.platforms.includes(platform)) continue;
+    if (
+      platform === "google" &&
+      !options?.force &&
+      !isGoogleAdAccountSyncDue(acc.lastSyncAt)
+    ) {
+      continue;
+    }
     try {
       const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
       const rows = await fetchCampaignRows(
@@ -264,7 +272,7 @@ export async function syncAdCampaignMetricsForStoreDay(
 export async function syncAdCampaignMetricsForStoreDays(
   storeId: string,
   dateKeys: string[],
-  options?: { platforms?: AdPlatform[] },
+  options?: { platforms?: AdPlatform[]; force?: boolean },
 ): Promise<CampaignSyncResult> {
   let campaignsSynced = 0;
   const sorted = [...new Set(dateKeys)].sort();

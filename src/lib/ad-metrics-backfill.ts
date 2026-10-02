@@ -170,12 +170,14 @@ export async function syncMissingAdMetricsForStore(
     completeCampaignDays,
   });
   const hasGoogle = accounts.some((a) => a.platform === "google");
-  const googleRefreshOnly = hasGoogle
-    ? googleConversionRefreshDateKeys(allKeys, today).filter(
-        (dateKey) =>
-          dateKey !== today && !toSyncIncremental.includes(dateKey),
-      )
-    : [];
+  // Refresh 7d de conversões Google só no manual — no cron gasta demasiados refresh_token.
+  const googleRefreshOnly =
+    force && hasGoogle
+      ? googleConversionRefreshDateKeys(allKeys, today).filter(
+          (dateKey) =>
+            dateKey !== today && !toSyncIncremental.includes(dateKey),
+        )
+      : [];
   const toSync = [...new Set([...toSyncIncremental, ...googleRefreshOnly])]
     .sort()
     .slice(-Math.max(1, maxDays));
@@ -197,6 +199,7 @@ export async function syncMissingAdMetricsForStore(
           googleOnlyRefresh || (dateKey !== today && spendClosed && !force),
         campaignPlatforms: googleOnlyRefresh ? ["google"] : undefined,
         forceOverwrite,
+        force,
       });
       synced++;
       if (result.updated) spendDays++;

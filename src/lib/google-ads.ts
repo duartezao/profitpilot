@@ -7,6 +7,7 @@
  * GOOGLE_ADS_DEVELOPER_TOKEN é opcional (sunset Google 2026-09-09 — acesso via Cloud project).
  */
 
+import { createHash } from "node:crypto";
 import {
   formatCampaignStatusLabel,
   metricsFromCampaignTotals,
@@ -239,9 +240,25 @@ export function normalizeCustomerId(id: string): string {
   return digits;
 }
 
+const googleAccessTokenCache = new Map<
+  string,
+  { token: string; expiresAt: number }
+>();
+
+function googleAccessTokenCacheKey(refreshToken: string): string {
+  return createHash("sha256").update(refreshToken.trim()).digest("hex").slice(0, 24);
+}
+
 export async function refreshGoogleAccessToken(
   refreshToken: string,
 ): Promise<string> {
+  const cacheKey = googleAccessTokenCacheKey(refreshToken);
+  const cached = googleAccessTokenCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now + 60_000) {
+    return cached.token;
+  }
+
   const { clientId, clientSecret } = requireGoogleOAuthEnv();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -257,6 +274,7 @@ export async function refreshGoogleAccessToken(
   });
   const json = (await res.json()) as {
     access_token?: string;
+    expires_in?: number;
     error?: string;
     error_description?: string;
   };
@@ -267,6 +285,14 @@ export async function refreshGoogleAccessToken(
         "Não foi possível renovar o token Google.",
     );
   }
+  const ttlSec =
+    typeof json.expires_in === "number" && json.expires_in > 120
+      ? json.expires_in - 60
+      : 50 * 60;
+  googleAccessTokenCache.set(cacheKey, {
+    token: json.access_token,
+    expiresAt: now + ttlSec * 1000,
+  });
   return json.access_token;
 }
 

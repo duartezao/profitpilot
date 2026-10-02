@@ -29,6 +29,7 @@ import {
 import { fetchMetaAdSpendForDay } from "@/lib/meta-ads";
 import { fetchGoogleAdSpendForDay } from "@/lib/google-ads";
 import { fetchTiktokAdSpendForDay } from "@/lib/tiktok-ads";
+import { isGoogleAdAccountSyncDue } from "@/lib/ad-sync-constants";
 import { syncAdCampaignMetricsForStoreDay, syncAdCampaignMetricsForStoreDays } from "@/lib/ad-campaign-sync";
 import { syncApiMetricsToDailyNote } from "@/lib/ad-note-sync";
 
@@ -200,6 +201,8 @@ export async function syncAdAccountsSpendForStore(
     campaignPlatforms?: AdPlatform[];
     /** Permite reescrever dias passados (apenas se a origem actual for API). */
     forceOverwrite?: boolean;
+    /** Manual / backfill forçado — ignora throttle Google. */
+    force?: boolean;
   },
 ): Promise<ApiAdSpendSyncResult> {
   const { Store } = await import("@/models/Store");
@@ -245,6 +248,13 @@ export async function syncAdAccountsSpendForStore(
   if (canWriteSpend) {
     for (const acc of accounts) {
       const platform = acc.platform as AdPlatform;
+      if (
+        platform === "google" &&
+        !options?.force &&
+        !isGoogleAdAccountSyncDue(acc.lastSyncAt)
+      ) {
+        continue;
+      }
       try {
         const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
         const { spend, currency } = await fetchSpendForAccount(
@@ -307,9 +317,12 @@ export async function syncAdAccountsSpendForStore(
   const campaignKeys = options?.campaignDateKeys?.length
     ? options.campaignDateKeys
     : [dateKey];
-  const campaignOptions = options?.campaignPlatforms?.length
-    ? { platforms: options.campaignPlatforms }
-    : undefined;
+  const campaignOptions = {
+    ...(options?.campaignPlatforms?.length
+      ? { platforms: options.campaignPlatforms }
+      : {}),
+    force: Boolean(options?.force),
+  };
   let campaignsSynced = 0;
   try {
     if (campaignKeys.length === 1) {
