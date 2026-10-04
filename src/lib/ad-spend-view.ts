@@ -89,7 +89,11 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
     const scoped = stores.find((s) => String(s._id) === storeId);
     if (!scoped) return null;
 
-    const range = resolveAdSpendRange(scoped.importStartDate, scoped.createdAt);
+    const range = resolveAdSpendRange(
+      scoped.importStartDate,
+      scoped.createdAt,
+      scoped.ianaTimezone,
+    );
     const rangeLabel = `${parseDateInput(range.fromKey)?.toLocaleDateString("pt-PT") ?? range.fromKey} – ${parseDateInput(range.toKey)?.toLocaleDateString("pt-PT") ?? range.toKey}`;
 
     const [calendar, adAccounts, workspaceGoogleLogins, lastSyncedAt] =

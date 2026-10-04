@@ -15,9 +15,11 @@ import { AD_PLATFORM_LABELS, adSpendLineTotalBase } from "@/lib/ad-spend-platfor
 import { isAdSpendDayLockedForApiForStore } from "@/lib/ad-spend-lock";
 import { isApiSpendDayClosed } from "@/lib/ad-spend-complete";
 import {
+  addDaysToDateKey,
   dateKeyInTimezone,
   dayKeysBetweenInTimezone,
   normalizeStoreTimezone,
+  zonedStartOfDay,
 } from "@/lib/store-timezone";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
@@ -34,32 +36,34 @@ export type AdSpendRange = {
   toKey: string;
 };
 
-/** Intervalo de dias a preencher: desde a data de importação (setup) até ontem. */
+/** Intervalo de dias a preencher: desde a data de importação (setup) até ontem (fuso da loja). */
 export function resolveAdSpendRange(
   importStartDate?: Date | null,
   storeCreatedAt?: Date | null,
+  storeTimeZone?: string | null,
 ): AdSpendRange {
-  const today = startOfDay(new Date());
-  const yesterday = addDays(today, -1);
+  const tz = normalizeStoreTimezone(storeTimeZone);
+  const todayKey = dateKeyInTimezone(new Date(), tz);
+  const yesterdayKey = addDaysToDateKey(todayKey, -1, tz);
 
-  let from: Date;
+  let fromKey: string;
   if (importStartDate) {
-    from = startOfDay(new Date(importStartDate));
+    fromKey = dateKeyInTimezone(new Date(importStartDate), tz);
   } else if (storeCreatedAt) {
-    from = startOfDay(new Date(storeCreatedAt));
+    fromKey = dateKeyInTimezone(new Date(storeCreatedAt), tz);
   } else {
-    from = addDays(today, -AD_SPEND_LOOKBACK_DAYS);
+    fromKey = addDaysToDateKey(todayKey, -AD_SPEND_LOOKBACK_DAYS, tz);
   }
 
-  if (from > yesterday) {
-    from = yesterday;
+  if (fromKey > yesterdayKey) {
+    fromKey = yesterdayKey;
   }
 
   return {
-    from,
-    to: yesterday,
-    fromKey: formatDateInput(from),
-    toKey: formatDateInput(yesterday),
+    from: zonedStartOfDay(fromKey, tz),
+    to: zonedStartOfDay(yesterdayKey, tz),
+    fromKey,
+    toKey: yesterdayKey,
   };
 }
 
@@ -281,12 +285,13 @@ export async function buildAdSpendCalendar(
 ): Promise<AdSpendDayRow[]> {
   const tz = normalizeStoreTimezone(storeTimeZone);
   const todayKey = dateKeyInTimezone(new Date(), tz);
-  const { from, to: yesterday } = resolveAdSpendRange(
+  const { from, to: yesterday, toKey: yesterdayKey } = resolveAdSpendRange(
     importStartDate,
     storeCreatedAt,
+    tz,
   );
 
-  const dateKeys = dayRangeKeys(from, yesterday);
+  const dateKeys = dayKeysBetweenInTimezone(from, yesterday, tz);
   if (!dateKeys.length) return [];
   const [entries, orderDays] = await Promise.all([
     ManualAdSpend.find({
@@ -350,8 +355,6 @@ export async function buildAdSpendCalendar(
       ];
     }),
   );
-  const yesterdayKey = formatDateInput(yesterday);
-
   return dateKeys
     .slice()
     .reverse()

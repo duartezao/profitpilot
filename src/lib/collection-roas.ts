@@ -15,6 +15,7 @@ import {
   startOfDay,
 } from "@/lib/period";
 import {
+  addDaysToDateKey,
   dateKeyInTimezone,
   dayKeysBetweenInTimezone,
   normalizeStoreTimezone,
@@ -479,11 +480,10 @@ export async function buildCollectionRoasReport(
   const todayKey = dateKeyInTimezone(new Date(), storeTz);
   /** Referência = fim do período (não além de hoje) — o «dia certo» do intervalo. */
   const referenceKey = periodToKey <= todayKey ? periodToKey : todayKey;
-  const lookbackStart = formatDateInput(
-    addDays(
-      startOfDay(new Date(`${referenceKey}T12:00:00`)),
-      -(ACTIVE_STREAK_LOOKBACK_DAYS - 1),
-    ),
+  const lookbackStart = addDaysToDateKey(
+    referenceKey,
+    -(ACTIVE_STREAK_LOOKBACK_DAYS - 1),
+    storeTz,
   );
   const dailyRows = allRelevantKeys.size
     ? await AdCampaignDay.aggregate<{

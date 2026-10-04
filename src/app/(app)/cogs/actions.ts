@@ -306,7 +306,11 @@ export async function saveManualCogsDayAction(
   );
   if (!store) return { error: "Loja não encontrada ou sem acesso." };
 
-  const { fromKey } = resolveAdSpendRange(store.importStartDate, store.createdAt);
+  const { fromKey } = resolveAdSpendRange(
+    store.importStartDate,
+    store.createdAt,
+    store.ianaTimezone,
+  );
   if (date < fromKey) {
     return { error: `Só podes registar COGS a partir de ${fromKey}.` };
   }

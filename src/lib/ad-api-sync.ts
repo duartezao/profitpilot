@@ -267,18 +267,8 @@ export async function syncAdAccountsSpendForStore(
   let anyError = false;
   const touchedAccountIds: Types.ObjectId[] = [];
 
-  // Throttle Google em «hoje» sem outras plataformas → não reescrever gasto a 0.
-  if (canWriteSpend && syncAccounts.length === 0) {
-    return {
-      storeId,
-      today: dateKey,
-      updated: false,
-      campaignsSynced: 0,
-      skippedReason: "no_data",
-    };
-  }
-
-  if (canWriteSpend) {
+  // Throttle Google em «hoje» → não reescrever gasto; campanhas podem seguir abaixo.
+  if (canWriteSpend && syncAccounts.length > 0) {
     for (const acc of syncAccounts) {
       const platform = acc.platform as AdPlatform;
       try {
@@ -331,7 +321,8 @@ export async function syncAdAccountsSpendForStore(
   }
 
   let updated = false;
-  if (canWriteSpend) {
+  // Sem contas sincronizadas neste ciclo (ex. Google em throttle) → não gravar 0.
+  if (canWriteSpend && apiByPlatform.size > 0) {
     updated = await upsertApiAdSpendForDay(
       store.workspaceId,
       store._id,
@@ -353,13 +344,21 @@ export async function syncAdAccountsSpendForStore(
     invalidateWorkspaceMetricsCache(String(store.workspaceId));
   }
 
-  if (!updated && !anyError && apiByPlatform.size === 0 && canWriteSpend) {
+  // Throttle Google (syncAccounts vazio) ≠ «sem dados» — não cortar campanhas.
+  const googleThrottledIdle =
+    googleThrottleToday && !googleAllowedThisCycle && syncAccounts.length === 0;
+  if (
+    !updated &&
+    !anyError &&
+    apiByPlatform.size === 0 &&
+    canWriteSpend &&
+    !googleThrottledIdle
+  ) {
     return { storeId, today: dateKey, updated: false, skippedReason: "no_data" };
   }
 
   // Hoje + Google ainda no throttle → não pedir campanhas (já vieram no ciclo anterior).
-  const skipGoogleCampaigns =
-    googleThrottleToday && !googleAllowedThisCycle;
+  const skipGoogleCampaigns = googleThrottledIdle;
   if (skipGoogleCampaigns && !canWriteSpend) {
     return {
       storeId,
