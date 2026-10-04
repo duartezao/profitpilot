@@ -24,9 +24,25 @@ export type GoogleAdAccountOption = {
   id: string;
   name: string;
   currency: string;
+  /** Fuso IANA da conta (customer.time_zone) — segments.date usa este fuso. */
+  timeZone?: string | null;
   /** MCC a usar na API — preenchido quando a conta vem de um gestor. */
   loginCustomerId?: string;
 };
+
+/** Normaliza time_zone da Google para IANA válido; null se inválido. */
+export function normalizeGoogleAdsTimezone(
+  raw?: string | null,
+): string | null {
+  const t = String(raw ?? "").trim();
+  if (!t) return null;
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: t });
+    return t;
+  } catch {
+    return null;
+  }
+}
 
 export class GoogleAdsApiError extends Error {
   constructor(message: string) {
@@ -566,6 +582,7 @@ SELECT
   customer_client.client_customer,
   customer_client.descriptive_name,
   customer_client.currency_code,
+  customer_client.time_zone,
   customer_client.manager,
   customer_client.hidden,
   customer_client.level,
@@ -588,6 +605,7 @@ async function listGoogleClientAccountsUnderManager(
       clientCustomer?: string;
       descriptiveName?: string;
       currencyCode?: string;
+      timeZone?: string;
       manager?: boolean;
       hidden?: boolean;
     };
@@ -604,6 +622,7 @@ async function listGoogleClientAccountsUnderManager(
       id,
       name: cc.descriptiveName?.trim() || `Conta ${id}`,
       currency: cc.currencyCode ?? "USD",
+      timeZone: normalizeGoogleAdsTimezone(cc.timeZone),
       loginCustomerId: normalizeCustomerId(managerId),
     });
   }
@@ -617,7 +636,7 @@ async function enrichGoogleAccount(
 ): Promise<GoogleAdAccountOption | null> {
   const cid = normalizeCustomerId(customerId);
   const query =
-    "SELECT customer.descriptive_name, customer.currency_code FROM customer LIMIT 1";
+    "SELECT customer.descriptive_name, customer.currency_code, customer.time_zone FROM customer LIMIT 1";
   const attempts: (string | undefined)[] = [
     undefined,
     envLoginCustomerId() ?? undefined,
@@ -632,7 +651,11 @@ async function enrichGoogleAccount(
     seen.add(key);
     try {
       const rows = await googleAdsSearchOnce<{
-        customer?: { descriptiveName?: string; currencyCode?: string };
+        customer?: {
+          descriptiveName?: string;
+          currencyCode?: string;
+          timeZone?: string;
+        };
       }>(accessToken, cid, query, loginId);
       const row = rows[0]?.customer;
       if (!row) continue;
@@ -640,6 +663,7 @@ async function enrichGoogleAccount(
         id: cid,
         name: row.descriptiveName?.trim() || `Conta ${cid}`,
         currency: row.currencyCode ?? "USD",
+        timeZone: normalizeGoogleAdsTimezone(row.timeZone),
       };
     } catch {
       /* tenta outro login-customer-id */
@@ -707,7 +731,12 @@ export async function verifyGoogleAdAccountAccess(
   refreshToken: string,
   customerId: string,
   manualLoginCustomerId?: string,
-): Promise<{ name: string; currency: string; loginCustomerId?: string }> {
+): Promise<{
+  name: string;
+  currency: string;
+  timeZone?: string | null;
+  loginCustomerId?: string;
+}> {
   const accessToken = await refreshGoogleAccessToken(refreshToken);
   const cid = normalizeCustomerId(customerId);
   const loginCustomerId = await resolveGoogleLoginCustomerId(
@@ -724,7 +753,7 @@ export async function verifyGoogleAdAccountAccess(
   }
 
   const query =
-    "SELECT customer.descriptive_name, customer.currency_code FROM customer LIMIT 1";
+    "SELECT customer.descriptive_name, customer.currency_code, customer.time_zone FROM customer LIMIT 1";
 
   const attempts: (string | undefined)[] = [
     loginCustomerId,
@@ -744,13 +773,18 @@ export async function verifyGoogleAdAccountAccess(
     seen.add(key);
     try {
       const rows = await googleAdsSearchOnce<{
-        customer?: { descriptiveName?: string; currencyCode?: string };
+        customer?: {
+          descriptiveName?: string;
+          currencyCode?: string;
+          timeZone?: string;
+        };
       }>(accessToken, cid, query, loginId);
       const row = rows[0]?.customer;
       if (!row) continue;
       return {
         name: row.descriptiveName?.trim() || `Conta ${cid}`,
         currency: row.currencyCode ?? "USD",
+        timeZone: normalizeGoogleAdsTimezone(row.timeZone),
         loginCustomerId: loginId,
       };
     } catch {
@@ -761,6 +795,25 @@ export async function verifyGoogleAdAccountAccess(
   throw new GoogleAdsApiError(
     humanizeGoogleAdsError("USER_PERMISSION_DENIED", cid),
   );
+}
+
+/** Lê o fuso IANA da conta Google (customer.time_zone). */
+export async function fetchGoogleCustomerTimezone(
+  refreshToken: string,
+  customerId: string,
+  loginCustomerId?: string,
+): Promise<string | null> {
+  const accessToken = await refreshGoogleAccessToken(refreshToken);
+  const cid = normalizeCustomerId(customerId);
+  const rows = await googleAdsSearchOnce<{
+    customer?: { timeZone?: string };
+  }>(
+    accessToken,
+    cid,
+    "SELECT customer.time_zone FROM customer LIMIT 1",
+    loginCustomerId,
+  );
+  return normalizeGoogleAdsTimezone(rows[0]?.customer?.timeZone);
 }
 
 /** Gasto num único dia (segments.date). */

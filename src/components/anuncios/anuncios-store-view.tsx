@@ -14,6 +14,7 @@ import { LastSyncBadge } from "@/components/last-sync-badge";
 import { PageTabCard, PageTabs } from "@/components/page-tabs";
 import { DeleteAdAccountButton } from "@/components/anuncios/delete-ad-account-button";
 import { AdAccountFeesForm } from "@/components/anuncios/ad-account-fees-form";
+import { GoogleTimezoneMismatchBanner } from "@/components/anuncios/google-timezone-mismatch-banner";
 import { cn } from "@/lib/utils";
 
 type TabId = "gasto" | "contas" | "campanhas" | "historico";
@@ -79,6 +80,16 @@ export function AnunciosStoreView({
           tone="muted"
         />
       </div>
+
+      {s.googleTimezoneMismatch && (
+        <GoogleTimezoneMismatchBanner
+          storeId={s.storeId}
+          storeTimezone={s.storeTimezone}
+          googleTimezone={s.googleTimezoneMismatch}
+          canEdit={s.canEdit}
+          onAligned={onDataChanged}
+        />
+      )}
 
       {s.missingCount > 0 && tab !== "gasto" && (
         <button

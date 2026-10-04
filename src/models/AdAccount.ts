@@ -30,6 +30,11 @@ const AdAccountSchema = new Schema(
     apiAgencyFeePercent: { type: Number, default: 0, min: 0, max: 100 },
     /** Email/conta usada no OAuth ao ligar (informativo). */
     linkedLoginEmail: { type: String, trim: true, default: "" },
+    /**
+     * Fuso IANA da conta Ads (ex. America/Los_Angeles).
+     * Google segments.date usa este fuso — alinhar com a loja para ROAS do dia.
+     */
+    ianaTimezone: { type: String, trim: true, default: null },
     status: {
       type: String,
       enum: ["active", "error", "disconnected"],

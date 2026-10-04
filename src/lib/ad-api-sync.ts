@@ -24,10 +24,14 @@ import {
   googleLoginCustomerIdFromCreds,
   loadSyncAdAccountsForStore,
   markAdAccountSync,
+  updateAdAccountTimezone,
   type AdAccountCredentials,
 } from "@/lib/ad-accounts";
 import { fetchMetaAdSpendForDay } from "@/lib/meta-ads";
-import { fetchGoogleAdSpendForDay } from "@/lib/google-ads";
+import {
+  fetchGoogleAdSpendForDay,
+  fetchGoogleCustomerTimezone,
+} from "@/lib/google-ads";
 import { fetchTiktokAdSpendForDay } from "@/lib/tiktok-ads";
 import { isGoogleAdAccountSyncDue } from "@/lib/ad-sync-constants";
 import { syncAdCampaignMetricsForStoreDay, syncAdCampaignMetricsForStoreDays } from "@/lib/ad-campaign-sync";
@@ -231,6 +235,23 @@ export async function syncAdAccountsSpendForStore(
     return { storeId, today: dateKey, updated: false, skippedReason: "no_accounts" };
   }
 
+  const todayKey = dateKeyInTimezone(new Date(), storeTz);
+  /**
+   * Throttle Google só no refresh de **hoje**.
+   * Dias em lacuna/parciais e campanhas do mesmo ciclo passam sempre —
+   * senão o markAdAccountSync do gasto saltava as campanhas (Lucien empancava).
+   */
+  const googleThrottleToday =
+    !options?.force && dateKey === todayKey;
+  const syncAccounts = accounts.filter((acc) => {
+    if ((acc.platform as AdPlatform) !== "google") return true;
+    if (!googleThrottleToday) return true;
+    return isGoogleAdAccountSyncDue(acc.lastSyncAt);
+  });
+  const googleAllowedThisCycle = syncAccounts.some(
+    (a) => (a.platform as AdPlatform) === "google",
+  );
+
   const existingSpend = await ManualAdSpend.findOne({ storeId: store._id, dateKey })
     .select("dateKey source")
     .lean();
@@ -244,17 +265,22 @@ export async function syncAdAccountsSpendForStore(
 
   const apiByPlatform = new Map<AdPlatform, PlatformApiSpend>();
   let anyError = false;
+  const touchedAccountIds: Types.ObjectId[] = [];
+
+  // Throttle Google em «hoje» sem outras plataformas → não reescrever gasto a 0.
+  if (canWriteSpend && syncAccounts.length === 0) {
+    return {
+      storeId,
+      today: dateKey,
+      updated: false,
+      campaignsSynced: 0,
+      skippedReason: "no_data",
+    };
+  }
 
   if (canWriteSpend) {
-    for (const acc of accounts) {
+    for (const acc of syncAccounts) {
       const platform = acc.platform as AdPlatform;
-      if (
-        platform === "google" &&
-        !options?.force &&
-        !isGoogleAdAccountSyncDue(acc.lastSyncAt)
-      ) {
-        continue;
-      }
       try {
         const creds = decryptAdCredentials<AdAccountCredentials>(acc.credentials);
         const { spend, currency } = await fetchSpendForAccount(
@@ -278,7 +304,24 @@ export async function syncAdAccountsSpendForStore(
             agencyFeePercent: acc.apiAgencyFeePercent ?? 0,
           },
         });
-        await markAdAccountSync(acc._id, true);
+        touchedAccountIds.push(acc._id);
+
+        // Guarda fuso da conta Google (segments.date) se ainda em falta.
+        if (
+          platform === "google" &&
+          !(acc as { ianaTimezone?: string | null }).ianaTimezone
+        ) {
+          try {
+            const tz = await fetchGoogleCustomerTimezone(
+              credentialTokenForPlatform(platform, creds),
+              acc.externalAccountId,
+              googleLoginCustomerIdFromCreds(creds),
+            );
+            if (tz) await updateAdAccountTimezone(acc._id, tz);
+          } catch {
+            /* fuso — não bloqueia spend */
+          }
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Falha no sync.";
         await markAdAccountSync(acc._id, false, msg);
@@ -314,6 +357,19 @@ export async function syncAdAccountsSpendForStore(
     return { storeId, today: dateKey, updated: false, skippedReason: "no_data" };
   }
 
+  // Hoje + Google ainda no throttle → não pedir campanhas (já vieram no ciclo anterior).
+  const skipGoogleCampaigns =
+    googleThrottleToday && !googleAllowedThisCycle;
+  if (skipGoogleCampaigns && !canWriteSpend) {
+    return {
+      storeId,
+      today: dateKey,
+      updated: false,
+      campaignsSynced: 0,
+      skippedReason: "no_data",
+    };
+  }
+
   const campaignKeys = options?.campaignDateKeys?.length
     ? options.campaignDateKeys
     : [dateKey];
@@ -321,7 +377,8 @@ export async function syncAdAccountsSpendForStore(
     ...(options?.campaignPlatforms?.length
       ? { platforms: options.campaignPlatforms }
       : {}),
-    force: Boolean(options?.force),
+    // Mesmo ciclo: campanhas não voltam a aplicar throttle (evita saltar após o gasto).
+    force: Boolean(options?.force) || googleAllowedThisCycle || !googleThrottleToday,
   };
   let campaignsSynced = 0;
   try {
@@ -332,11 +389,6 @@ export async function syncAdAccountsSpendForStore(
         campaignOptions,
       );
       campaignsSynced = r.campaignsSynced;
-      if (!canWriteSpend && r.campaignsSynced > 0) {
-        for (const acc of accounts) {
-          await markAdAccountSync(acc._id, true);
-        }
-      }
     } else {
       const r = await syncAdCampaignMetricsForStoreDays(
         storeId,
@@ -347,6 +399,17 @@ export async function syncAdAccountsSpendForStore(
     }
   } catch {
     /* campanhas — não bloqueia spend */
+  }
+
+  // Marca sync só no fim (gasto + campanhas) — senão o throttle mata as campanhas.
+  if (campaignsSynced > 0 || (updated && apiByPlatform.size > 0)) {
+    const ids =
+      touchedAccountIds.length > 0
+        ? touchedAccountIds
+        : syncAccounts.map((a) => a._id);
+    for (const id of ids) {
+      await markAdAccountSync(id, true);
+    }
   }
   try {
     const { syncAdCampaignLandingsForStore } = await import(
