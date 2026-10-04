@@ -6,7 +6,12 @@ import mongoose from "mongoose";
 import { z } from "zod";
 import { connectToDatabase } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
-import { createAdAccount, softDeleteAdAccount, updateAdAccountApiFees } from "@/lib/ad-accounts";
+import {
+  createAdAccount,
+  softDeleteAdAccount,
+  updateAdAccountApiFees,
+  type GoogleCredentials,
+} from "@/lib/ad-accounts";
 import { AD_PLATFORMS, type AdPlatform } from "@/lib/ad-spend-platforms";
 import { assertStoreAccess, findStoreForUser } from "@/lib/store-scope";
 import { syncAdAccountsSpendForStore } from "@/lib/ad-api-sync";
@@ -754,7 +759,9 @@ export async function alignStoreTimezoneToGoogleAction(
 
   if (!tz) {
     try {
-      const creds = adAccounts.decryptAdCredentials(google.credentials);
+      const creds = adAccounts.decryptAdCredentials<GoogleCredentials>(
+        google.credentials,
+      );
       tz = await fetchGoogleCustomerTimezone(
         adAccounts.credentialTokenForPlatform("google", creds),
         google.externalAccountId,
