@@ -16,6 +16,8 @@ export type AdAccountRow = {
   apiExtraFeeFixed: number;
   apiAgencyFeePercent: number;
   linkedLoginEmail: string;
+  /** Fuso IANA da conta Ads (Google); null se desconhecido. */
+  ianaTimezone: string | null;
   status: string;
   lastSyncAt: string | null;
   lastSyncError: string | null;
@@ -84,6 +86,7 @@ export async function listAdAccountsForStore(
     apiExtraFeeFixed: r.apiExtraFeeFixed ?? 0,
     apiAgencyFeePercent: r.apiAgencyFeePercent ?? 0,
     linkedLoginEmail: r.linkedLoginEmail?.trim() ?? "",
+    ianaTimezone: r.ianaTimezone?.trim() || null,
     status: r.status ?? "active",
     lastSyncAt: r.lastSyncAt ? r.lastSyncAt.toISOString() : null,
     lastSyncError: r.lastSyncError ?? null,
@@ -101,6 +104,7 @@ export async function createAdAccount(opts: {
   apiExtraFeeFixed?: number;
   apiAgencyFeePercent?: number;
   linkedLoginEmail?: string;
+  ianaTimezone?: string | null;
   replaceOtherOnPlatform?: boolean;
 }): Promise<string> {
   await connectToDatabase();
@@ -125,9 +129,21 @@ export async function createAdAccount(opts: {
     apiExtraFeeFixed: opts.apiExtraFeeFixed ?? 0,
     apiAgencyFeePercent: opts.apiAgencyFeePercent ?? 0,
     linkedLoginEmail: opts.linkedLoginEmail?.trim() ?? "",
+    ianaTimezone: opts.ianaTimezone?.trim() || null,
     status: "active",
   });
   return String(doc._id);
+}
+
+/** Actualiza o fuso IANA da conta Ads (ex. após sync Google). */
+export async function updateAdAccountTimezone(
+  accountId: Types.ObjectId,
+  ianaTimezone: string | null,
+): Promise<void> {
+  await AdAccount.updateOne(
+    { _id: accountId, deletedAt: null },
+    { $set: { ianaTimezone: ianaTimezone?.trim() || null } },
+  );
 }
 
 /** Desliga outras contas da mesma plataforma (histórico de gasto manual mantém-se). */

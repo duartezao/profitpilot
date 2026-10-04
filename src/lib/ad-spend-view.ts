@@ -41,6 +41,13 @@ export type AdSpendStoreView = {
   minDate: string;
   yesterday: string;
   today: string;
+  /** Fuso IANA da loja (dias de REV / Hoje). */
+  storeTimezone: string;
+  /**
+   * Fuso da conta Google ligado, se divergir da loja.
+   * Null = sem Google, ou fusos iguais / desconhecido.
+   */
+  googleTimezoneMismatch: string | null;
   calendar: AdSpendDayRow[];
   missingCount: number;
   yesterdayMissing: boolean;
@@ -101,11 +108,15 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
     const missingDays = calendar.filter((d) => d.amount === null);
     const googleAdsApiReady = googleAdsServerConfigStatus().apiReady;
 
+    const storeTimezone = normalizeStoreTimezone(scoped.ianaTimezone);
     const yesterday = range.toKey;
-    const today = dateKeyInTimezone(
-      new Date(),
-      normalizeStoreTimezone(scoped.ianaTimezone),
-    );
+    const today = dateKeyInTimezone(new Date(), storeTimezone);
+    const googleAcc = adAccounts.find((a) => a.platform === "google");
+    const googleTz = googleAcc?.ianaTimezone
+      ? normalizeStoreTimezone(googleAcc.ianaTimezone)
+      : null;
+    const googleTimezoneMismatch =
+      googleTz && googleTz !== storeTimezone ? googleTz : null;
 
     return {
       mode: "store",
@@ -119,6 +130,8 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
         minDate: range.fromKey,
         yesterday,
         today,
+        storeTimezone,
+        googleTimezoneMismatch,
         calendar,
         missingCount: countMissingDays(calendar),
         yesterdayMissing: missingDays.some((d) => d.isYesterday),

@@ -232,6 +232,7 @@ export async function syncAdCampaignMetricsForStoreDay(
   for (const acc of accounts) {
     const platform = acc.platform as AdPlatform;
     if (options?.platforms && !options.platforms.includes(platform)) continue;
+    // Throttle Google só quando o caller não pediu force (pai já decide o ciclo).
     if (
       platform === "google" &&
       !options?.force &&

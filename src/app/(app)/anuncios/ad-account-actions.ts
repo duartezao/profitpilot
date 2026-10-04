@@ -109,6 +109,7 @@ async function verifyPlatformAccount(
 ): Promise<{
   name: string;
   currency: string;
+  timeZone?: string | null;
   externalAccountId?: string;
   loginCustomerId?: string;
 }> {
@@ -272,6 +273,7 @@ export async function addAdAccountAction(
       apiExtraFeeFixed: apiExtraFeeFixed ?? 0,
       apiAgencyFeePercent: apiAgencyFeePercent ?? 0,
       linkedLoginEmail: linkedEmailResolved,
+      ianaTimezone: verified.timeZone ?? null,
       replaceOtherOnPlatform: replaceOther,
     });
     if (platform === "meta" && metaOAuthPending) {
@@ -711,5 +713,83 @@ export async function updateAdAccountFeesAction(
   if (!ok) return { error: "Conta não encontrada." };
 
   revalidatePath("/anuncios");
+  return { ok: true };
+}
+
+/**
+ * Alinha o fuso civil da loja ao da conta Google (segments.date),
+ * para ROAS / lucro do dia bater com o dia dos ads.
+ */
+export async function alignStoreTimezoneToGoogleAction(
+  storeId: string,
+): Promise<AdAccountActionState> {
+  const user = await getCurrentUser();
+  if (!user?.workspaceId) return { error: "Sessão inválida." };
+  if (!ROLES_EDIT.includes(user.role)) {
+    return { error: "Sem permissão para alterar o fuso horário." };
+  }
+
+  await connectToDatabase();
+  const store = await findStoreForUser(
+    user,
+    storeId,
+    "_id ianaTimezone",
+  );
+  if (!store) return { error: "Loja não encontrada ou sem acesso." };
+
+  const adAccounts = await import("@/lib/ad-accounts");
+  const { fetchGoogleCustomerTimezone, normalizeGoogleAdsTimezone } =
+    await import("@/lib/google-ads");
+  const { Store } = await import("@/models/Store");
+  const { normalizeStoreTimezone } = await import("@/lib/store-timezone");
+
+  const accounts = await adAccounts.loadSyncAdAccountsForStore(store._id);
+  const google = accounts.find((a) => a.platform === "google");
+  if (!google) return { error: "Nenhuma conta Google ligada a esta loja." };
+
+  let tz =
+    normalizeGoogleAdsTimezone(
+      (google as { ianaTimezone?: string | null }).ianaTimezone,
+    ) ?? null;
+
+  if (!tz) {
+    try {
+      const creds = adAccounts.decryptAdCredentials(google.credentials);
+      tz = await fetchGoogleCustomerTimezone(
+        adAccounts.credentialTokenForPlatform("google", creds),
+        google.externalAccountId,
+        adAccounts.googleLoginCustomerIdFromCreds(creds),
+      );
+      if (tz) await adAccounts.updateAdAccountTimezone(google._id, tz);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Falha ao ler fuso Google.";
+      return { error: msg };
+    }
+  }
+
+  if (!tz) {
+    return {
+      error:
+        "Não foi possível obter o fuso da conta Google. Corre «Actualizar» e tenta de novo.",
+    };
+  }
+
+  const storeTz = normalizeStoreTimezone(
+    (store as { ianaTimezone?: string | null }).ianaTimezone,
+  );
+  if (storeTz === tz) {
+    return { ok: true };
+  }
+
+  await Store.updateOne(
+    { _id: store._id },
+    { $set: { ianaTimezone: tz, timezoneSource: "manual" } },
+  );
+
+  revalidatePath("/anuncios");
+  revalidatePath("/definicoes");
+  revalidatePath("/dashboard");
+  revalidatePath("/metricas");
+  revalidatePath("/colecoes-roas");
   return { ok: true };
 }
