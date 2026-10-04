@@ -45,3 +45,32 @@ next-env.d.ts
 /docs/ProfitPilot-Google-Ads-API-Design-Document.md
 /docs/ProfitPilot-Google-Ads-API-Design-Document.pdf
 /scripts/md-to-pdf.py
+
+# Scripts de diagnóstico / one-off (podem expor lojas, IDs, dados reais)
+/scripts/diag-*.ts
+/scripts/debug-*.ts
+/scripts/check-*.ts
+/scripts/probe-*.ts
+/scripts/verify-*.ts
+/scripts/raw-*.ts
+/scripts/compare-*.ts
+/scripts/investigate-*.ts
+
+# Prints, screenshots e dumps locais
+/prints/
+/screenshots/
+**/print*.png
+**/print*.jpg
+**/print*.jpeg
+**/print*.webp
+**/screenshot*.png
+**/screenshot*.jpg
+**/screenshot*.jpeg
+**/screenshot*.webp
+
+# Ficheiros temporários de teste
+/tmp*
+tmp-*
+*.tmp.xlsx
+*-test.xlsx
+*-export-test.xlsx
