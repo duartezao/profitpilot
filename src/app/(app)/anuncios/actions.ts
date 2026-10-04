@@ -118,6 +118,7 @@ export async function saveManualAdSpendAction(
   const { fromKey } = resolveAdSpendRange(
     store.importStartDate,
     store.createdAt,
+    tz,
   );
   if (date < fromKey) {
     return {
