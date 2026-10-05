@@ -199,6 +199,12 @@ function presetRangeInTimezone(
   const { start, end } = boundsFromKeys(startKey, endKey, timeZone);
   const prevStart = zonedStartOfDay(prevStartKey, timeZone);
   const prevEnd = zonedEndOfDay(prevEndKey, timeZone);
+  const specificDates = dayKeysBetweenInTimezone(start, end, timeZone);
+  const prevSpecificDates = dayKeysBetweenInTimezone(
+    prevStart,
+    prevEnd,
+    timeZone,
+  );
 
   return {
     preset: id,
@@ -206,6 +212,8 @@ function presetRangeInTimezone(
     end,
     startDateKey: startKey,
     endDateKey: endKey,
+    specificDates,
+    prevSpecificDates,
     label: formatDateKeyRangeLabel(startKey, endKey),
     prevStart,
     prevEnd,
@@ -237,6 +245,12 @@ function customRangeInTimezone(
   const { prevStart, prevEnd } = rollingPrevious(start, end);
   const prevStartKey = dateKeyInTimezone(prevStart, timeZone);
   const prevEndKey = dateKeyInTimezone(prevEnd, timeZone);
+  const specificDates = dayKeysBetweenInTimezone(start, end, timeZone);
+  const prevSpecificDates = dayKeysBetweenInTimezone(
+    prevStart,
+    prevEnd,
+    timeZone,
+  );
 
   return {
     preset: "custom",
@@ -244,6 +258,8 @@ function customRangeInTimezone(
     end,
     startDateKey: from,
     endDateKey: to,
+    specificDates,
+    prevSpecificDates,
     label: formatDateKeyRangeLabel(from, to),
     prevStart,
     prevEnd,
