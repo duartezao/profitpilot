@@ -36,6 +36,8 @@ const AdCampaignTargetSchema = new Schema(
     collectionHandles: { type: [String], default: [] },
     /** Handles Shopify extraídos de /products/{handle}. */
     productHandles: { type: [String], default: [] },
+    /** Handles Shopify extraídos de /pages/{handle} (advertorials). */
+    pageHandles: { type: [String], default: [] },
     syncedAt: { type: Date, default: () => new Date() },
   },
   { timestamps: true },

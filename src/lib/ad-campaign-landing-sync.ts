@@ -13,6 +13,7 @@ import { fetchGoogleCampaignLandingUrls } from "@/lib/google-ads";
 import { fetchMetaCampaignLandingUrls } from "@/lib/meta-ads";
 import {
   extractCollectionHandlesFromUrls,
+  extractPageHandlesFromUrls,
   extractProductHandlesFromUrls,
   normalizeLandingUrls,
   normalizeShopifyHandle,
@@ -71,7 +72,7 @@ export { normalizeCampaignId };
  * Sincroniza URLs de destino dos ads → agrega por campanha.
  * `collectionHandles` = **só** o que está no URL das ads (`/collections/{handle}`).
  * Não usa coleção principal do produto (ex. chaussures) — isso distorce o ROAS.
- * `productHandles` fica guardado para auditoria; não entra no cruzamento ROAS.
+ * `productHandles` / `pageHandles` para ROAS por produto e advertorial `/pages/`.
  */
 export async function syncAdCampaignLandingsForStore(
   storeId: string,
@@ -132,6 +133,9 @@ export async function syncAdCampaignLandingsForStore(
         const productHandles = uniqueHandles(
           extractProductHandlesFromUrls(landingUrls),
         );
+        const pageHandles = uniqueHandles(
+          extractPageHandlesFromUrls(landingUrls),
+        );
 
         await AdCampaignTarget.findOneAndUpdate(
           {
@@ -151,6 +155,7 @@ export async function syncAdCampaignLandingsForStore(
               landingUrls,
               collectionHandles,
               productHandles,
+              pageHandles,
               syncedAt: new Date(),
             },
           },

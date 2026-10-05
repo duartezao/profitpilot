@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   extractCollectionHandleFromUrl,
   extractCollectionHandlesFromUrls,
+  extractPageHandleFromUrl,
+  extractPageHandlesFromUrls,
   extractProductHandleFromUrl,
   extractProductHandlesFromUrls,
   normalizeLandingUrls,
@@ -49,13 +51,36 @@ describe("collection-url-match", () => {
     );
   });
 
-  it("coleção e produto não se confundem", () => {
+  it("extrai handle de advertorial /pages/", () => {
+    assert.equal(
+      extractPageHandleFromUrl(
+        "https://sartoriabarberini.com/pages/mary-jane-soletta-ortopedica?utm=1",
+      ),
+      "mary-jane-soletta-ortopedica",
+    );
+    assert.equal(
+      extractPageHandleFromUrl(
+        "https://loja.com/it/pages/Mary-Jane-Soletta/",
+      ),
+      "mary-jane-soletta",
+    );
+  });
+
+  it("coleção, produto e page não se confundem", () => {
     assert.equal(
       extractCollectionHandleFromUrl("https://loja.com/products/robe"),
       null,
     );
     assert.equal(
       extractProductHandleFromUrl("https://loja.com/collections/essenziali"),
+      null,
+    );
+    assert.equal(
+      extractPageHandleFromUrl("https://loja.com/collections/essenziali"),
+      null,
+    );
+    assert.equal(
+      extractProductHandleFromUrl("https://loja.com/pages/advertorial"),
       null,
     );
   });
@@ -75,6 +100,13 @@ describe("collection-url-match", () => {
         "/products/BAR",
       ]),
       ["bar"],
+    );
+    assert.deepEqual(
+      extractPageHandlesFromUrls([
+        "https://a.com/pages/adv",
+        "https://a.com/pages/ADV?x=1",
+      ]),
+      ["adv"],
     );
     assert.deepEqual(
       normalizeLandingUrls([

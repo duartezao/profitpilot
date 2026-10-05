@@ -2,10 +2,12 @@
  * Extrai handles Shopify a partir de URLs de destino de ads.
  * - /collections/{handle} → coleção (com ou sem prefixo de idioma)
  * - /products/{handle} → produto (depois mapeado à coleção principal)
+ * - /pages/{handle} → advertorial / landing page
  */
 
 const COLLECTION_PATH_RE = /\/collections\/([^/?#]+)/i;
 const PRODUCT_PATH_RE = /\/products\/([^/?#]+)/i;
+const PAGE_PATH_RE = /\/pages\/([^/?#]+)/i;
 
 export function normalizeShopifyHandle(raw: string): string {
   try {
@@ -64,6 +66,13 @@ export function extractProductHandleFromUrl(
   return extractHandle(url, PRODUCT_PATH_RE);
 }
 
+/** Devolve o handle se a URL apontar para /pages/{handle} (advertorial). */
+export function extractPageHandleFromUrl(
+  url: string | null | undefined,
+): string | null {
+  return extractHandle(url, PAGE_PATH_RE);
+}
+
 function uniqueHandles(
   urls: Array<string | null | undefined>,
   extract: (url: string | null | undefined) => string | null,
@@ -91,6 +100,13 @@ export function extractProductHandlesFromUrls(
   urls: Array<string | null | undefined>,
 ): string[] {
   return uniqueHandles(urls, extractProductHandleFromUrl);
+}
+
+/** URLs únicas → handles de página/advertorial únicos (ordem estável). */
+export function extractPageHandlesFromUrls(
+  urls: Array<string | null | undefined>,
+): string[] {
+  return uniqueHandles(urls, extractPageHandleFromUrl);
 }
 
 /** Normaliza e deduplica URLs de destino. */
