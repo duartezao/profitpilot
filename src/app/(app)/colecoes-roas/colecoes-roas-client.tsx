@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Check, ChevronDown, ChevronUp, Copy, Link2, Target } from "lucide-react";
 import { Sensitive } from "@/components/privacy-mode";
-import type { CollectionRoasReport, CollectionRoasRow, ProductRoasRow } from "@/lib/collection-roas";
+import type { CollectionRoasReport, CollectionRoasRow, PageRoasRow, ProductRoasRow } from "@/lib/collection-roas";
 import { periodQueryFromSearchParams } from "@/lib/period";
 import { cn } from "@/lib/utils";
 import { syncAdAccountsNowAction } from "@/app/(app)/anuncios/ad-account-actions";
@@ -385,6 +385,166 @@ function ProductRoasCard({ row }: { row: ProductRoasRow }) {
   );
 }
 
+function PageRoasCard({ row }: { row: PageRoasRow }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="border-t border-border first:border-t-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full flex-col gap-2 px-4 py-3 text-left hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-3 sm:px-5"
+        aria-expanded={open}
+      >
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted">
+            <Target className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <div className="min-w-0">
+            <Sensitive className="block truncate font-medium">
+              {row.pageTitle}
+            </Sensitive>
+            <p className="truncate text-xs text-muted-foreground">
+              <Sensitive>/pages/{row.pageHandle}</Sensitive>
+              {row.matchedProductHandle ? (
+                <>
+                  {" · "}
+                  <span>REV via produto</span>
+                </>
+              ) : null}
+              {" · "}
+              <span className="tabular-nums">{row.activeDaysLabel}</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[300px]">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">REV</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.revenueFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">Spend</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.adSpendFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">ROAS real</p>
+              <p
+                className={cn(
+                  "tabular-nums text-sm font-semibold",
+                  row.realRoas != null && row.realRoas >= 1
+                    ? "text-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                <Sensitive>{row.realRoasFmt}</Sensitive>
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">CPC</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.cpcFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">CPM</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.cpmFmt}</Sensitive>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">CTR</p>
+              <p className="tabular-nums text-sm font-medium">
+                <Sensitive>{row.ctrFmt}</Sensitive>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <span className="hidden shrink-0 text-muted-foreground sm:inline">
+          {open ? (
+            <ChevronUp className="h-4 w-4" />
+          ) : (
+            <ChevronDown className="h-4 w-4" />
+          )}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-border bg-muted/20 px-4 py-3 sm:px-5">
+          <p className="mb-2 text-xs font-medium text-muted-foreground">
+            Campanhas com este advertorial ({row.campaigns.length})
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="pb-2 pr-3 font-medium">Campanha</th>
+                  <th className="pb-2 pr-3 font-medium">Plataforma</th>
+                  <th className="pb-2 pr-3 text-right font-medium">A correr</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Spend</th>
+                  <th className="pb-2 pr-3 text-right font-medium">CPC</th>
+                  <th className="pb-2 pr-3 text-right font-medium">CPM</th>
+                  <th className="pb-2 pr-3 text-right font-medium">CTR</th>
+                  <th className="pb-2 text-right font-medium">ROAS plat.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {row.campaigns.map((c) => (
+                  <tr
+                    key={`${c.platform}-${c.campaignId}`}
+                    className="border-t border-border/60"
+                  >
+                    <td className="py-2 pr-3">
+                      <Sensitive className="block max-w-[220px] truncate">
+                        {c.campaignName}
+                      </Sensitive>
+                      {c.landingUrls[0] && (
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          <Sensitive>{c.landingUrls[0]}</Sensitive>
+                        </p>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 text-muted-foreground">
+                      {c.platformLabel}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                      {c.activeDays}
+                      <span className="text-[11px]">d</span>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      <Sensitive>{c.spendFmt}</Sensitive>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                      <Sensitive>{c.cpcFmt}</Sensitive>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                      <Sensitive>{c.cpmFmt}</Sensitive>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-muted-foreground">
+                      <Sensitive>{c.ctrFmt}</Sensitive>
+                    </td>
+                    <td className="py-2 text-right tabular-nums text-muted-foreground">
+                      <Sensitive>{c.platformRoasFmt}</Sensitive>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ColecoesRoasClient({ storeId }: { storeId: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -620,6 +780,27 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
             </section>
           )}
 
+          {(data.pages?.length ?? 0) > 0 && (
+            <section className="overflow-hidden rounded-lg border border-border bg-surface">
+              <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                <div>
+                  <h2 className="text-lg font-semibold">Advertorials</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {data.pages.length} páginas com campanhas{" "}
+                    <span className="font-medium text-foreground">
+                      /pages/…
+                    </span>
+                    {" · "}
+                    REV = produto Shopify com o mesmo handle
+                  </p>
+                </div>
+              </div>
+              {data.pages.map((row) => (
+                <PageRoasCard key={row.pageHandle} row={row} />
+              ))}
+            </section>
+          )}
+
           {data.storeBriefingText ? (
             <section className="overflow-hidden rounded-lg border border-border bg-surface">
               <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3 sm:px-5">
@@ -650,7 +831,12 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
                   <span className="font-medium text-foreground">
                     /collections/…
                   </span>
-                  .
+                  ,{" "}
+                  <span className="font-medium text-foreground">
+                    /products/…
+                  </span>{" "}
+                  nem{" "}
+                  <span className="font-medium text-foreground">/pages/…</span>.
                 </p>
               </div>
               <ul className="divide-y divide-border">
