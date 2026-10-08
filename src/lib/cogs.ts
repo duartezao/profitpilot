@@ -164,6 +164,7 @@ export async function listSoldVariantsMissingCost(
 
   if (options?.assimilateFirst !== false) {
     for (const storeId of storeIds) {
+      await propagateSiblingCatalogCosts(storeId);
       await assimilatePendingCogsForStore(storeId);
     }
   }
@@ -586,6 +587,146 @@ export async function closeManualCostHistory(
   await closeOpenHistory(storeId, variantId, "manual", effectiveTo);
 }
 
+/**
+ * Copia COGS de uma variante com custo para as outras do mesmo produto
+ * que ainda estão a 0 (tamanhos/cores sem «cost per item» na Shopify).
+ */
+export async function propagateSiblingCatalogCosts(
+  storeId: Types.ObjectId,
+): Promise<{ variantsUpdated: number }> {
+  const costs = await ProductCost.find({ storeId })
+    .select("variantId productId unitCost manualCost manualCostFrom")
+    .lean();
+
+  const byProduct = new Map<string, typeof costs>();
+  for (const c of costs) {
+    const productId = c.productId ? String(c.productId) : "";
+    if (!productId) continue;
+    const list = byProduct.get(productId) ?? [];
+    list.push(c);
+    byProduct.set(productId, list);
+  }
+
+  let variantsUpdated = 0;
+  const fromDefault = new Date(0);
+
+  for (const [productId, list] of byProduct) {
+    let donorManual: { cost: number; from: Date } | null = null;
+    let donorShopify = 0;
+
+    for (const c of list) {
+      if (c.manualCost != null && num(c.manualCost) > 0) {
+        const cost = num(c.manualCost);
+        if (!donorManual || cost > donorManual.cost) {
+          donorManual = {
+            cost,
+            from: c.manualCostFrom ? new Date(c.manualCostFrom) : fromDefault,
+          };
+        }
+      }
+      const shopify = num(c.unitCost);
+      if (shopify > donorShopify) donorShopify = shopify;
+    }
+
+    if (!donorManual && donorShopify <= 0) continue;
+
+    for (const c of list) {
+      const hasOwn =
+        num(c.unitCost) > 0 ||
+        (c.manualCost != null && num(c.manualCost) > 0);
+      if (hasOwn) continue;
+
+      const variantId = String(c.variantId);
+      if (donorManual) {
+        await ProductCost.updateOne(
+          { storeId, variantId },
+          {
+            $set: {
+              manualCost: donorManual.cost,
+              manualCostFrom: donorManual.from,
+            },
+          },
+        );
+        await recordManualCostChange(
+          storeId,
+          variantId,
+          donorManual.cost,
+          donorManual.from,
+          productId,
+        );
+      } else {
+        await ProductCost.updateOne(
+          { storeId, variantId },
+          { $set: { unitCost: donorShopify } },
+        );
+        await recordShopifyCostChange(
+          storeId,
+          variantId,
+          donorShopify,
+          new Date(),
+          productId,
+        );
+      }
+      variantsUpdated++;
+    }
+  }
+
+  return { variantsUpdated };
+}
+
+/**
+ * Aplica um custo manual a todas as variantes do mesmo produto
+ * que ainda não têm custo (própria variante incluída se indicado).
+ */
+export async function applyManualCostToProductSiblings(
+  storeId: Types.ObjectId,
+  productId: string,
+  cost: number,
+  effectiveFrom: Date,
+  options?: { skipVariantId?: string },
+): Promise<{ variantsUpdated: number }> {
+  if (!productId || cost < 0) return { variantsUpdated: 0 };
+
+  const siblings = await ProductCost.find({
+    storeId,
+    productId,
+  })
+    .select("variantId unitCost manualCost")
+    .lean();
+
+  let variantsUpdated = 0;
+  for (const s of siblings) {
+    const variantId = String(s.variantId);
+    if (options?.skipVariantId && variantId === options.skipVariantId) {
+      continue;
+    }
+    const hasOwn =
+      num(s.unitCost) > 0 ||
+      (s.manualCost != null && num(s.manualCost) > 0);
+    if (hasOwn) continue;
+
+    await ProductCost.updateOne(
+      { storeId, variantId },
+      {
+        $set: {
+          manualCost: cost,
+          manualCostFrom: effectiveFrom,
+        },
+      },
+    );
+    await recordManualCostChange(
+      storeId,
+      variantId,
+      cost,
+      effectiveFrom,
+      productId,
+    );
+    variantsUpdated++;
+  }
+
+  return { variantsUpdated };
+}
+
 export const SOLD_VARIANT_BATCH = 50;
 
 /**
@@ -811,6 +952,10 @@ export async function assimilatePendingCogsForStore(
   storeId: Types.ObjectId,
   options?: AssimilateOptions,
 ): Promise<AssimilateResult> {
+  // Preenche catálogo a partir de irmãos com custo antes de resolver linhas.
+  if (!options?.variantIds?.length) {
+    await propagateSiblingCatalogCosts(storeId);
+  }
   const resolveCost = await loadCostResolverForStore(storeId);
   const result: AssimilateResult = { ordersUpdated: 0, linesFilled: 0 };
 
