@@ -8,7 +8,8 @@ import { connectToDatabase } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { ProductCost } from "@/models/ProductCost";
 import {
-  backfillMissingLineCosts,
+  applyManualCostToProductSiblings,
+  assimilatePendingCogsForStore,
   closeManualCostHistory,
   recordManualCostChange,
 } from "@/lib/cogs";
@@ -121,8 +122,21 @@ export async function setManualCostAction(
     existing?.productId,
   );
 
+  // Mesmo custo nas outras variantes (tamanhos/cores) ainda sem COGS.
+  if (existing?.productId) {
+    await applyManualCostToProductSiblings(
+      store._id,
+      String(existing.productId),
+      costToStore,
+      from,
+      { skipVariantId: variantId },
+    );
+  }
+
   // Só preenche linhas ainda sem custo — usa histórico na data de cada venda.
-  await backfillMissingLineCosts(store._id, variantId, from);
+  await assimilatePendingCogsForStore(store._id, {
+    from: from.getTime() > 0 ? from : undefined,
+  });
 
   revalidatePath("/cogs");
   revalidatePath("/dashboard");
