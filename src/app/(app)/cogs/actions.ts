@@ -10,6 +10,7 @@ import { ProductCost } from "@/models/ProductCost";
 import {
   applyManualCostToProductSiblings,
   assimilatePendingCogsForStore,
+  backfillMissingLineCosts,
   closeManualCostHistory,
   recordManualCostChange,
 } from "@/lib/cogs";
