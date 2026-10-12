@@ -4,6 +4,7 @@ import {
   computePayoutNetInStoreCurrency,
   deriveShopifyFxRate,
   orderStoreAmountForBalanceTx,
+  payoutNetBaseLooksPlausible,
   shopifyPayoutLegacyId,
 } from "../src/lib/payout-shopify-fx.ts";
 import {
@@ -73,6 +74,24 @@ describe("orderStoreAmountForBalanceTx", () => {
       { totalPrice: 100, netRevenue: 100, refunded: 10, fees: 3 },
     );
     assert.equal(amt, 87);
+  });
+});
+
+describe("payoutNetBaseLooksPlausible", () => {
+  it("rejeita netBase com sinal oposto ao net do payout", () => {
+    assert.equal(payoutNetBaseLooksPlausible(1096.27, -2311.92), false);
+    assert.equal(payoutNetBaseLooksPlausible(575.59, -1066.33), false);
+  });
+
+  it("aceita netBase com o mesmo sinal", () => {
+    assert.equal(payoutNetBaseLooksPlausible(100, 92), true);
+    assert.equal(payoutNetBaseLooksPlausible(-50, -48), true);
+  });
+
+  it("rejeita null / zero desalinhado", () => {
+    assert.equal(payoutNetBaseLooksPlausible(100, null), false);
+    assert.equal(payoutNetBaseLooksPlausible(100, 0), false);
+    assert.equal(payoutNetBaseLooksPlausible(0, 0), true);
   });
 });
 
