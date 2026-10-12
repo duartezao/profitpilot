@@ -996,7 +996,7 @@ Lucro após taxas =
 * **A caminho (in transit)** — já enviado pela Shopify, ainda não na conta.
 * **Histórico de payouts** já recebidos (data, valor, estado).
 * **Vista consolidada**: somatório de tudo o que vais receber de **todas as lojas**, com timeline ("esta semana vais receber X, na próxima Y").
-* **Multi-moeda**: quando a moeda do payout Shopify (ex. USD numa loja EUR) difere da moeda da loja, o equivalente na moeda base usa a **taxa implícita Shopify** (balance transactions + encomendas), não ECB. O valor original do payout mantém-se visível na moeda do payout. Re-sincronizar a loja preenche `netBase` em payouts antigos.
+* **Multi-moeda**: quando a moeda do payout Shopify (ex. USD numa loja EUR) difere da moeda da loja, o equivalente na moeda base usa a **taxa implícita Shopify** (balance transactions + encomendas), não ECB. Se o `netBase` derivado inverter o sinal do `net` do payout (BTs desalinhadas), cai automaticamente para **FX de mercado** (`payoutNetBaseLooksPlausible`). O valor original do payout mantém-se visível na moeda do payout. Re-sincronizar a loja preenche `netBase` em payouts antigos.
 
 ## Detalhe de cada payout
 

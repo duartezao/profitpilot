@@ -132,6 +132,20 @@ export function computePayoutNetInStoreCurrency(
 
 export type PayoutFxSource = "shopify" | "market" | "identity";
 
+/**
+ * `netBase` derivado de balance transactions pode inverter o sinal do `net`
+ * do payout (ex. loja EUR, payout USD). Nesse caso preferimos FX de mercado.
+ */
+export function payoutNetBaseLooksPlausible(
+  payoutNet: number,
+  netBase: number | null | undefined,
+): boolean {
+  if (netBase == null || !Number.isFinite(netBase)) return false;
+  if (payoutNet === 0) return netBase === 0;
+  if (netBase === 0) return false;
+  return Math.sign(payoutNet) === Math.sign(netBase);
+}
+
 export async function storeAmountToBase(
   amountStore: number,
   storeCurrency: string,
@@ -217,22 +231,22 @@ export async function computePayoutBaseAmounts(opts: {
   let netBase: number;
   let fxSource: PayoutFxSource;
 
-  if (opts.balanceTxs.length > 0 && (usedShopifyRate || netStore !== 0)) {
+  const shopifyCandidate =
+    opts.balanceTxs.length > 0 && (usedShopifyRate || netStore !== 0)
+      ? netStore
+      : null;
+  const useShopify =
+    shopifyCandidate != null &&
+    payoutNetBaseLooksPlausible(opts.payoutNet, shopifyCandidate);
+
+  if (useShopify) {
     netBase = await storeAmountToBase(
-      netStore,
+      shopifyCandidate,
       storeCur,
       baseCur,
       opts.dateKey,
     );
     fxSource = usedShopifyRate ? "shopify" : "market";
-  } else if (marketRate != null) {
-    netBase = await moneyToBase(
-      opts.payoutNet,
-      payoutCur,
-      baseCur,
-      opts.dateKey,
-    );
-    fxSource = "market";
   } else {
     netBase = await moneyToBase(
       opts.payoutNet,
@@ -483,9 +497,10 @@ export async function resolvePayoutNetBase(
   baseCurrency: string,
   dateKey: string,
 ): Promise<number> {
-  if (payout.netBase != null && Number.isFinite(payout.netBase)) {
-    return payout.netBase;
+  const net = num(payout.net);
+  if (payoutNetBaseLooksPlausible(net, payout.netBase)) {
+    return num(payout.netBase);
   }
   const cur = (payout.currency ?? storeCurrency).toUpperCase();
-  return moneyToBase(payout.net ?? 0, cur, baseCurrency, dateKey);
+  return moneyToBase(net, cur, baseCurrency, dateKey);
 }
