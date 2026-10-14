@@ -535,6 +535,7 @@ export async function recordShopifyCostChange(
   effectiveFrom: Date,
   productId?: string | null,
 ) {
+  if (!(cost > 0)) return;
   await closeOpenHistory(storeId, variantId, "shopify", effectiveFrom);
   await CogsHistory.create({
     storeId,
