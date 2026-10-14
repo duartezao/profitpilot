@@ -156,3 +156,16 @@ export function resolveVariantCatalogCost(
   if (directCost > 0) return directCost;
   return pickSiblingValue(variantId, productId, ctx, "unitCost");
 }
+
+/**
+ * Nunca substituir um custo/preço já positivo por 0 (Shopify sem «cost per item»).
+ * Produtos têm sempre custo — 0 da API não é um valor a gravar por cima do existente.
+ */
+export function preferPositiveCatalogValue(
+  resolved: number,
+  previous: number | undefined,
+): number {
+  if (resolved > 0) return resolved;
+  if (previous != null && previous > 0) return previous;
+  return 0;
+}

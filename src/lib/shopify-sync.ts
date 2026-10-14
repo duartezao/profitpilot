@@ -37,12 +37,14 @@ import {
   SOLD_VARIANT_BATCH,
   loadCostResolverForStore,
   loadPriceResolverForStore,
+  propagateSiblingCatalogCosts,
   recordShopifyCostChange,
   recordShopifyPriceChange,
   resolveCatalogEffectiveFrom,
 } from "@/lib/cogs";
 import {
   buildCatalogFallbackContext,
+  preferPositiveCatalogValue,
   resolveVariantCatalogCost,
   resolveVariantCatalogPrice,
   type CatalogVariantInput,
@@ -211,24 +213,32 @@ export async function syncProductCosts(
     const conn = data.productVariants;
 
     const ops = conn.nodes.map((v) => {
-      const newCost = num(v.inventoryItem?.unitCost?.amount);
-      const newPrice = num(v.price);
+      const variantId = v.id;
+      const rawCost = num(v.inventoryItem?.unitCost?.amount);
+      const rawPrice = num(v.price);
+      const newCost = preferPositiveCatalogValue(
+        rawCost,
+        prevCosts.get(String(variantId)),
+      );
+      const newPrice = preferPositiveCatalogValue(
+        rawPrice,
+        prevPrices.get(String(variantId)),
+      );
+      const $set: Record<string, unknown> = {
+        storeId: store._id,
+        variantId,
+        productId: v.product?.id,
+        title: v.product?.title
+          ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
+          : v.title,
+        currency: store.currency,
+      };
+      if (newPrice > 0) $set.price = newPrice;
+      if (newCost > 0) $set.unitCost = newCost;
       return {
         updateOne: {
-          filter: { storeId: store._id, variantId: v.id },
-          update: {
-            $set: {
-              storeId: store._id,
-              variantId: v.id,
-              productId: v.product?.id,
-              title: v.product?.title
-                ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
-                : v.title,
-              price: newPrice,
-              unitCost: newCost,
-              currency: store.currency,
-            },
-          },
+          filter: { storeId: store._id, variantId },
+          update: { $set },
           upsert: true,
         },
         newCost,
@@ -246,13 +256,14 @@ export async function syncProductCosts(
       for (const op of ops) {
         const variantId = String(op.updateOne.filter.variantId);
         const prevCost = prevCosts.get(variantId);
-        const costChanged = prevCost === undefined || prevCost !== op.newCost;
-        if (costChanged) {
+        if (op.newCost > 0 && (prevCost === undefined || prevCost !== op.newCost)) {
           await recordShopifyCostChange(
             store._id,
             variantId,
             op.newCost,
-            prevCost === undefined ? new Date(0) : effectiveFrom,
+            prevCost === undefined || !(prevCost > 0)
+              ? new Date(0)
+              : effectiveFrom,
             op.productId,
           );
           prevCosts.set(variantId, op.newCost);
@@ -260,13 +271,17 @@ export async function syncProductCosts(
         }
 
         const prevPrice = prevPrices.get(variantId);
-        const priceChanged = prevPrice === undefined || prevPrice !== op.newPrice;
-        if (priceChanged) {
+        if (
+          op.newPrice > 0 &&
+          (prevPrice === undefined || prevPrice !== op.newPrice)
+        ) {
           await recordShopifyPriceChange(
             store._id,
             variantId,
             op.newPrice,
-            prevPrice === undefined ? new Date(0) : effectiveFrom,
+            prevPrice === undefined || !(prevPrice > 0)
+              ? new Date(0)
+              : effectiveFrom,
             op.productId,
           );
           prevPrices.set(variantId, op.newPrice);
@@ -343,30 +358,38 @@ export async function syncProductCostsPage(
   const changedVariantIds: string[] = [];
 
   const ops = conn.nodes.map((v) => {
-    const newCost = num(v.inventoryItem?.unitCost?.amount);
-    const newPrice = num(v.price);
+    const variantId = v.id;
+    const rawCost = num(v.inventoryItem?.unitCost?.amount);
+    const rawPrice = num(v.price);
+    const newCost = preferPositiveCatalogValue(
+      rawCost,
+      prevCosts.get(String(variantId)),
+    );
+    const newPrice = preferPositiveCatalogValue(
+      rawPrice,
+      prevPrices.get(String(variantId)),
+    );
+    const $set: Record<string, unknown> = {
+      storeId: store._id,
+      variantId,
+      productId: v.product?.id,
+      title: v.product?.title
+        ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
+        : v.title,
+      currency: store.currency,
+    };
+    if (newPrice > 0) $set.price = newPrice;
+    if (newCost > 0) $set.unitCost = newCost;
     return {
       updateOne: {
-        filter: { storeId: store._id, variantId: v.id },
-        update: {
-          $set: {
-            storeId: store._id,
-            variantId: v.id,
-            productId: v.product?.id,
-            title: v.product?.title
-              ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
-              : v.title,
-            price: newPrice,
-            unitCost: newCost,
-            currency: store.currency,
-          },
-        },
+        filter: { storeId: store._id, variantId },
+        update: { $set },
         upsert: true,
       },
       newCost,
       newPrice,
       productId: v.product?.id,
-      variantId: v.id,
+      variantId,
     };
   });
 
@@ -379,26 +402,31 @@ export async function syncProductCostsPage(
     for (const op of ops) {
       const variantId = String(op.variantId);
       const prevCost = prevCosts.get(variantId);
-      const costChanged = prevCost === undefined || prevCost !== op.newCost;
-      if (costChanged) {
+      if (op.newCost > 0 && (prevCost === undefined || prevCost !== op.newCost)) {
         await recordShopifyCostChange(
           store._id,
           variantId,
           op.newCost,
-          prevCost === undefined ? new Date(0) : effectiveFrom,
+          prevCost === undefined || !(prevCost > 0)
+            ? new Date(0)
+            : effectiveFrom,
           op.productId,
         );
         changedVariantIds.push(variantId);
       }
 
       const prevPrice = prevPrices.get(variantId);
-      const priceChanged = prevPrice === undefined || prevPrice !== op.newPrice;
-      if (priceChanged) {
+      if (
+        op.newPrice > 0 &&
+        (prevPrice === undefined || prevPrice !== op.newPrice)
+      ) {
         await recordShopifyPriceChange(
           store._id,
           variantId,
           op.newPrice,
-          prevPrice === undefined ? new Date(0) : effectiveFrom,
+          prevPrice === undefined || !(prevPrice > 0)
+            ? new Date(0)
+            : effectiveFrom,
           op.productId,
         );
       }
@@ -504,42 +532,47 @@ async function upsertProductCostNodes(
 
   const ops = nodes.map((v) => {
     const productId = v.product?.id ?? null;
+    const variantId = v.id;
     const rawCost = num(v.inventoryItem?.unitCost?.amount);
     const rawPrice = num(v.price);
-    const newCost = resolveVariantCatalogCost(
-      v.id,
+    const resolvedCost = resolveVariantCatalogCost(
+      variantId,
       productId,
       rawCost,
       fallbackCtx,
     );
-    const newPrice = resolveVariantCatalogPrice(
-      v.id,
+    const resolvedPrice = resolveVariantCatalogPrice(
+      variantId,
       productId,
       rawPrice,
       fallbackCtx,
     );
+    const prevCost = prevCosts.get(String(variantId));
+    const prevPrice = prevPrices.get(String(variantId));
+    // Nunca gravar 0 por cima de um custo/preço já conhecido (Shopify vazio ≠ custo 0).
+    const newCost = preferPositiveCatalogValue(resolvedCost, prevCost);
+    const newPrice = preferPositiveCatalogValue(resolvedPrice, prevPrice);
+    const $set: Record<string, unknown> = {
+      storeId: store._id,
+      variantId,
+      productId: productId ?? undefined,
+      title: v.product?.title
+        ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
+        : v.title,
+      currency: store.currency,
+    };
+    if (newPrice > 0) $set.price = newPrice;
+    if (newCost > 0) $set.unitCost = newCost;
     return {
       updateOne: {
-        filter: { storeId: store._id, variantId: v.id },
-        update: {
-          $set: {
-            storeId: store._id,
-            variantId: v.id,
-            productId: productId ?? undefined,
-            title: v.product?.title
-              ? `${v.product.title}${v.title && v.title !== "Default Title" ? ` — ${v.title}` : ""}`
-              : v.title,
-            price: newPrice,
-            unitCost: newCost,
-            currency: store.currency,
-          },
-        },
+        filter: { storeId: store._id, variantId },
+        update: { $set },
         upsert: true,
       },
       newCost,
       newPrice,
       productId,
-      variantId: v.id,
+      variantId,
       costEffectiveFrom: resolveCatalogEffectiveFrom(
         v.inventoryItem?.updatedAt ?? v.updatedAt,
       ),
@@ -584,28 +617,32 @@ async function upsertProductCostNodes(
   for (const op of ops) {
     const variantId = String(op.variantId);
     const prevCost = prevCosts.get(variantId);
-    const costChanged = prevCost === undefined || prevCost !== op.newCost;
+    const costChanged =
+      op.newCost > 0 && (prevCost === undefined || prevCost !== op.newCost);
     if (costChanged) {
-      if (op.newCost > 0) {
-        const effectiveFrom =
-          prevCost === undefined ? new Date(0) : op.costEffectiveFrom;
-        costEffectiveFromByVariant.set(variantId, effectiveFrom);
-        await recordShopifyCostChange(
-          store._id,
-          variantId,
-          op.newCost,
-          effectiveFrom,
-          op.productId,
-        );
-      }
+      const effectiveFrom =
+        prevCost === undefined || !(prevCost > 0)
+          ? new Date(0)
+          : op.costEffectiveFrom;
+      costEffectiveFromByVariant.set(variantId, effectiveFrom);
+      await recordShopifyCostChange(
+        store._id,
+        variantId,
+        op.newCost,
+        effectiveFrom,
+        op.productId,
+      );
       changedVariantIds.push(variantId);
     }
 
     const prevPrice = prevPrices.get(variantId);
-    const priceChanged = prevPrice === undefined || prevPrice !== op.newPrice;
+    const priceChanged =
+      op.newPrice > 0 && (prevPrice === undefined || prevPrice !== op.newPrice);
     if (priceChanged) {
       const effectiveFrom =
-        prevPrice === undefined ? new Date(0) : op.priceEffectiveFrom;
+        prevPrice === undefined || !(prevPrice > 0)
+          ? new Date(0)
+          : op.priceEffectiveFrom;
       priceEffectiveFromByVariant.set(variantId, effectiveFrom);
       await recordShopifyPriceChange(
         store._id,
@@ -1011,6 +1048,109 @@ export async function syncAllSoldProductCosts(
     refreshOffset = page.nextRefreshOffset;
   }
   return { count: total, changedVariantIds };
+}
+
+/**
+ * Re-sincroniza da Shopify todas as variantes com custo a 0 (catálogo ou linhas
+ * de encomenda), propaga irmãos e assimila encomendas.
+ */
+export async function resyncZeroCostVariantsForStore(
+  store: StoreDoc,
+  domain: string,
+  token: string,
+): Promise<{
+  candidates: number;
+  synced: number;
+  changed: number;
+  siblingsUpdated: number;
+  ordersUpdated: number;
+  linesFilled: number;
+}> {
+  const storeId = store._id;
+
+  const zeroCatalog = await ProductCost.find({
+    storeId,
+    $and: [
+      { $or: [{ unitCost: { $lte: 0 } }, { unitCost: null }] },
+      {
+        $or: [
+          { manualCost: null },
+          { manualCost: { $exists: false } },
+          { manualCost: { $lte: 0 } },
+        ],
+      },
+    ],
+  })
+    .select("variantId")
+    .lean();
+
+  const zeroOrderRows = await Order.aggregate<{ _id: string }>([
+    { $match: { storeId } },
+    { $unwind: "$lineItems" },
+    {
+      $match: {
+        "lineItems.variantId": { $exists: true, $nin: ["", null] },
+        "lineItems.unitCost": { $lte: 0 },
+      },
+    },
+    { $group: { _id: "$lineItems.variantId" } },
+  ]);
+
+  const ids = [
+    ...new Set([
+      ...zeroCatalog.map((c) => String(c.variantId)),
+      ...zeroOrderRows.map((r) => String(r._id)),
+    ]),
+  ].filter(Boolean);
+
+  let synced = 0;
+  const changedVariantIds: string[] = [];
+
+  for (let i = 0; i < ids.length; i += SOLD_VARIANT_BATCH) {
+    const batch = ids.slice(i, i + SOLD_VARIANT_BATCH);
+    const query = `query($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on ProductVariant {
+          ${SHOPIFY_VARIANT_CATALOG_FIELDS}
+        }
+      }
+    }`;
+    type Resp = { nodes: Array<ShopifyVariantCostNode | null> };
+    const data = await shopifyGraphQL<Resp>(domain, token, query, {
+      ids: batch,
+    });
+    const nodes = data.nodes.filter(
+      (n): n is ShopifyVariantCostNode => n != null && Boolean(n.id),
+    );
+    const result = await upsertProductCostNodes(store, nodes, {
+      deferAssimilate: true,
+    });
+    synced += result.count;
+    changedVariantIds.push(...result.changedVariantIds);
+  }
+
+  const siblings = await propagateSiblingCatalogCosts(storeId);
+  const assimilateIds = [...new Set([...ids, ...changedVariantIds])];
+  let ordersUpdated = 0;
+  let linesFilled = 0;
+  for (let i = 0; i < assimilateIds.length; i += 40) {
+    const chunk = assimilateIds.slice(i, i + 40);
+    const r = await assimilatePendingCogsForStore(storeId, {
+      variantIds: chunk,
+      reviseHistory: true,
+    });
+    ordersUpdated += r.ordersUpdated;
+    linesFilled += r.linesFilled;
+  }
+
+  return {
+    candidates: ids.length,
+    synced,
+    changed: changedVariantIds.length,
+    siblingsUpdated: siblings.variantsUpdated,
+    ordersUpdated,
+    linesFilled,
+  };
 }
 
 export type OrdersPageResult = {
