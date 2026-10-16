@@ -4,7 +4,12 @@ export type OrderSyncStoreDates = {
   createdAt?: Date | null;
 };
 
-const SYNC_LOOKBACK_MS = 2 * 60 * 60 * 1000;
+/**
+ * Margem atrás do `lastSyncAt` no sync incremental (`updated_at`).
+ * Um pouco acima das 2h originais para não perder vendas se houver
+ * um buraco curto entre syncs.
+ */
+const SYNC_LOOKBACK_MS = 6 * 60 * 60 * 1000;
 
 /** Data mínima de importação de encomendas (importStartDate ou 90 dias). */
 export function orderImportFloorDate(store: OrderSyncStoreDates): Date {
@@ -14,7 +19,7 @@ export function orderImportFloorDate(store: OrderSyncStoreDates): Date {
   );
 }
 
-/** Instantância desde quando importar/atualizar encomendas (com margem para refunds). */
+/** Instantância desde quando importar/atualizar encomendas (com margem). */
 export function orderSyncSince(store: OrderSyncStoreDates): Date {
   if (store.lastSyncAt) {
     return new Date(

@@ -9,10 +9,12 @@ describe("orderSyncSearchQuery", () => {
     lastSyncAt: new Date("2026-06-01T00:00:00.000Z"),
   };
 
-  it("sync incremental usa updated_at", () => {
+  it("sync incremental usa updated_at com lookback de 6h", () => {
     const q = orderSyncSearchQuery(store);
     assert.match(q, /^updated_at:>=/);
     assert.doesNotMatch(q, /^created_at:>=/);
+    // lastSyncAt 2026-06-01T00:00 → since 2026-05-31T18:00
+    assert.match(q, /updated_at:>=2026-05-31T18:00:00/);
   });
 
   it("resync total usa created_at desde importStartDate", () => {
