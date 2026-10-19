@@ -50,7 +50,11 @@ function compactAxisValue(v: number): string {
   return String(Math.round(v));
 }
 
-/** Domínio Y — lucro ancora sempre em 0; faturação pode ampliar quando longe de zero. */
+/**
+ * Domínio Y — ancora em 0.
+ * Se não há valores negativos, o mínimo fica em 0 (sem padding a −10k).
+ * Só desce abaixo de 0 quando há lucro/faturação negativa nos dados.
+ */
 function computeChartYDomain(
   values: number[],
   opts?: { anchorZero?: boolean },
@@ -58,12 +62,20 @@ function computeChartYDomain(
   const nums = values.filter((v) => Number.isFinite(v));
   if (nums.length === 0) return undefined;
 
-  let min = Math.min(...nums);
-  let max = Math.max(...nums);
+  const dataMin = Math.min(...nums);
+  const dataMax = Math.max(...nums);
+  let min = dataMin;
+  let max = dataMax;
+
   if (min === max) {
     const pad = Math.max(Math.abs(min) * 0.12, 10);
-    min -= pad;
-    max += pad;
+    if (dataMin >= 0) {
+      min = 0;
+      max = dataMax + pad;
+    } else {
+      min = dataMin - pad;
+      max = 0;
+    }
   } else {
     const span = max - min;
     const pad = Math.max(span * 0.1, 1);
@@ -72,17 +84,23 @@ function computeChartYDomain(
   }
 
   if (opts?.anchorZero) {
+    if (dataMin >= 0) {
+      min = 0;
+      max = Math.max(max, 0);
+    } else if (dataMax <= 0) {
+      max = 0;
+      min = Math.min(min, 0);
+    } else {
+      min = Math.min(min, 0);
+      max = Math.max(max, 0);
+    }
+  } else if (dataMin >= 0) {
+    min = 0;
+  } else if (dataMax <= 0) {
+    max = 0;
+  } else {
     min = Math.min(min, 0);
     max = Math.max(max, 0);
-  } else if (min < 0 && max > 0) {
-    min = Math.min(min, 0);
-    max = Math.max(max, 0);
-  } else if (min >= 0) {
-    const span = max - min;
-    if (min <= span * 2) min = Math.min(min, 0);
-  } else if (max <= 0) {
-    const span = max - min;
-    if (Math.abs(max) <= span * 2) max = Math.max(max, 0);
   }
 
   return [min, max];

@@ -2439,7 +2439,8 @@ export async function syncStore(storeId: string): Promise<SyncResult> {
   try {
     await snapshotYesterdayMetrics(String(store.workspaceId), storeId);
     await reconcileDailyMetricsForStore(storeId, {
-      maxDays: incremental ? 45 : 120,
+      /** Incremental: mês+; full sync: ano civil para YTD no dashboard ser por snapshot. */
+      maxDays: incremental ? 45 : 370,
     });
   } catch (e) {
     console.error("[sync] daily metrics snapshot", e);

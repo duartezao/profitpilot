@@ -2095,7 +2095,7 @@ Ideias para tornar a app realmente forte e diferenciada:
 
 19. **Filas (BullMQ)** para imports históricos pesados sem bloquear a app.
 20. ~~**Camada de cache (Redis)** para dashboards rápidos.~~ **Feito (v1):** cache Next.js `unstable_cache` 60 s no summary API; Redis opcional no futuro para multi-instância.
-21. ~~**Agregações pré-calculadas** (dailyMetrics) em vez de calcular tudo em runtime.~~ **Parcialmente feito:** gráfico de lucro usa `DailyMetric` para histórico; KPIs totais ainda agregam orders.
+21. ~~**Agregações pré-calculadas** (dailyMetrics) em vez de calcular tudo em runtime.~~ **Feito (v2):** gráfico + KPIs/`aggregateStoreAggs` usam `DailyMetric` no histórico; Orders só para hoje e dias sem snapshot.
 22. **Idempotência nos webhooks** (evitar contar a mesma order duas vezes).
 23. **Testes** nos cálculos de lucro (é o cálculo mais crítico — um erro aqui destrói a confiança na app).
 
