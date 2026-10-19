@@ -256,7 +256,12 @@ export default async function FinancasPage({
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Lucro acumulado</dt>
+                  <dt className="text-muted-foreground">
+                    Lucro acumulado
+                    {consolidatedCash.stores[0]?.sinceDate
+                      ? ` · desde ${consolidatedCash.stores[0].sinceDate}`
+                      : ""}
+                  </dt>
                   <dd className="tabular-nums font-medium text-positive" data-sensitive>
                     {consolidatedCash.totals.netProfitFmt}
                   </dd>
