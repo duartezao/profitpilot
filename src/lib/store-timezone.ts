@@ -199,12 +199,17 @@ function presetRangeInTimezone(
   const { start, end } = boundsFromKeys(startKey, endKey, timeZone);
   const prevStart = zonedStartOfDay(prevStartKey, timeZone);
   const prevEnd = zonedEndOfDay(prevEndKey, timeZone);
-  const specificDates = dayKeysBetweenInTimezone(start, end, timeZone);
-  const prevSpecificDates = dayKeysBetweenInTimezone(
-    prevStart,
-    prevEnd,
-    timeZone,
-  );
+  /**
+   * Só listar dias exactos em intervalos curtos (≤31).
+   * Em YTD/365d um `$or` com centenas de dias distorce agregações diárias
+   * do gráfico — usar `start`/`end` contíguos (igual a `sliceFromDateKeys`).
+   */
+  const dayKeys = dayKeysBetweenInTimezone(start, end, timeZone);
+  const prevDayKeys = dayKeysBetweenInTimezone(prevStart, prevEnd, timeZone);
+  const specificDates =
+    dayKeys.length <= MAX_SPECIFIC_DATES ? dayKeys : undefined;
+  const prevSpecificDates =
+    prevDayKeys.length <= MAX_SPECIFIC_DATES ? prevDayKeys : undefined;
 
   return {
     preset: id,
@@ -245,12 +250,12 @@ function customRangeInTimezone(
   const { prevStart, prevEnd } = rollingPrevious(start, end);
   const prevStartKey = dateKeyInTimezone(prevStart, timeZone);
   const prevEndKey = dateKeyInTimezone(prevEnd, timeZone);
-  const specificDates = dayKeysBetweenInTimezone(start, end, timeZone);
-  const prevSpecificDates = dayKeysBetweenInTimezone(
-    prevStart,
-    prevEnd,
-    timeZone,
-  );
+  const dayKeys = dayKeysBetweenInTimezone(start, end, timeZone);
+  const prevDayKeys = dayKeysBetweenInTimezone(prevStart, prevEnd, timeZone);
+  const specificDates =
+    dayKeys.length <= MAX_SPECIFIC_DATES ? dayKeys : undefined;
+  const prevSpecificDates =
+    prevDayKeys.length <= MAX_SPECIFIC_DATES ? prevDayKeys : undefined;
 
   return {
     preset: "custom",
@@ -340,9 +345,14 @@ export function resolvePeriodForStore(
   return presetRangeInTimezone(preset, tz, now);
 }
 
+type ZonedPeriodBounds = Pick<
+  ResolvedPeriod,
+  "start" | "end" | "specificDates" | "startDateKey" | "endDateKey"
+>;
+
 /** Filtro MongoDB por `orderDate` com limites no fuso da loja. */
 export function orderDateMatchInTimezone(
-  period: Pick<ResolvedPeriod, "start" | "end" | "specificDates">,
+  period: ZonedPeriodBounds,
   timeZone: string,
 ): Record<string, unknown> {
   return zonedDateMatchInTimezone("orderDate", period, timeZone);
@@ -351,7 +361,7 @@ export function orderDateMatchInTimezone(
 /** Match de instante num campo Date alinhado ao fuso da loja (ex. `refundLines.refundedAt`). */
 export function zonedDateMatchInTimezone(
   field: string,
-  period: Pick<ResolvedPeriod, "start" | "end" | "specificDates">,
+  period: ZonedPeriodBounds,
   timeZone: string,
 ): Record<string, unknown> {
   const tz = normalizeStoreTimezone(timeZone);
@@ -365,7 +375,69 @@ export function zonedDateMatchInTimezone(
       })),
     };
   }
-  return { [field]: { $gte: period.start, $lte: period.end } };
+  /** Sempre derivar limites dos dias civis — evita desalinhamento start/end vs eixo do gráfico. */
+  const startKey =
+    period.startDateKey ?? dateKeyInTimezone(period.start, tz);
+  const endKey = period.endDateKey ?? dateKeyInTimezone(period.end, tz);
+  return {
+    [field]: {
+      $gte: zonedStartOfDay(startKey, tz),
+      $lte: zonedEndOfDay(endKey, tz),
+    },
+  };
+}
+
+/** Corta o período ao piso de importação (chave civil no fuso da loja). */
+export function clampSliceToImportDateKey<
+  T extends {
+    start: Date;
+    end: Date;
+    specificDates?: string[];
+    startDateKey?: string;
+    endDateKey?: string;
+  },
+>(slice: T, floorKey: string | null, timeZone: string): T {
+  if (!floorKey) return slice;
+  const tz = normalizeStoreTimezone(timeZone);
+
+  if (slice.specificDates != null) {
+    if (slice.specificDates.length === 0) return slice;
+    const specificDates = slice.specificDates.filter((d) => d >= floorKey);
+    if (!specificDates.length) {
+      return { ...slice, specificDates: [] };
+    }
+    return {
+      ...slice,
+      specificDates,
+      start: zonedStartOfDay(specificDates[0]!, tz),
+      startDateKey: specificDates[0],
+    };
+  }
+
+  const startKey = slice.startDateKey ?? dateKeyInTimezone(slice.start, tz);
+  const endKey = slice.endDateKey ?? dateKeyInTimezone(slice.end, tz);
+  if (startKey >= floorKey) return slice;
+  if (floorKey > endKey) {
+    return { ...slice, specificDates: [] };
+  }
+  return {
+    ...slice,
+    start: zonedStartOfDay(floorKey, tz),
+    startDateKey: floorKey,
+  };
+}
+
+/** Piso de importação mais cedo entre lojas (YYYY-MM-DD no fuso indicado). */
+export function earliestImportDateKey(
+  stores: Array<{ importStartDate?: Date | null; createdAt?: Date }>,
+  timeZone: string,
+): string | null {
+  let earliest: string | null = null;
+  for (const s of stores) {
+    const key = importDateKey(s.importStartDate, s.createdAt, timeZone);
+    if (key && (!earliest || key < earliest)) earliest = key;
+  }
+  return earliest;
 }
 
 /** Chave YYYY-MM-DD da data de importação (dia civil no fuso da loja, se indicado). */

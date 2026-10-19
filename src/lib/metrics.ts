@@ -93,9 +93,6 @@ import {
   addDays,
   startOfDay,
   endOfDay,
-  clampSliceToImportFloor,
-  earliestImportFloor,
-  resolveImportFloor,
   type PeriodInput,
   type ResolvedPeriod,
 } from "@/lib/period";
@@ -1066,7 +1063,10 @@ function normPayoutStatus(s?: string | null) {
   return (s ?? "").toLowerCase();
 }
 
-type PeriodSlice = Pick<ResolvedPeriod, "start" | "end" | "specificDates">;
+type PeriodSlice = Pick<
+  ResolvedPeriod,
+  "start" | "end" | "specificDates" | "startDateKey" | "endDateKey"
+>;
 
 function missingCogsNote(count: number, mode?: CogsMode | null): string {
   if (count <= 0) return "";
@@ -1492,7 +1492,15 @@ async function buildConsolidatedDailyProfitSeries(
         storeRef.createdAt,
         tzNorm,
       );
-      if (importKey && dateKey < importKey) {
+      /**
+       * Antes do piso de importação: só esconder se não houver encomendas.
+       * Se a BD tem vendas (contam nos KPIs), o gráfico tem de as mostrar.
+       */
+      if (
+        importKey &&
+        dateKey < importKey &&
+        !ordersByStoreDay.has(storeDayKey(dateKey, meta.storeId))
+      ) {
         point[meta.key] = null as unknown as number;
         point[meta.revenueKey] = null as unknown as number;
         continue;
@@ -1561,15 +1569,19 @@ async function buildConsolidatedDailyProfitSeries(
 }
 
 function dayKeysInSlice(slice: PeriodSlice, storeTimeZone?: string | null): string[] {
-  if (slice.specificDates !== undefined) {
+  if (slice.specificDates != null && slice.specificDates.length > 0) {
     return [...slice.specificDates].sort();
   }
   if (storeTimeZone) {
-    return dayKeysBetweenInTimezone(
-      slice.start,
-      slice.end,
-      storeTimeZone,
-    );
+    const tz = normalizeStoreTimezone(storeTimeZone);
+    if (slice.startDateKey && slice.endDateKey) {
+      return dayKeysBetweenInTimezone(
+        zonedStartOfDay(slice.startDateKey, tz),
+        zonedEndOfDay(slice.endDateKey, tz),
+        tz,
+      );
+    }
+    return dayKeysBetweenInTimezone(slice.start, slice.end, tz);
   }
   const keys: string[] = [];
   let cur = startOfDay(slice.start);
@@ -1656,7 +1668,24 @@ async function buildDailyProfitSeries(
     refunds: 0,
   };
 
-  return dateKeys.map((dateKey) => {
+  /**
+   * Inclui dias com vendas que a lista civil possa ter perdido (fuso).
+   * Sem isto, meses com ~100k podiam ficar a 0 no gráfico anual.
+   */
+  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const periodStart =
+    slice.startDateKey ??
+    (tz ? dateKeyInTimezone(slice.start, tz) : formatDateInput(slice.start));
+  const periodEnd =
+    slice.endDateKey ??
+    (tz ? dateKeyInTimezone(slice.end, tz) : formatDateInput(slice.end));
+  const keySet = new Set(dateKeys);
+  for (const k of orderByDay.keys()) {
+    if (k >= periodStart && k <= periodEnd) keySet.add(k);
+  }
+  const finalKeys = [...keySet].sort();
+
+  return finalKeys.map((dateKey) => {
     const o = orderByDay.get(dateKey) ?? zeroAgg;
     const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
     const dayOpEx = sumLoadedExpensesForDay(
@@ -2571,10 +2600,25 @@ export async function buildWorkspaceSummary(
     start,
     end,
     specificDates: period.specificDates,
+    startDateKey: period.startDateKey,
+    endDateKey: period.endDateKey,
   };
   const prevSlice: PeriodSlice = prevSpecificDates
-    ? { start: prevStart, end: prevEnd, specificDates: prevSpecificDates }
-    : { start: prevStart, end: prevEnd };
+    ? {
+        start: prevStart,
+        end: prevEnd,
+        specificDates: prevSpecificDates,
+      }
+    : {
+        start: prevStart,
+        end: prevEnd,
+        startDateKey: period.prevSpecificDates
+          ? undefined
+          : dateKeyInTimezone(prevStart, storeTz),
+        endDateKey: period.prevSpecificDates
+          ? undefined
+          : dateKeyInTimezone(prevEnd, storeTz),
+      };
 
   const financialSplit = scoped
     ? null
@@ -2615,14 +2659,12 @@ export async function buildWorkspaceSummary(
         clipSliceForKilledStore(s, currentSlice) !== null,
     );
 
-  const importFloor = scoped
-    ? resolveImportFloor(scoped.importStartDate, scoped.createdAt)
-    : earliestImportFloor(stores);
-  /** Consolidado multi-loja: eixo = período completo; cada loja só desenha após a sua importação. */
-  const chartSlice: PeriodSlice =
-    !scoped && stores.length > 1
-      ? effectiveCurrentSlice
-      : clampSliceToImportFloor(effectiveCurrentSlice, importFloor);
+  /**
+   * Mesmo intervalo que os KPIs — se cortarmos só o gráfico pelo import floor,
+   * meses com ~100k entram nos totais e ficam a 0 / em falta na série.
+   * O piso por loja continua a aplicar-se em buildConsolidated (só sem vendas).
+   */
+  const chartSlice: PeriodSlice = effectiveCurrentSlice;
   let effectiveChartSlice = chartSlice;
   if (scoped && resolveStoreOperationStatus(scoped) === "killed") {
     effectiveChartSlice =

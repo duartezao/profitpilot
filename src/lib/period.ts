@@ -634,16 +634,21 @@ export function clampSliceToImportFloor(
 ): DateRangeSlice {
   if (!importFloor) return slice;
   const floorKey = formatDateInput(importFloor);
+  const clampedStart =
+    startOfDay(slice.start) < importFloor ? importFloor : slice.start;
 
   if (slice.specificDates !== undefined) {
+    const specificDates = slice.specificDates.filter((d) => d >= floorKey);
+    if (!specificDates.length) {
+      return { ...slice, start: clampedStart, specificDates: [] };
+    }
     return {
       ...slice,
-      specificDates: slice.specificDates.filter((d) => d >= floorKey),
+      start: clampedStart,
+      specificDates,
     };
   }
 
-  const clampedStart =
-    startOfDay(slice.start) < importFloor ? importFloor : slice.start;
   if (startOfDay(clampedStart) > startOfDay(slice.end)) {
     return { ...slice, specificDates: [] };
   }
