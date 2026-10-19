@@ -18,11 +18,17 @@ import {
 } from "@/lib/order-money";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
 import type { CogsMode } from "@/lib/cogs-modes";
-import { endOfDay, formatRangeLabel, orderDateMatch } from "@/lib/period";
+import {
+  endOfDay,
+  formatRangeLabel,
+  orderDateMatch,
+  type PeriodInput,
+} from "@/lib/period";
 import {
   dateKeyInTimezone,
   normalizeStoreTimezone,
   orderDateMatchInTimezone,
+  resolvePeriodForStore,
 } from "@/lib/store-timezone";
 import { sumManualCogsForPeriod } from "@/lib/manual-cogs";
 import {
@@ -39,9 +45,7 @@ import {
   sumLoadedExpenses,
   sumLoadedWorkspaceExpenses,
 } from "@/lib/expenses";
-import { sumChargebacksByStore } from "@/lib/dispute-cost";
 import { calcNetProfit } from "@/lib/profit";
-import { buildWorkspacePnl } from "@/lib/metrics";
 import type { IncomingDayLine } from "@/lib/treasury-day-lines";
 import { mergeIncomingDayLines } from "@/lib/treasury-day-lines";
 
@@ -417,8 +421,9 @@ async function sumOrderFinancialsSince(
   since: Date,
   cogsMode: CogsMode,
   timeZone?: string | null,
+  until: Date = endOfDay(new Date()),
 ): Promise<{ revenue: number; fees: number; cogs: number; shipping: number }> {
-  const slice = { start: since, end: endOfDay(new Date()) };
+  const slice = { start: since, end: until };
   const tz = timeZone ? normalizeStoreTimezone(timeZone) : null;
   const dateMatch = tz
     ? orderDateMatchInTimezone(slice, tz)
@@ -479,6 +484,8 @@ export async function buildWorkspaceTreasury(
   workspaceId: string,
   storeId?: string,
   storeAccess: StoreAccess = "all",
+  /** Se definido, entradas/saídas/capital usam este período (alinha com o Resumo). */
+  periodInput?: PeriodInput,
 ): Promise<WorkspaceTreasury> {
   await connectToDatabase();
 
@@ -606,47 +613,60 @@ export async function buildWorkspaceTreasury(
       const startDate = s.startingBalanceDate
         ? new Date(s.startingBalanceDate)
         : null;
-      const since = resolveSinceDate(
+      const storeSince = resolveSinceDate(
         startDate,
         since90,
         s.importStartDate,
         s.createdAt,
       );
-      const slice = { start: since, end: endOfDay(new Date()) };
-      const cogsMode = (s.cogsMode ?? "shopify") as CogsMode;
       const tz = normalizeStoreTimezone(s.ianaTimezone);
-      const fromKey = dateKeyInTimezone(since, tz);
-      const toKey = dateKeyInTimezone(new Date(), tz);
+      /** Com período do Resumo: mesma janela dos KPIs. Sem período: desde saldo/loja. */
+      const period = periodInput
+        ? resolvePeriodForStore(periodInput, tz)
+        : null;
+      const since = period ? period.start : storeSince;
+      const end = period ? period.end : endOfDay(new Date());
+      const slice = {
+        start: since,
+        end,
+        specificDates: period?.specificDates,
+        startDateKey: period?.startDateKey,
+        endDateKey: period?.endDateKey,
+      };
+      const cogsMode = (s.cogsMode ?? "shopify") as CogsMode;
       const sid = String(s._id);
-      /**
-       * Lucro = mesmo `buildWorkspacePnl` do Resumo (não um aggregate paralelo).
-       * Assim «lucro acumulado» na caixa alinha com o P&L da mesma janela.
-       */
-      const [orderFin, adSpend, storePnl] = await Promise.all([
-        sumOrderFinancialsSince(s._id, since, cogsMode, s.ianaTimezone),
+      const [orderFin, adSpend] = await Promise.all([
+        sumOrderFinancialsSince(s._id, since, cogsMode, s.ianaTimezone, end),
         sumAdSpendForPeriod([s._id], slice, tz),
-        buildWorkspacePnl(
-          workspaceId,
-          { from: fromKey, to: toKey },
-          sid,
-          storeAccess,
-        ),
       ]);
       const storeOpEx = sumLoadedExpenses(expenseRows, slice, sid);
       const wsOpExForStore =
         stores.length === 1
           ? sumLoadedWorkspaceExpenses(expenseRows, slice)
           : 0;
+      const outflowsOpEx = storeOpEx + wsOpExForStore;
+      /** Lucro só para tab Caixa (breakdown). O Resumo usa o P&L dos KPIs. */
+      const netProfit = calcNetProfit(
+        {
+          revenue: orderFin.revenue,
+          cogs: orderFin.cogs,
+          shipping: 0,
+          fees: orderFin.fees,
+        },
+        adSpend,
+        outflowsOpEx,
+        0,
+      );
       return {
         storeId: sid,
         since,
+        end,
         revenue: orderFin.revenue,
         fees: orderFin.fees,
         cogs: orderFin.cogs,
         shipping: orderFin.shipping,
         adSpend,
-        /** P&L scoped não inclui despesas workspace — descontar na loja isolada. */
-        netProfit: storePnl.totals.netProfit - wsOpExForStore,
+        netProfit,
         storeOpEx,
         wsOpExForStore,
       };
@@ -681,7 +701,7 @@ export async function buildWorkspaceTreasury(
       : null;
     const out = outflowMap.get(sid)!;
     const since = out.since;
-    const sinceLabel = formatRangeLabel(since, endOfDay(new Date()));
+    const sinceLabel = formatRangeLabel(since, out.end);
 
     const payoutToBase = async (p: {
       net?: number | null;

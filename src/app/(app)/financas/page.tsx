@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { canAccessStore } from "@/lib/store-access";
 import { buildWorkspacePnl } from "@/lib/metrics";
 import { buildWorkspaceTreasury } from "@/lib/treasury";
+import { computeFinancasCashPosition } from "@/lib/financas-cash-position";
 import { scopeQueryFromInput } from "@/lib/scope-query";
 import { formatCurrency, formatPercent, cn } from "@/lib/utils";
 import { formatProfitBreakdown } from "@/lib/profit";
@@ -52,9 +53,10 @@ export default async function FinancasPage({
   if (storeId && !canAccessStore(user.storeAccess, storeId)) {
     redirect("/financas");
   }
+  const periodInput = { period, from, to, dates };
   const pnl = await buildWorkspacePnl(
     user.workspaceId,
-    { period, from, to, dates },
+    periodInput,
     storeId,
     user.storeAccess,
   );
@@ -62,11 +64,32 @@ export default async function FinancasPage({
     user.workspaceId,
     storeId,
     user.storeAccess,
+    periodInput,
   );
   const storeCash = storeId ? (treasury.stores[0] ?? null) : null;
   const consolidatedCash =
     !storeId && treasury.stores.length > 0 ? treasury : null;
   const { totals, stores, currency } = pnl;
+
+  /** Caixa do Resumo: lucro = KPIs (zero segundo cálculo). */
+  const cashPosition = computeFinancasCashPosition({
+    periodLabel: pnl.periodLabel,
+    netProfit: totals.netProfit,
+    startingBalance: storeCash
+      ? storeCash.startingBalance
+      : (consolidatedCash?.stores.reduce((s, l) => s + l.startingBalance, 0) ??
+        0),
+    manualIn: storeCash
+      ? storeCash.manualIn
+      : (consolidatedCash?.totals.manualIn ?? 0),
+    manualOut: storeCash
+      ? storeCash.manualOut
+      : (consolidatedCash?.totals.manualOut ?? 0),
+    shopifyPending: storeCash
+      ? storeCash.shopifyPending
+      : (consolidatedCash?.totals.shopifyPending ?? 0),
+    currency,
+  });
   const scopeName =
     storeId && stores.length > 0 ? stores[0].name : null;
 
@@ -224,46 +247,39 @@ export default async function FinancasPage({
         </div>
       </div>
 
-      {consolidatedCash && (
+      {(consolidatedCash || storeCash) && (
         <div className="mt-4 rounded-lg border border-border bg-background p-4 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-muted-foreground">
                 Conta + a receber
+                <span className="font-normal"> · {cashPosition.periodLabel}</span>
               </p>
               <p
                 className={cn(
                   "mt-1 text-2xl font-semibold tabular-nums",
-                  consolidatedCash.totals.projectedCash >= 0
+                  cashPosition.projectedCash >= 0
                     ? "text-positive"
                     : "text-negative",
                 )}
-                title={consolidatedCash.totals.projectedCashTitle}
+                title={cashPosition.projectedCashFmt}
                 data-sensitive
               >
-                {consolidatedCash.totals.projectedCashFmt}
+                {cashPosition.projectedCashFmt}
               </p>
               <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
                 <div>
                   <dt className="text-muted-foreground">Saldo inicial</dt>
                   <dd className="tabular-nums font-medium" data-sensitive>
-                    {money(
-                      consolidatedCash.stores.reduce(
-                        (s, l) => s + l.startingBalance,
-                        0,
-                      ),
-                    )}
+                    {cashPosition.startingBalanceFmt}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">
-                    Lucro acumulado
-                    {consolidatedCash.stores[0]?.sinceDate
-                      ? ` · desde ${consolidatedCash.stores[0].sinceDate}`
-                      : ""}
+                    Lucro líquido · {cashPosition.periodLabel}
                   </dt>
                   <dd className="tabular-nums font-medium text-positive" data-sensitive>
-                    {consolidatedCash.totals.netProfitFmt}
+                    {cashPosition.netProfitFmt}
                   </dd>
                 </div>
                 <div>
@@ -271,34 +287,32 @@ export default async function FinancasPage({
                   <dd
                     className={cn(
                       "tabular-nums font-medium",
-                      consolidatedCash.totals.cashOnHand >= 0
+                      cashPosition.cashOnHand >= 0
                         ? "text-positive"
                         : "text-negative",
                     )}
                     data-sensitive
                   >
-                    {consolidatedCash.totals.cashOnHandFmt}
+                    {cashPosition.cashOnHandFmt}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Capital − levant.</dt>
                   <dd className="tabular-nums font-medium" data-sensitive>
-                    {consolidatedCash.totals.manualIn > 0 ||
-                    consolidatedCash.totals.manualOut > 0
-                      ? `${consolidatedCash.totals.manualInFmt} / −${consolidatedCash.totals.manualOutFmt}`
+                    {cashPosition.manualIn > 0 || cashPosition.manualOut > 0
+                      ? `${cashPosition.manualInFmt} / −${cashPosition.manualOutFmt}`
                       : "—"}
                   </dd>
                 </div>
               </dl>
               <p className="mt-2 text-xs text-muted-foreground">
-                Conta + a receber = saldo inicial + lucro desde o início de cada
-                loja (± capital). É o dinheiro do negócio se parasses agora — não
-                o extracto do banco. Os KPIs acima são só do período seleccionado
-                ({pnl.periodLabel}).
+                Conta + a receber = saldo inicial + lucro líquido do período (±
+                capital). O lucro é o mesmo número dos KPIs acima — não há segundo
+                cálculo. Não é o extracto do banco.
               </p>
-              {consolidatedCash.warnings.length > 0 && (
+              {(consolidatedCash?.warnings.length ?? 0) > 0 && (
                 <ul className="mt-2 space-y-1 text-xs text-warning">
-                  {consolidatedCash.warnings.map((w) => (
+                  {consolidatedCash!.warnings.map((w) => (
                     <li key={w}>{w}</li>
                   ))}
                 </ul>
@@ -310,13 +324,13 @@ export default async function FinancasPage({
               </p>
               <p
                 className="mt-1 text-lg font-semibold tabular-nums"
-                title={consolidatedCash.totals.shopifyPendingFmt}
+                title={cashPosition.shopifyPendingFmt}
                 data-sensitive
               >
-                {consolidatedCash.totals.shopifyPendingFmt}
+                {cashPosition.shopifyPendingFmt}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Banca = total − a receber
+                Em banca = total − a receber
               </p>
             </div>
           </div>
