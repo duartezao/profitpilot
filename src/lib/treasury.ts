@@ -12,6 +12,8 @@ import { moneyToBase } from "@/lib/fx";
 import { resolvePayoutNetBase } from "@/lib/payout-shopify-fx";
 import {
   cogsSumExprForMode,
+  feesSumBaseExpr,
+  netRevenueSumBaseExpr,
   shippingSumBaseExpr,
 } from "@/lib/order-money";
 import { mergePaidOrderFilter } from "@/lib/order-financial-status";
@@ -37,6 +39,8 @@ import {
   sumLoadedExpenses,
   sumLoadedWorkspaceExpenses,
 } from "@/lib/expenses";
+import { sumChargebacksByStore } from "@/lib/dispute-cost";
+import { calcNetProfit } from "@/lib/profit";
 import type { IncomingDayLine } from "@/lib/treasury-day-lines";
 import { mergeIncomingDayLines } from "@/lib/treasury-day-lines";
 
@@ -88,6 +92,43 @@ export function computeShopifyPendingTotal(opts: {
   };
 }
 
+/**
+ * Caixa ancorada no lucro (mesma fórmula do P&L).
+ * Conta + a receber = saldo inicial + lucro ± capital.
+ * Banca = esse total − o que ainda está na Shopify.
+ */
+export function profitAnchoredCash(opts: {
+  startingBalance: number;
+  revenue: number;
+  cogs: number;
+  fees: number;
+  adSpend: number;
+  operatingExpenses: number;
+  chargebacks: number;
+  manualIn: number;
+  manualOut: number;
+  shopifyPending: number;
+}): { netProfit: number; projectedCash: number; cashOnHand: number } {
+  const netProfit = calcNetProfit(
+    {
+      revenue: opts.revenue,
+      cogs: opts.cogs,
+      shipping: 0,
+      fees: opts.fees,
+    },
+    opts.adSpend,
+    opts.operatingExpenses,
+    opts.chargebacks,
+  );
+  const projectedCash =
+    opts.startingBalance + netProfit + opts.manualIn - opts.manualOut;
+  return {
+    netProfit,
+    projectedCash,
+    cashOnHand: projectedCash - opts.shopifyPending,
+  };
+}
+
 export type StoreTreasuryLine = {
   storeId: string;
   storeName: string;
@@ -131,11 +172,14 @@ export type StoreTreasuryLine = {
   shopifyPendingTitle: string;
   /** Dias úteis configurados para payout de gateway externo (null = só Shopify Payments). */
   externalGatewayPayoutBusinessDays: number | null;
-  /** Saldo em conta ≈ inicial + recebido − saídas conhecidas. */
+  /** Lucro P&L na janela da caixa (REV − COGS − taxas − ads − opex − CB). */
+  netProfit: number;
+  netProfitFmt: string;
+  /** Banca = (inicial + lucro ± capital) − a receber Shopify. */
   cashOnHand: number;
   cashOnHandFmt: string;
   cashOnHandTitle: string;
-  /** Com o que ainda vem da Shopify (por pagar + a caminho). */
+  /** Conta + a receber = inicial + lucro ± capital (bate com o P&L). */
   projectedCash: number;
   projectedCashFmt: string;
   projectedCashTitle: string;
@@ -179,6 +223,8 @@ export type WorkspaceTreasury = {
     manualOutFmt: string;
     shopifyPending: number;
     shopifyPendingFmt: string;
+    netProfit: number;
+    netProfitFmt: string;
     cashOnHand: number;
     cashOnHandFmt: string;
     cashOnHandTitle: string;
@@ -365,39 +411,55 @@ function mergeIncomingByDay(
   return mergeIncomingDayLines(lines, currency);
 }
 
-async function sumOrderOutflowsSince(
+async function sumOrderFinancialsSince(
   storeId: mongoose.Types.ObjectId,
   since: Date,
   cogsMode: CogsMode,
   timeZone?: string | null,
-): Promise<{ cogs: number; shipping: number }> {
+): Promise<{ revenue: number; fees: number; cogs: number; shipping: number }> {
   const slice = { start: since, end: endOfDay(new Date()) };
   const tz = timeZone ? normalizeStoreTimezone(timeZone) : null;
   const dateMatch = tz
     ? orderDateMatchInTimezone(slice, tz)
     : orderDateMatch(slice);
 
-  let cogs = 0;
+  const baseRows = await Order.aggregate<{
+    revenue: number;
+    fees: number;
+    cogs: number;
+    shipping: number;
+  }>([
+    { $match: mergePaidOrderFilter({ storeId, ...dateMatch }) },
+    {
+      $group: {
+        _id: null,
+        revenue: netRevenueSumBaseExpr,
+        fees: feesSumBaseExpr,
+        cogs: cogsMode === "day" ? { $sum: 0 } : cogsSumExprForMode(cogsMode),
+        shipping: shippingSumBaseExpr,
+      },
+    },
+  ]);
+  const base = baseRows[0] ?? {
+    revenue: 0,
+    fees: 0,
+    cogs: 0,
+    shipping: 0,
+  };
+
+  let cogs = base.cogs;
   if (cogsMode === "day") {
     cogs = await sumManualCogsForPeriod([storeId], slice, tz);
-  } else {
-    const cogsExpr = cogsSumExprForMode(cogsMode);
-    const cogsRows = await Order.aggregate<{ cogs: number }>([
-      { $match: mergePaidOrderFilter({ storeId, ...dateMatch }) },
-      { $group: { _id: null, cogs: cogsExpr } },
-    ]);
-    cogs = cogsRows[0]?.cogs ?? 0;
-    if (appliesEuCategoryFees(cogsMode)) {
-      cogs += await sumEuCategoryFeesForPeriod([storeId], slice, tz);
-    }
+  } else if (appliesEuCategoryFees(cogsMode)) {
+    cogs += await sumEuCategoryFeesForPeriod([storeId], slice, tz);
   }
 
-  const shippingRows = await Order.aggregate<{ shipping: number }>([
-    { $match: mergePaidOrderFilter({ storeId, ...dateMatch }) },
-    { $group: { _id: null, shipping: shippingSumBaseExpr } },
-  ]);
-
-  return { cogs, shipping: shippingRows[0]?.shipping ?? 0 };
+  return {
+    revenue: base.revenue,
+    fees: base.fees,
+    cogs,
+    shipping: base.shipping,
+  };
 }
 
 function resolveSinceDate(
@@ -439,6 +501,8 @@ export async function buildWorkspaceTreasury(
       manualOutFmt: formatCurrency(0, "EUR"),
       shopifyPending: 0,
       shopifyPendingFmt: formatCurrency(0, "EUR"),
+      netProfit: 0,
+      netProfitFmt: formatCurrency(0, "EUR"),
       cashOnHand: 0,
       cashOnHandFmt: formatCurrency(0, "EUR"),
       cashOnHandTitle: formatCurrency(0, "EUR"),
@@ -504,6 +568,8 @@ export async function buildWorkspaceTreasury(
         manualOutFmt: fmt(0),
         shopifyPending: 0,
         shopifyPendingFmt: fmt(0),
+        netProfit: 0,
+        netProfitFmt: fmt(0),
         cashOnHand: 0,
         cashOnHandFmt: fmt(0),
         cashOnHandTitle: fmt(0),
@@ -542,20 +608,21 @@ export async function buildWorkspaceTreasury(
       );
       const slice = { start: since, end: endOfDay(new Date()) };
       const cogsMode = (s.cogsMode ?? "shopify") as CogsMode;
-      const [orderOut, adSpend] = await Promise.all([
-        sumOrderOutflowsSince(s._id, since, cogsMode, s.ianaTimezone),
-        sumAdSpendForPeriod(
-          [s._id],
-          slice,
-          normalizeStoreTimezone(s.ianaTimezone),
-        ),
+      const tz = normalizeStoreTimezone(s.ianaTimezone);
+      const [orderFin, adSpend, cbByStore] = await Promise.all([
+        sumOrderFinancialsSince(s._id, since, cogsMode, s.ianaTimezone),
+        sumAdSpendForPeriod([s._id], slice, tz),
+        sumChargebacksByStore([s._id], slice, tz),
       ]);
       return {
         storeId: String(s._id),
         since,
-        cogs: orderOut.cogs,
-        shipping: orderOut.shipping,
+        revenue: orderFin.revenue,
+        fees: orderFin.fees,
+        cogs: orderFin.cogs,
+        shipping: orderFin.shipping,
         adSpend,
+        chargebacks: cbByStore.get(String(s._id)) ?? 0,
       };
     }),
   );
@@ -761,13 +828,25 @@ export async function buildWorkspaceTreasury(
         ? incoming
         : shopifyPendingFromComponents +
           (shopifyActive && externalGateway ? externalGateway.incoming : 0);
-    const cashOnHand =
-      startingBalance +
-      received +
-      manual.manualIn -
-      outflowsTotal -
-      manual.manualOut;
-    const projectedCash = cashOnHand + shopifyPending;
+    /**
+     * Conta + a receber = lucro (P&L) + saldo inicial ± capital.
+     * Assim bate com «se lucrei X e parei, tenho X».
+     * Banca = esse total − o que ainda está na Shopify (split, não soma via payouts).
+     */
+    const anchored = profitAnchoredCash({
+      startingBalance,
+      revenue: out.revenue,
+      cogs: out.cogs,
+      fees: out.fees,
+      adSpend: out.adSpend,
+      operatingExpenses: outflowsOpEx,
+      chargebacks: out.chargebacks,
+      manualIn: manual.manualIn,
+      manualOut: manual.manualOut,
+      shopifyPending,
+    });
+    const cashOnHand = anchored.cashOnHand;
+    const projectedCash = anchored.projectedCash;
     const projected = projectedCash;
 
     return {
@@ -806,6 +885,8 @@ export async function buildWorkspaceTreasury(
       shopifyPendingFmt: fmtBase(shopifyPending),
       shopifyPendingTitle: fmtBase(shopifyPending),
       externalGatewayPayoutBusinessDays: externalDays,
+      netProfit: anchored.netProfit,
+      netProfitFmt: fmtBase(anchored.netProfit),
       cashOnHand,
       cashOnHandFmt: fmtBase(cashOnHand),
       cashOnHandTitle: fmtBase(cashOnHand),
@@ -857,6 +938,7 @@ export async function buildWorkspaceTreasury(
     currency,
   );
 
+  const netProfitTotal = sum("netProfit") - workspaceOpExTotal;
   const cashOnHandTotal = sum("cashOnHand") - workspaceOpExTotal;
   const outflowsOpExTotal = sum("outflowsOpEx") + workspaceOpExTotal;
   const outflowsTotal = sum("outflowsTotal") + workspaceOpExTotal;
@@ -888,6 +970,8 @@ export async function buildWorkspaceTreasury(
       manualOutFmt: fmt(manualOutTotal),
       shopifyPending: shopifyPendingTotal,
       shopifyPendingFmt: fmt(shopifyPendingTotal),
+      netProfit: netProfitTotal,
+      netProfitFmt: fmt(netProfitTotal),
       cashOnHand: cashOnHandTotal,
       cashOnHandFmt: fmt(cashOnHandTotal),
       cashOnHandTitle: fmt(cashOnHandTotal),

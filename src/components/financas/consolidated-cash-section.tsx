@@ -38,7 +38,25 @@ export function ConsolidatedCashSection({
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <div className="rounded-lg border border-accent/30 bg-background p-4 sm:col-span-2 sm:p-5 lg:col-span-1">
           <p className="text-[13px] font-medium text-muted-foreground">
-            Saldo em conta
+            Conta + a receber
+          </p>
+          <p
+            className={cn(
+              "mt-1 text-2xl font-semibold tabular-nums",
+              totals.projectedCash >= 0 ? "text-positive" : "text-negative",
+            )}
+            title={totals.projectedCashTitle}
+            data-sensitive
+          >
+            {totals.projectedCashFmt}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Inicial + lucro acumulado (± capital)
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-background p-4 sm:p-5">
+          <p className="text-[13px] font-medium text-muted-foreground">
+            Em banca
           </p>
           <p
             className={cn(
@@ -51,25 +69,7 @@ export function ConsolidatedCashSection({
             {totals.cashOnHandFmt}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Soma das lojas · o que era suposto ter em banca
-          </p>
-        </div>
-        <div className="rounded-lg border border-border bg-background p-4 sm:p-5">
-          <p className="text-[13px] font-medium text-muted-foreground">
-            A receber (Shopify)
-          </p>
-          <p
-            className="mt-1 text-2xl font-semibold tabular-nums"
-            title={totals.shopifyPendingFmt}
-            data-sensitive
-          >
-            {totals.shopifyPendingFmt}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Conta + a receber:{" "}
-            <span className="font-medium text-foreground tabular-nums" data-sensitive>
-              {totals.projectedCashFmt}
-            </span>
+            Total − Shopify a receber ({totals.shopifyPendingFmt})
           </p>
         </div>
         <div className="rounded-lg border border-border bg-background p-4 sm:p-5">

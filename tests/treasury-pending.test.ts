@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   computeShopifyPendingTotal,
   isShopifyPaymentsActive,
+  profitAnchoredCash,
   shouldUseExternalGatewayTreasury,
 } from "../src/lib/treasury.ts";
 import {
@@ -39,6 +40,45 @@ describe("computeShopifyPendingTotal", () => {
       allocatedIncoming: 0,
     });
     assert.equal(r.shopifyPending, 3177);
+  });
+});
+
+describe("profitAnchoredCash", () => {
+  it("conta + a receber = inicial + lucro ± capital", () => {
+    const r = profitAnchoredCash({
+      startingBalance: 2200,
+      revenue: 100_000,
+      cogs: 30_000,
+      fees: 3000,
+      adSpend: 10_000,
+      operatingExpenses: 2000,
+      chargebacks: 500,
+      manualIn: 0,
+      manualOut: 0,
+      shopifyPending: 15_000,
+    });
+    // lucro = 100k - 30k - 3k - 10k - 2k - 0.5k = 54.5k
+    assert.equal(r.netProfit, 54_500);
+    assert.equal(r.projectedCash, 2200 + 54_500);
+    assert.equal(r.cashOnHand, 2200 + 54_500 - 15_000);
+  });
+
+  it("levantamentos baixam o total sem mudar o lucro", () => {
+    const r = profitAnchoredCash({
+      startingBalance: 0,
+      revenue: 10_000,
+      cogs: 0,
+      fees: 0,
+      adSpend: 0,
+      operatingExpenses: 0,
+      chargebacks: 0,
+      manualIn: 0,
+      manualOut: 2000,
+      shopifyPending: 1000,
+    });
+    assert.equal(r.netProfit, 10_000);
+    assert.equal(r.projectedCash, 8000);
+    assert.equal(r.cashOnHand, 7000);
   });
 });
 
