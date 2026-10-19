@@ -41,6 +41,7 @@ import {
 } from "@/lib/expenses";
 import { sumChargebacksByStore } from "@/lib/dispute-cost";
 import { calcNetProfit } from "@/lib/profit";
+import { buildWorkspacePnl } from "@/lib/metrics";
 import type { IncomingDayLine } from "@/lib/treasury-day-lines";
 import { mergeIncomingDayLines } from "@/lib/treasury-day-lines";
 
@@ -595,6 +596,11 @@ export async function buildWorkspaceTreasury(
     payoutStatus: "pending",
   }).lean();
 
+  const storeCurrencyByStore = new Map(
+    stores.map((s) => [String(s._id), (s.currency ?? currency).toUpperCase()]),
+  );
+  const expenseRows = await loadWorkspaceExpensesLean(wsId);
+
   const outflowByStore = await Promise.all(
     stores.map(async (s) => {
       const startDate = s.startingBalanceDate
@@ -609,20 +615,40 @@ export async function buildWorkspaceTreasury(
       const slice = { start: since, end: endOfDay(new Date()) };
       const cogsMode = (s.cogsMode ?? "shopify") as CogsMode;
       const tz = normalizeStoreTimezone(s.ianaTimezone);
-      const [orderFin, adSpend, cbByStore] = await Promise.all([
+      const fromKey = dateKeyInTimezone(since, tz);
+      const toKey = dateKeyInTimezone(new Date(), tz);
+      const sid = String(s._id);
+      /**
+       * Lucro = mesmo `buildWorkspacePnl` do Resumo (não um aggregate paralelo).
+       * Assim «lucro acumulado» na caixa alinha com o P&L da mesma janela.
+       */
+      const [orderFin, adSpend, storePnl] = await Promise.all([
         sumOrderFinancialsSince(s._id, since, cogsMode, s.ianaTimezone),
         sumAdSpendForPeriod([s._id], slice, tz),
-        sumChargebacksByStore([s._id], slice, tz),
+        buildWorkspacePnl(
+          workspaceId,
+          { from: fromKey, to: toKey },
+          sid,
+          storeAccess,
+        ),
       ]);
+      const storeOpEx = sumLoadedExpenses(expenseRows, slice, sid);
+      const wsOpExForStore =
+        stores.length === 1
+          ? sumLoadedWorkspaceExpenses(expenseRows, slice)
+          : 0;
       return {
-        storeId: String(s._id),
+        storeId: sid,
         since,
         revenue: orderFin.revenue,
         fees: orderFin.fees,
         cogs: orderFin.cogs,
         shipping: orderFin.shipping,
         adSpend,
-        chargebacks: cbByStore.get(String(s._id)) ?? 0,
+        /** P&L scoped não inclui despesas workspace — descontar na loja isolada. */
+        netProfit: storePnl.totals.netProfit - wsOpExForStore,
+        storeOpEx,
+        wsOpExForStore,
       };
     }),
   );
@@ -631,9 +657,6 @@ export async function buildWorkspaceTreasury(
   const sinceByStore = new Map(
     outflowByStore.map((o) => [o.storeId, o.since]),
   );
-  const storeCurrencyByStore = new Map(
-    stores.map((s) => [String(s._id), (s.currency ?? currency).toUpperCase()]),
-  );
   const manualCashMap = await sumManualCashByStores(
     workspaceId,
     storeIds,
@@ -641,7 +664,6 @@ export async function buildWorkspaceTreasury(
     currency,
     storeCurrencyByStore,
   );
-  const expenseRows = await loadWorkspaceExpensesLean(wsId);
 
   const fmtBase = (v: number) => fmt(v, currency);
 
@@ -808,14 +830,7 @@ export async function buildWorkspaceTreasury(
     }
 
     const outflowsOps = out.cogs + out.adSpend;
-    const expenseSlice = { start: since, end: endOfDay(new Date()) };
-    const storeOpEx = sumLoadedExpenses(expenseRows, expenseSlice, sid);
-    /** Numa loja isolada, contas partilhadas do workspace também saem da banca. */
-    const wsOpExForStore =
-      stores.length === 1
-        ? sumLoadedWorkspaceExpenses(expenseRows, expenseSlice)
-        : 0;
-    const outflowsOpEx = storeOpEx + wsOpExForStore;
+    const outflowsOpEx = out.storeOpEx + out.wsOpExForStore;
     const outflowsTotal = outflowsOps + outflowsOpEx;
     const manual = manualCashMap.get(sid) ?? { manualIn: 0, manualOut: 0 };
     /**
@@ -829,25 +844,14 @@ export async function buildWorkspaceTreasury(
         : shopifyPendingFromComponents +
           (shopifyActive && externalGateway ? externalGateway.incoming : 0);
     /**
-     * Conta + a receber = lucro (P&L) + saldo inicial ± capital.
-     * Assim bate com «se lucrei X e parei, tenho X».
-     * Banca = esse total − o que ainda está na Shopify (split, não soma via payouts).
+     * Conta + a receber = lucro P&L (mesma função do Resumo) + saldo inicial ± capital.
+     * Banca = esse total − o que ainda está na Shopify.
      */
-    const anchored = profitAnchoredCash({
-      startingBalance,
-      revenue: out.revenue,
-      cogs: out.cogs,
-      fees: out.fees,
-      adSpend: out.adSpend,
-      operatingExpenses: outflowsOpEx,
-      chargebacks: out.chargebacks,
-      manualIn: manual.manualIn,
-      manualOut: manual.manualOut,
-      shopifyPending,
-    });
-    const cashOnHand = anchored.cashOnHand;
-    const projectedCash = anchored.projectedCash;
+    const projectedCash =
+      startingBalance + out.netProfit + manual.manualIn - manual.manualOut;
+    const cashOnHand = projectedCash - shopifyPending;
     const projected = projectedCash;
+    const anchoredNetProfit = out.netProfit;
 
     return {
       storeId: sid,
@@ -885,8 +889,8 @@ export async function buildWorkspaceTreasury(
       shopifyPendingFmt: fmtBase(shopifyPending),
       shopifyPendingTitle: fmtBase(shopifyPending),
       externalGatewayPayoutBusinessDays: externalDays,
-      netProfit: anchored.netProfit,
-      netProfitFmt: fmtBase(anchored.netProfit),
+      netProfit: anchoredNetProfit,
+      netProfitFmt: fmtBase(anchoredNetProfit),
       cashOnHand,
       cashOnHandFmt: fmtBase(cashOnHand),
       cashOnHandTitle: fmtBase(cashOnHand),
