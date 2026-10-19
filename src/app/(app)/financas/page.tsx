@@ -24,6 +24,7 @@ import { listWorkspaceExpenses, sumWorkspaceMonthlyFixedBase } from "@/lib/expen
 import { expenseAppliesInPeriod } from "@/lib/expense-proration";
 import { periodToDateKeys } from "@/lib/period-date-keys";
 import {
+  dateKeyInTimezone,
   dominantStoreTimezone,
   normalizeStoreTimezone,
   resolvePeriodForStore,
@@ -77,9 +78,13 @@ export default async function FinancasPage({
     totals,
     totals.adSpend,
     money,
-    pnl.cogsIncomplete
-      ? { note: pnl.missingCogsMessage.replace(/\.$/, "") }
-      : undefined,
+    {
+      operatingExpenses: totals.operatingExpenses,
+      chargebacks: totals.chargebacks,
+      ...(pnl.cogsIncomplete
+        ? { note: pnl.missingCogsMessage.replace(/\.$/, "") }
+        : {}),
+    },
   );
 
   const lines: Array<{
@@ -107,6 +112,14 @@ export default async function FinancasPage({
       value: -totals.operatingExpenses,
       tone: "text-negative",
       share: totals.operatingExpenses,
+    });
+  }
+  if (totals.chargebacks > 0) {
+    lines.push({
+      label: "Chargebacks",
+      value: -totals.chargebacks,
+      tone: "text-negative",
+      share: totals.chargebacks,
     });
   }
   if (totals.refunds > 0) {
@@ -142,6 +155,52 @@ export default async function FinancasPage({
   const periodFilter = periodToDateKeys(
     resolvePeriodForStore({ period, from, to, dates }, financasTz),
   );
+
+  /** Lucro na mesma janela da caixa (since → hoje), para reconciliar com conta+a receber. */
+  const cashLines = storeCash
+    ? [storeCash]
+    : (consolidatedCash?.stores ?? []);
+  const cashBasisFrom = [
+    ...new Set(
+      cashLines
+        .map((l) => l.sinceDate)
+        .filter((d): d is string => Boolean(d)),
+    ),
+  ].sort()[0];
+  const cashBasisTo = dateKeyInTimezone(new Date(), financasTz);
+  const cashBasisPnl = cashBasisFrom
+    ? await buildWorkspacePnl(
+        user.workspaceId,
+        { from: cashBasisFrom, to: cashBasisTo },
+        storeId,
+        user.storeAccess,
+      )
+    : null;
+  const startingBalanceTotal = cashLines.reduce(
+    (s, l) => s + l.startingBalance,
+    0,
+  );
+  const cashProjected = storeCash
+    ? storeCash.projectedCash
+    : (consolidatedCash?.totals.projectedCash ?? null);
+  const cashManualIn = storeCash
+    ? storeCash.manualIn
+    : (consolidatedCash?.totals.manualIn ?? 0);
+  const cashManualOut = storeCash
+    ? storeCash.manualOut
+    : (consolidatedCash?.totals.manualOut ?? 0);
+  const expectedFromProfit =
+    cashBasisPnl && cashProjected != null
+      ? startingBalanceTotal +
+        cashBasisPnl.totals.netProfit +
+        cashManualIn -
+        cashManualOut
+      : null;
+  const cashVsProfitGap =
+    expectedFromProfit != null && cashProjected != null
+      ? cashProjected - expectedFromProfit
+      : null;
+
   const expenses = await listWorkspaceExpenses(
     user.workspaceId,
     storeNames,
@@ -167,7 +226,10 @@ export default async function FinancasPage({
     <>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-background p-4">
-          <p className="text-xs font-medium text-muted-foreground">Receita</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            Receita
+            <span className="font-normal"> · {pnl.periodLabel}</span>
+          </p>
           <p className="mt-1 text-xl font-semibold tabular-nums" data-sensitive>
             {money(totals.revenue)}
           </p>
@@ -179,12 +241,16 @@ export default async function FinancasPage({
               totals.cogs +
                 totals.fees +
                 totals.adSpend +
-                totals.operatingExpenses,
+                totals.operatingExpenses +
+                totals.chargebacks,
             )}
           </p>
         </div>
         <div className="rounded-lg border border-border bg-background p-4">
-          <p className="text-xs font-medium text-muted-foreground">Lucro líquido</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            Lucro líquido
+            <span className="font-normal"> · {pnl.periodLabel}</span>
+          </p>
           <p
             className={`mt-1 text-xl font-semibold tabular-nums ${totals.netProfit >= 0 ? "text-positive" : "text-negative"}`}
             title={profitTitle}
@@ -259,7 +325,7 @@ export default async function FinancasPage({
               </dl>
               <p className="mt-2 text-xs text-muted-foreground">
                 Projecção desde o início de cada loja — não é o extracto do banco.
-                Soma dos saldos iniciais de cada loja.
+                Os KPIs acima são só do período seleccionado ({pnl.periodLabel}).
               </p>
               {consolidatedCash.warnings.length > 0 && (
                 <ul className="mt-2 space-y-1 text-xs text-warning">
@@ -271,20 +337,84 @@ export default async function FinancasPage({
             </div>
             <div className="text-right">
               <p className="text-xs font-medium text-muted-foreground">
-                Com a receber
+                A receber (Shopify)
               </p>
               <p
                 className="mt-1 text-lg font-semibold tabular-nums"
-                title={consolidatedCash.totals.projectedCashTitle}
+                title={consolidatedCash.totals.shopifyPendingFmt}
                 data-sensitive
               >
-                {consolidatedCash.totals.projectedCashFmt}
+                {consolidatedCash.totals.shopifyPendingFmt}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Em conta + Shopify por pagar
+                Conta + a receber:{" "}
+                <span className="font-medium text-foreground tabular-nums" data-sensitive>
+                  {consolidatedCash.totals.projectedCashFmt}
+                </span>
               </p>
             </div>
           </div>
+
+          {cashBasisPnl &&
+            expectedFromProfit != null &&
+            cashVsProfitGap != null && (
+              <div className="mt-4 border-t border-border pt-4">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Se o lucro fosse dinheiro na mão (mesma base da caixa
+                  {cashBasisFrom ? ` · desde ${cashBasisFrom}` : ""})
+                </p>
+                <dl className="mt-2 grid gap-1 text-sm sm:grid-cols-2">
+                  <div className="flex justify-between gap-3 sm:block">
+                    <dt className="text-muted-foreground">
+                      Lucro acumulado + saldo inicial
+                      {cashManualIn > 0 || cashManualOut > 0
+                        ? " ± capital"
+                        : ""}
+                    </dt>
+                    <dd
+                      className="font-semibold tabular-nums"
+                      data-sensitive
+                    >
+                      {money(expectedFromProfit)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3 sm:block sm:text-right">
+                    <dt className="text-muted-foreground">
+                      Conta + a receber (agora)
+                    </dt>
+                    <dd
+                      className="font-semibold tabular-nums"
+                      data-sensitive
+                    >
+                      {money(cashProjected ?? 0)}
+                    </dd>
+                  </div>
+                </dl>
+                <p
+                  className={cn(
+                    "mt-2 text-sm font-medium tabular-nums",
+                    Math.abs(cashVsProfitGap) < 1
+                      ? "text-positive"
+                      : "text-warning",
+                  )}
+                  data-sensitive
+                >
+                  {Math.abs(cashVsProfitGap) < 1
+                    ? "Bate certo com o lucro acumulado."
+                    : cashVsProfitGap < 0
+                      ? `Faltam ${money(-cashVsProfitGap)} vs o lucro acumulado — payouts/Shopify abaixo da receita líquida de taxas, ou saídas a mais.`
+                      : `${money(cashVsProfitGap)} a mais vs o lucro acumulado — capital ou payouts acima do P&L.`}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Conta: saldo inicial ({money(startingBalanceTotal)}) + lucro
+                  desde a caixa ({money(cashBasisPnl.totals.netProfit)})
+                  {cashManualIn > 0 || cashManualOut > 0
+                    ? ` + capital ${money(cashManualIn)} − levant. ${money(cashManualOut)}`
+                    : ""}
+                  .
+                </p>
+              </div>
+            )}
         </div>
       )}
 
