@@ -158,7 +158,22 @@ export function StoreCashFlowSection({
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
           <p className="text-[13px] font-medium text-muted-foreground">
-            Saldo em conta
+            Conta + a receber
+          </p>
+          <p
+            className={`mt-1 text-2xl font-semibold tabular-nums ${cash.projectedCash >= 0 ? "text-positive" : "text-negative"}`}
+            title={cash.projectedCashTitle}
+            data-sensitive
+          >
+            {cash.projectedCashFmt}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Inicial + lucro acumulado ({cash.netProfitFmt}) ± capital
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
+          <p className="text-[13px] font-medium text-muted-foreground">
+            Em banca
           </p>
           <p
             className={`mt-1 text-2xl font-semibold tabular-nums ${cash.cashOnHand >= 0 ? "text-positive" : "text-negative"}`}
@@ -168,23 +183,7 @@ export function StoreCashFlowSection({
             {cash.cashOnHandFmt}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Inicial + recebido + capital − COGS − envio − ads − despesas −
-            levantamentos
-          </p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
-          <p className="text-[13px] font-medium text-muted-foreground">
-            A receber (Shopify)
-          </p>
-          <p
-            className="mt-1 text-2xl font-semibold tabular-nums"
-            title={cash.shopifyPendingTitle}
-            data-sensitive
-          >
-            {cash.shopifyPendingFmt}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Por liquidar + payouts agendados/a caminho (sem double-count)
+            Total − a receber Shopify ({cash.shopifyPendingFmt})
           </p>
         </div>
         <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
