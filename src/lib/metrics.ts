@@ -52,7 +52,15 @@ import {
 import { countSoldVariantsMissingCost, countMissingCogsByDay } from "@/lib/cogs";
 import { ranksProductsByUnits, isCogsMode, type CogsMode } from "@/lib/cogs-modes";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
-import { DailyMetric } from "@/models/DailyMetric";
+import {
+  loadDailyMetricSnaps,
+  aggregateSnapsByDate,
+  snapsByStoreDay,
+  fullyCoveredHistKeys,
+  sumDayAggs,
+  type DailyMetricDayAgg,
+  type DailyMetricSnap,
+} from "@/lib/daily-metrics-read";
 import {
   resolvePeriodForStore,
   orderDateMatchInTimezone,
@@ -388,8 +396,100 @@ function storeCogsMode(store: StoreCogsCtx): CogsMode {
   return (store.cogsMode ?? "shopify") as CogsMode;
 }
 
-/** Agrega métricas por loja com COGS conforme o modo (shopify/variant/order/day). */
+/**
+ * Totais por loja: snapshots DailyMetric no histórico + Orders só em dias
+ * sem snapshot / hoje. Mesmos números, bem menos trabalho em YTD.
+ */
 async function aggregateStoreAggs(
+  wsId: mongoose.Types.ObjectId,
+  stores: StoreCogsCtx[],
+  slice: PeriodSlice,
+  sharedTimeZone?: string | null,
+): Promise<Map<string, StoreAgg>> {
+  if (!stores.length) return new Map();
+
+  const tz = sharedTimeZone ? normalizeStoreTimezone(sharedTimeZone) : null;
+  if (!tz) {
+    return aggregateStoreAggsFromOrders(wsId, stores, slice, sharedTimeZone);
+  }
+
+  const dateKeys = dayKeysInSlice(slice, tz);
+  const todayKey = dateKeyInTimezone(new Date(), tz);
+  const histKeys = dateKeys.filter((k) => k < todayKey);
+  if (histKeys.length === 0) {
+    return aggregateStoreAggsFromOrders(wsId, stores, slice, sharedTimeZone);
+  }
+
+  const storeOids = stores.map((s) => s._id);
+  const snaps = await loadDailyMetricSnaps(
+    storeOids,
+    histKeys[0]!,
+    histKeys[histKeys.length - 1]!,
+  );
+  if (snaps.length === 0) {
+    return aggregateStoreAggsFromOrders(wsId, stores, slice, sharedTimeZone);
+  }
+
+  const histSet = new Set(histKeys);
+  const byStoreDay = snapsByStoreDay(
+    snaps.filter((s) => histSet.has(s.dateKey)),
+  );
+
+  const liveKeySet = new Set<string>();
+  for (const k of histKeys) {
+    for (const s of stores) {
+      if (!byStoreDay.has(`${k}:${String(s._id)}`)) {
+        liveKeySet.add(k);
+        break;
+      }
+    }
+  }
+  for (const k of dateKeys) {
+    if (k >= todayKey) liveKeySet.add(k);
+  }
+
+  const result = new Map<string, StoreAgg>();
+  for (const s of stores) {
+    result.set(String(s._id), emptyStoreAgg());
+  }
+
+  for (const snap of snaps) {
+    if (!histSet.has(snap.dateKey) || liveKeySet.has(snap.dateKey)) continue;
+    const agg = result.get(snap.storeId);
+    if (!agg) continue;
+    agg.revenue += snap.revenue;
+    agg.orders += snap.orders;
+    agg.cogs += snap.cogs;
+    agg.shipping += snap.shipping;
+    agg.fees += snap.fees;
+    agg.refunds += snap.refunds;
+  }
+
+  if (liveKeySet.size === 0) return result;
+
+  const liveKeys = [...liveKeySet].sort();
+  const liveSlice = sliceFromDateKeys(liveKeys, tz);
+  const liveMap = await aggregateStoreAggsFromOrders(
+    wsId,
+    stores,
+    liveSlice,
+    sharedTimeZone,
+  );
+  for (const [sid, live] of liveMap) {
+    const agg = result.get(sid) ?? emptyStoreAgg();
+    agg.revenue += live.revenue;
+    agg.orders += live.orders;
+    agg.cogs += live.cogs;
+    agg.shipping += live.shipping;
+    agg.fees += live.fees;
+    agg.refunds += live.refunds;
+    result.set(sid, agg);
+  }
+  return result;
+}
+
+/** Agrega métricas por loja com COGS conforme o modo (shopify/variant/order/day). */
+async function aggregateStoreAggsFromOrders(
   wsId: mongoose.Types.ObjectId,
   stores: StoreCogsCtx[],
   slice: PeriodSlice,
@@ -1454,10 +1554,50 @@ async function buildConsolidatedDailyProfitSeries(
   });
 
   const storeOids = stores.map((s) => s._id);
-  const [ordersByStoreDay, adByStoreDay] = await Promise.all([
-    aggregateDailyOrdersByStore(wsId, stores, slice, storeTimeZone),
-    aggregateDailyAdSpendByStore(storeOids, slice, storeTimeZone),
-  ]);
+  const tzNorm = normalizeStoreTimezone(storeTimeZone);
+  const dateKeys = dayKeysInSlice(slice, storeTimeZone);
+  const todayKey = dateKeyInTimezone(new Date(), tzNorm);
+  const histKeys = dateKeys.filter((k) => k < todayKey);
+
+  const snaps =
+    histKeys.length > 0
+      ? await loadDailyMetricSnaps(
+          storeOids,
+          histKeys[0]!,
+          histKeys[histKeys.length - 1]!,
+        )
+      : [];
+  const histSet = new Set(histKeys);
+  const snapByStoreDay = snapsByStoreDay(
+    snaps.filter((s) => histSet.has(s.dateKey)),
+  );
+
+  const liveKeySet = new Set<string>();
+  for (const k of dateKeys) {
+    if (k >= todayKey) {
+      liveKeySet.add(k);
+      continue;
+    }
+    for (const s of stores) {
+      if (!snapByStoreDay.has(`${k}:${String(s._id)}`)) {
+        liveKeySet.add(k);
+        break;
+      }
+    }
+  }
+
+  let ordersByStoreDay = new Map<
+    string,
+    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
+  >();
+  let adByStoreDay = new Map<string, number>();
+  if (liveKeySet.size > 0) {
+    const liveSlice = sliceFromDateKeys([...liveKeySet].sort(), tzNorm);
+    [ordersByStoreDay, adByStoreDay] = await Promise.all([
+      aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone),
+      aggregateDailyAdSpendByStore(storeOids, liveSlice, storeTimeZone),
+    ]);
+  }
 
   const zeros = {
     revenue: 0,
@@ -1467,9 +1607,7 @@ async function buildConsolidatedDailyProfitSeries(
     refunds: 0,
   };
 
-  const tzNorm = normalizeStoreTimezone(storeTimeZone);
-
-  const points = dayKeysInSlice(slice, storeTimeZone).map((dateKey) => {
+  const points = dateKeys.map((dateKey) => {
     const byStore: ProfitChartStoreSlice[] = [];
     let totalProfit = 0;
     let totalRevenue = 0;
@@ -1492,14 +1630,17 @@ async function buildConsolidatedDailyProfitSeries(
         storeRef.createdAt,
         tzNorm,
       );
+      const storeDay = storeDayKey(dateKey, meta.storeId);
+      const snap = snapByStoreDay.get(`${dateKey}:${meta.storeId}`);
       /**
-       * Antes do piso de importação: só esconder se não houver encomendas.
+       * Antes do piso de importação: só esconder se não houver encomendas/snapshot.
        * Se a BD tem vendas (contam nos KPIs), o gráfico tem de as mostrar.
        */
       if (
         importKey &&
         dateKey < importKey &&
-        !ordersByStoreDay.has(storeDayKey(dateKey, meta.storeId))
+        !snap &&
+        !ordersByStoreDay.has(storeDay)
       ) {
         point[meta.key] = null as unknown as number;
         point[meta.revenueKey] = null as unknown as number;
@@ -1513,18 +1654,24 @@ async function buildConsolidatedDailyProfitSeries(
         const killKey = formatDateInput(startOfDay(storeRef.operationKilledAt));
         if (dateKey > killKey) continue;
       }
-      const o =
-        ordersByStoreDay.get(storeDayKey(dateKey, meta.storeId)) ?? zeros;
-      const storeKey = storeDayKey(dateKey, meta.storeId);
-      const hasEntry = adByStoreDay.has(storeKey);
-      const ad = hasEntry ? adByStoreDay.get(storeKey)! : 0;
-      const storeOpEx = sumLoadedExpensesForDay(
-        expenseRows,
-        dateKey,
-        meta.storeId,
-      );
-      const profit = calcDailyProfit(o, hasEntry ? ad : 0, storeOpEx);
-      const revenue = o.revenue;
+
+      let profit: number;
+      let revenue: number;
+      if (snap && dateKey < todayKey) {
+        profit = snap.netProfit;
+        revenue = snap.revenue;
+      } else {
+        const o = ordersByStoreDay.get(storeDay) ?? zeros;
+        const hasEntry = adByStoreDay.has(storeDay);
+        const ad = hasEntry ? adByStoreDay.get(storeDay)! : 0;
+        const storeOpEx = sumLoadedExpensesForDay(
+          expenseRows,
+          dateKey,
+          meta.storeId,
+        );
+        profit = calcDailyProfit(o, hasEntry ? ad : 0, storeOpEx);
+        revenue = o.revenue;
+      }
       byStore.push({
         storeId: meta.storeId,
         name: meta.name,
@@ -1593,34 +1740,6 @@ function dayKeysInSlice(slice: PeriodSlice, storeTimeZone?: string | null): stri
   return keys;
 }
 
-async function loadSnapshotProfitsByDay(
-  storeOids: mongoose.Types.ObjectId[],
-  dateKeys: string[],
-  todayKey: string,
-): Promise<Map<string, number>> {
-  const histKeys = dateKeys.filter((k) => k < todayKey);
-  if (!histKeys.length || !storeOids.length) return new Map();
-
-  const rows = await DailyMetric.find({
-    storeId: storeOids.length === 1 ? storeOids[0] : { $in: storeOids },
-    dateKey: { $in: histKeys },
-  })
-    .select("dateKey netProfit storeId")
-    .lean();
-
-  const out = new Map<string, number>();
-  if (storeOids.length === 1) {
-    for (const r of rows) {
-      out.set(r.dateKey, r.netProfit ?? 0);
-    }
-    return out;
-  }
-  for (const r of rows) {
-    out.set(r.dateKey, (out.get(r.dateKey) ?? 0) + (r.netProfit ?? 0));
-  }
-  return out;
-}
-
 function sliceFromDateKeys(
   dateKeys: string[],
   storeTimeZone: string,
@@ -1644,21 +1763,35 @@ async function buildDailyProfitSeries(
   expenseRows: ExpenseLeanRow[] = [],
   expenseStoreId?: string | null,
 ): Promise<ProfitChartPoint[]> {
+  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
   const dateKeys = dayKeysInSlice(slice, storeTimeZone);
+  const todayKey = tz
+    ? dateKeyInTimezone(new Date(), tz)
+    : formatDateInput(startOfDay(new Date()));
+  const histKeys = dateKeys.filter((k) => k < todayKey);
+  const storeCount = Math.max(storeOids.length, 1);
 
-  const [orderByDay, adByDay, chargebacksByDay] = await Promise.all([
-    aggregateDailyOrders(
-      wsId,
+  let snapsByDate = new Map<string, DailyMetricDayAgg>();
+  let coveredHist = new Set<string>();
+  let liveKeys = dateKeys.filter((k) => k >= todayKey);
+
+  if (tz && histKeys.length > 0 && storeOids.length > 0) {
+    const snaps = await loadDailyMetricSnaps(
       storeOids,
-      slice,
-      storeTimeZone,
-      cogsMode,
-    ),
-    aggregateDailyAdSpend(storeOids, slice, storeTimeZone),
-    storeTimeZone
-      ? sumChargebacksByDayKey(storeOids, slice, storeTimeZone)
-      : Promise.resolve(new Map<string, number>()),
-  ]);
+      histKeys[0]!,
+      histKeys[histKeys.length - 1]!,
+    );
+    if (snaps.length === 0) {
+      liveKeys = [...dateKeys];
+    } else {
+      snapsByDate = aggregateSnapsByDate(snaps, new Set(histKeys));
+      const split = fullyCoveredHistKeys(snapsByDate, histKeys, storeCount);
+      coveredHist = new Set(split.covered);
+      liveKeys = [...split.missing, ...liveKeys];
+    }
+  } else {
+    liveKeys = [...dateKeys];
+  }
 
   const zeroAgg = {
     revenue: 0,
@@ -1668,11 +1801,36 @@ async function buildDailyProfitSeries(
     refunds: 0,
   };
 
-  /**
-   * Inclui dias com vendas que a lista civil possa ter perdido (fuso).
-   * Sem isto, meses com ~100k podiam ficar a 0 no gráfico anual.
-   */
-  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  let orderByDay = new Map<
+    string,
+    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds" | "orders">
+  >();
+  let adByDay = new Map<string, number>();
+  let chargebacksByDay = new Map<string, number>();
+
+  if (liveKeys.length > 0) {
+    const liveSlice =
+      tz && liveKeys.length
+        ? sliceFromDateKeys([...liveKeys].sort(), tz)
+        : slice;
+    const [orders, ads, cbs] = await Promise.all([
+      aggregateDailyOrders(
+        wsId,
+        storeOids,
+        liveSlice,
+        storeTimeZone,
+        cogsMode,
+      ),
+      aggregateDailyAdSpend(storeOids, liveSlice, storeTimeZone),
+      storeTimeZone
+        ? sumChargebacksByDayKey(storeOids, liveSlice, storeTimeZone)
+        : Promise.resolve(new Map<string, number>()),
+    ]);
+    orderByDay = orders;
+    adByDay = ads;
+    chargebacksByDay = cbs;
+  }
+
   const periodStart =
     slice.startDateKey ??
     (tz ? dateKeyInTimezone(slice.start, tz) : formatDateInput(slice.start));
@@ -1683,9 +1841,23 @@ async function buildDailyProfitSeries(
   for (const k of orderByDay.keys()) {
     if (k >= periodStart && k <= periodEnd) keySet.add(k);
   }
+  for (const k of coveredHist) keySet.add(k);
   const finalKeys = [...keySet].sort();
 
   return finalKeys.map((dateKey) => {
+    if (coveredHist.has(dateKey)) {
+      const snap = snapsByDate.get(dateKey)!;
+      return {
+        dateKey,
+        label: formatDateKeyLabel(dateKey),
+        dateLabel: formatDateKeyLabel(dateKey, { withYear: true }),
+        profit: snap.netProfit,
+        profitFmt: fmtMoney(snap.netProfit),
+        revenue: snap.revenue,
+        revenueFmt: fmtMoney(snap.revenue),
+      };
+    }
+
     const o = orderByDay.get(dateKey) ?? zeroAgg;
     const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
     const dayOpEx = sumLoadedExpensesForDay(
@@ -1696,12 +1868,10 @@ async function buildDailyProfitSeries(
     const dayCb = chargebacksByDay.get(dateKey) ?? 0;
     const profit = calcDailyProfit(o, hasEntry ? ad : 0, dayOpEx, dayCb);
     const revenue = o.revenue;
-    const label = formatDateKeyLabel(dateKey);
-    const dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
     return {
       dateKey,
-      label,
-      dateLabel,
+      label: formatDateKeyLabel(dateKey),
+      dateLabel: formatDateKeyLabel(dateKey, { withYear: true }),
       profit,
       profitFmt: fmtMoney(profit),
       revenue,
@@ -1764,76 +1934,155 @@ async function buildStoreDailyMetrics(
     cogsModePriorToDayForce?: CogsMode | null;
   },
 ): Promise<StoreDailyMetricRow[]> {
+  const dateKeys = dayKeysInSlice(slice, storeTimeZone);
+  const tz = storeTimeZone ? normalizeStoreTimezone(storeTimeZone) : null;
+  const todayKey = tz
+    ? dateKeyInTimezone(new Date(), tz)
+    : formatDateInput(startOfDay(new Date()));
+  const histKeys = dateKeys.filter((k) => k < todayKey);
+
+  const snapByDay = new Map<string, DailyMetricSnap>();
+  if (tz && histKeys.length > 0) {
+    const snaps = await loadDailyMetricSnaps(
+      [storeOid],
+      histKeys[0]!,
+      histKeys[histKeys.length - 1]!,
+    );
+    for (const s of snaps) {
+      if (s.dateKey < todayKey) snapByDay.set(s.dateKey, s);
+    }
+  }
+
+  const liveKeys = dateKeys.filter((k) => !snapByDay.has(k));
+  const liveSlice =
+    tz && liveKeys.length > 0
+      ? sliceFromDateKeys([...liveKeys].sort(), tz)
+      : slice;
+
   const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
     await Promise.all([
-      aggregateDailyOrders(
-        wsId,
-        [storeOid],
-        slice,
-        storeTimeZone,
-        cogsMode,
-        cogsDayOpts,
-      ),
-      aggregateDailyAdSpend([storeOid], slice, storeTimeZone),
-      loadDailySessionCountsForSlice(
-        storeOid,
-        analyticsSessionCountries,
-        slice,
-        storeTimeZone,
-      ),
+      liveKeys.length > 0
+        ? aggregateDailyOrders(
+            wsId,
+            [storeOid],
+            liveSlice,
+            storeTimeZone,
+            cogsMode,
+            cogsDayOpts,
+          )
+        : Promise.resolve(new Map()),
+      liveKeys.length > 0
+        ? aggregateDailyAdSpend([storeOid], liveSlice, storeTimeZone)
+        : Promise.resolve(new Map<string, number>()),
+      liveKeys.length > 0
+        ? loadDailySessionCountsForSlice(
+            storeOid,
+            analyticsSessionCountries,
+            liveSlice,
+            storeTimeZone,
+          )
+        : Promise.resolve(new Map()),
       cogsMode === "order" || cogsMode === "day"
         ? Promise.resolve(new Map<string, number>())
         : countMissingCogsByDay([storeOid], slice, storeTimeZone),
     ]);
 
-  return dayKeysInSlice(slice, storeTimeZone)
+  return dateKeys
     .map((dateKey) => {
-    const o = orderByDay.get(dateKey) ?? {
-      revenue: 0,
-      cogs: 0,
-      shipping: 0,
-      fees: 0,
-      refunds: 0,
-      orders: 0,
-    };
-    const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
-    const dayOpEx = sumLoadedExpensesForDay(
-      expenseRows,
-      dateKey,
-      String(storeOid),
-    );
-    const profit = calcDailyProfit(o, hasEntry ? ad : 0, dayOpEx);
-    const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
-    const dayNeedsManual =
-      cogsMode === "day" && (!fromKey || dateKey >= fromKey);
-    const missingCogs =
-      dayNeedsManual && o.orders > 0 && o.cogs === 0
-        ? 1
-        : missingCogsByDay.get(dateKey) ?? 0;
-    const dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
-    const sess = sessionsByDay.get(dateKey);
-    const sessions = sess?.sessions ?? null;
-    let profitTitle = formatProfitBreakdown(o, ad, fmtMoney, {
-      adSpendKnown: hasEntry,
-      operatingExpenses: dayOpEx,
-    });
-    if (missingCogs > 0) {
-      profitTitle += ` · ${missingCogsNote(missingCogs, cogsMode ?? undefined)}`;
-    }
-    return {
-      dateKey,
-      dateLabel,
-      revenue: fmtMoney(o.revenue),
-      cogs: fmtMoney(o.cogs),
-      refunds: fmtMoney(o.refunds),
-      adSpend: formatAdSpendCell(hasEntry, ad, fmtMoney),
-      profit: fmtMoney(profit),
-      profitPositive: profit >= 0,
-      profitTitle,
-      ordersCount: o.orders,
-        sessions,
+      const snap = snapByDay.get(dateKey);
+      if (snap) {
+        const o = {
+          revenue: snap.revenue,
+          cogs: snap.cogs,
+          shipping: snap.shipping,
+          fees: snap.fees,
+          refunds: snap.refunds,
+          orders: snap.orders,
+        };
+        const ad = snap.adSpend;
+        const dayOpEx = snap.operatingExpenses;
+        const profit = snap.netProfit;
+        const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
+        const dayNeedsManual =
+          cogsMode === "day" && (!fromKey || dateKey >= fromKey);
+        const missingCogs =
+          dayNeedsManual && o.orders > 0 && o.cogs === 0
+            ? 1
+            : missingCogsByDay.get(dateKey) ?? 0;
+        let profitTitle = formatProfitBreakdown(o, ad, fmtMoney, {
+          adSpendKnown: true,
+          operatingExpenses: dayOpEx,
+          chargebacks: snap.chargebacks,
+        });
+        if (missingCogs > 0) {
+          profitTitle += ` · ${missingCogsNote(missingCogs, cogsMode ?? undefined)}`;
+        }
+        return {
+          dateKey,
+          dateLabel: formatDateKeyLabel(dateKey, { withYear: true }),
+          revenue: fmtMoney(o.revenue),
+          cogs: fmtMoney(o.cogs),
+          refunds: fmtMoney(o.refunds),
+          adSpend: formatAdSpendCell(true, ad, fmtMoney),
+          profit: fmtMoney(profit),
+          profitPositive: profit >= 0,
+          profitTitle,
+          ordersCount: o.orders,
+          sessions: snap.sessions,
+          atcPct:
+            snap.atcPct != null ? formatPercent(snap.atcPct) : "—",
+          checkoutPct: "—",
+          cvrPct:
+            snap.cvrPct != null ? formatPercent(snap.cvrPct) : "—",
+        };
+      }
+
+      const o = orderByDay.get(dateKey) ?? {
+        revenue: 0,
+        cogs: 0,
+        shipping: 0,
+        fees: 0,
+        refunds: 0,
+        orders: 0,
+      };
+      const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
+      const dayOpEx = sumLoadedExpensesForDay(
+        expenseRows,
+        dateKey,
+        String(storeOid),
+      );
+      const profit = calcDailyProfit(o, hasEntry ? ad : 0, dayOpEx);
+      const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
+      const dayNeedsManual =
+        cogsMode === "day" && (!fromKey || dateKey >= fromKey);
+      const missingCogs =
+        dayNeedsManual && o.orders > 0 && o.cogs === 0
+          ? 1
+          : missingCogsByDay.get(dateKey) ?? 0;
+      const sess = sessionsByDay.get(dateKey);
+      let profitTitle = formatProfitBreakdown(o, ad, fmtMoney, {
+        adSpendKnown: hasEntry,
+        operatingExpenses: dayOpEx,
+      });
+      if (missingCogs > 0) {
+        profitTitle += ` · ${missingCogsNote(missingCogs, cogsMode ?? undefined)}`;
+      }
+      return {
+        dateKey,
+        dateLabel: formatDateKeyLabel(dateKey, { withYear: true }),
+        revenue: fmtMoney(o.revenue),
+        cogs: fmtMoney(o.cogs),
+        refunds: fmtMoney(o.refunds),
+        adSpend: formatAdSpendCell(hasEntry, ad, fmtMoney),
+        profit: fmtMoney(profit),
+        profitPositive: profit >= 0,
+        profitTitle,
+        ordersCount: o.orders,
+        sessions: sess?.sessions ?? null,
         atcPct: sess ? pctFmtFromCounts(sess.cart, sess.sessions) : "—",
-        checkoutPct: sess ? pctFmtFromCounts(sess.checkout, sess.sessions) : "—",
+        checkoutPct: sess
+          ? pctFmtFromCounts(sess.checkout, sess.sessions)
+          : "—",
         cvrPct: sess ? pctFmtFromCounts(sess.completed, sess.sessions) : "—",
       };
     })
@@ -1900,13 +2149,39 @@ async function buildStoreSparklinesBatch(
   }
 
   const tz = normalizeStoreTimezone(storeTimeZone);
-  const clippedSlice: PeriodSlice = sliceFromDateKeys(tailKeys, tz);
-
   const storeOids = stores.map((s) => s._id);
-  const [ordersByStoreDay, adByStoreDay] = await Promise.all([
-    aggregateDailyOrdersByStore(wsId, stores, clippedSlice, storeTimeZone),
-    aggregateDailyAdSpendByStore(storeOids, clippedSlice, storeTimeZone),
-  ]);
+  const snaps = await loadDailyMetricSnaps(
+    storeOids,
+    tailKeys[0]!,
+    tailKeys[tailKeys.length - 1]!,
+  );
+  const tailSet = new Set(tailKeys);
+  const byStoreDay = snapsByStoreDay(
+    snaps.filter((s) => tailSet.has(s.dateKey)),
+  );
+
+  const liveKeySet = new Set<string>();
+  for (const k of tailKeys) {
+    for (const s of stores) {
+      if (!byStoreDay.has(`${k}:${String(s._id)}`)) {
+        liveKeySet.add(k);
+        break;
+      }
+    }
+  }
+
+  let ordersByStoreDay = new Map<
+    string,
+    Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
+  >();
+  let adByStoreDay = new Map<string, number>();
+  if (liveKeySet.size > 0) {
+    const liveSlice = sliceFromDateKeys([...liveKeySet].sort(), tz);
+    [ordersByStoreDay, adByStoreDay] = await Promise.all([
+      aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone),
+      aggregateDailyAdSpendByStore(storeOids, liveSlice, storeTimeZone),
+    ]);
+  }
 
   const zeroRow = () => ({
     revenue: 0,
@@ -1919,6 +2194,8 @@ async function buildStoreSparklinesBatch(
   for (const s of stores) {
     const sid = String(s._id);
     const profits = tailKeys.map((dateKey) => {
+      const snap = byStoreDay.get(`${dateKey}:${sid}`);
+      if (snap) return snap.netProfit;
       const o = ordersByStoreDay.get(storeDayKey(dateKey, sid)) ?? zeroRow();
       const { amount: ad, hasEntry } = resolveDailyAdSpend(adByStoreDay, dateKey);
       return calcDailyProfit(o, hasEntry ? ad : 0, 0);
@@ -2026,57 +2303,51 @@ async function buildTopProductsByUnits(
   limit = 5,
   storeTimeZone?: string | null,
 ): Promise<TopProduct[]> {
-  const orders = await Order.find(
-    mergePaidOrderFilter({
-      storeId: storeOid,
-      ...(storeTimeZone
-        ? orderDateMatchInTimezone(slice, storeTimeZone)
-        : orderDateMatch(slice)),
-    }),
-  )
-    .select(
-      "lineItems netRevenue subtotal totalPrice refunded amountsBase.netRevenue amountsBase.fxRate",
-    )
-    .lean();
+  const dateMatch = storeTimeZone
+    ? orderDateMatchInTimezone(slice, storeTimeZone)
+    : orderDateMatch(slice);
 
-  const map = new Map<string, { units: number; revenue: number }>();
+  const rows = await Order.aggregate<{
+    _id: string;
+    units: number;
+    revenue: number;
+  }>([
+    {
+      $match: mergePaidOrderFilter({
+        storeId: storeOid,
+        ...dateMatch,
+      }),
+    },
+    { $unwind: "$lineItems" },
+    {
+      $group: {
+        _id: { $ifNull: ["$lineItems.title", "(sem nome)"] },
+        units: { $sum: { $ifNull: ["$lineItems.quantity", 0] } },
+        revenue: {
+          $sum: {
+            $multiply: [
+              { $ifNull: ["$lineItems.unitPrice", 0] },
+              { $ifNull: ["$lineItems.quantity", 0] },
+              { $ifNull: ["$amountsBase.fxRate", 1] },
+            ],
+          },
+        },
+      },
+    },
+    { $sort: { units: -1 } },
+    { $limit: limit },
+  ]);
 
-  for (const order of orders) {
-    const storeBasis =
-      orderLineRevenueBasis(order) ||
-      order.netRevenue ||
-      orderNetRevenue(order);
-    const netRevBase = order.amountsBase?.netRevenue;
-
-    for (const li of order.lineItems ?? []) {
-      const title = li.title || "(sem nome)";
-      const lineRevStore = lineStoreRevenue(li);
-      const rev = allocateBaseFromOrder(
-        order,
-        lineRevStore,
-        netRevBase,
-        storeBasis,
-      );
-      const row = map.get(title) ?? { units: 0, revenue: 0 };
-      row.units += li.quantity ?? 0;
-      row.revenue += rev;
-      map.set(title, row);
-    }
-  }
-
-  return [...map.entries()]
-    .sort((a, b) => b[1].units - a[1].units)
-    .slice(0, limit)
-    .map(([title, p]) => ({
-      title,
-      units: p.units,
-      revenue: fmtMoney(p.revenue),
-      profit: "—",
-      margin: "—",
-      berRoas: "—",
-      positive: true,
-      marginPositive: true,
-    }));
+  return rows.map((r) => ({
+    title: r._id || "(sem nome)",
+    units: r.units,
+    revenue: fmtMoney(r.revenue),
+    profit: "—",
+    margin: "—",
+    berRoas: "—",
+    positive: true,
+    marginPositive: true,
+  }));
 }
 
 async function buildTopProductsByProfit(
@@ -2681,7 +2952,7 @@ export async function buildWorkspaceSummary(
     refundWindowDays,
   );
 
-  async function aggregateOrders(
+  async function aggregateOrdersFromOrders(
     slice: PeriodSlice,
     storeOid?: mongoose.Types.ObjectId,
   ): Promise<StoreAgg> {
@@ -2784,6 +3055,64 @@ export async function buildWorkspaceSummary(
     return agg;
   }
 
+  /** KPIs: DailyMetric no histórico + Orders só em buracos / hoje. */
+  async function aggregateOrders(
+    slice: PeriodSlice,
+    storeOid?: mongoose.Types.ObjectId,
+  ): Promise<StoreAgg> {
+    const oids = storeOid ? [storeOid] : stores.map((s) => s._id);
+    const dateKeys = dayKeysInSlice(slice, storeTz);
+    const todayKey = dateKeyInTimezone(new Date(), storeTz);
+    const histKeys = dateKeys.filter((k) => k < todayKey);
+    if (histKeys.length === 0 || !oids.length) {
+      return aggregateOrdersFromOrders(slice, storeOid);
+    }
+
+    const snaps = await loadDailyMetricSnaps(
+      oids,
+      histKeys[0]!,
+      histKeys[histKeys.length - 1]!,
+    );
+    if (snaps.length === 0) {
+      return aggregateOrdersFromOrders(slice, storeOid);
+    }
+    const byDate = aggregateSnapsByDate(snaps, new Set(histKeys));
+    const { covered, missing } = fullyCoveredHistKeys(
+      byDate,
+      histKeys,
+      oids.length,
+    );
+    const liveKeys = [
+      ...missing,
+      ...dateKeys.filter((k) => k >= todayKey),
+    ];
+    const snapPart = sumDayAggs(byDate, covered);
+
+    let livePart: StoreAgg = {
+      revenue: 0,
+      cogs: 0,
+      shipping: 0,
+      fees: 0,
+      refunds: 0,
+      orders: 0,
+    };
+    if (liveKeys.length) {
+      livePart = await aggregateOrdersFromOrders(
+        sliceFromDateKeys([...liveKeys].sort(), storeTz),
+        storeOid,
+      );
+    }
+
+    return {
+      revenue: snapPart.revenue + livePart.revenue,
+      cogs: snapPart.cogs + livePart.cogs,
+      shipping: snapPart.shipping + livePart.shipping,
+      fees: snapPart.fees + livePart.fees,
+      refunds: snapPart.refunds + livePart.refunds,
+      orders: snapPart.orders + livePart.orders,
+    };
+  }
+
   const byStore = await aggregateStoreAggsWithKillClip(
     wsId,
     stores,
@@ -2797,8 +3126,34 @@ export async function buildWorkspaceSummary(
     rev > 0 ? formatPercent((profit / rev) * 100) : "—";
 
   const storeOids = stores.map((s) => s._id);
-  const expenseRows = await loadWorkspaceExpensesLean(wsId);
   const scopedStoreId = scoped ? String(scoped._id) : null;
+
+  /** Arranca cedo: não depende de ads/expenses. */
+  const sparklinesPromise =
+    !scoped && stores.length > 0
+      ? buildStoreSparklinesBatch(
+          wsId,
+          stores,
+          effectiveCurrentSlice,
+          storeTz,
+        )
+      : Promise.resolve(null as Map<string, number[]> | null);
+
+  const monthlyGoalsPromise = buildMonthlyGoalsProgress(
+    workspaceId,
+    storeId,
+    storeAccess,
+  );
+  const collectionRemindersPromise = listCollectionRemindersForWorkspace(
+    workspaceId,
+    storeOids,
+  );
+  const syncStoreIds = storeId
+    ? [storeId]
+    : accessibleStores.map((s) => String(s._id));
+  const lastSyncedAtPromise = resolveLastSyncedAtForStoreIds(syncStoreIds);
+
+  const expenseRows = await loadWorkspaceExpensesLean(wsId);
   const curOperatingExpenses = sumLoadedExpenses(
     expenseRows,
     effectiveCurrentSlice,
@@ -2818,11 +3173,75 @@ export async function buildWorkspaceSummary(
         )
       : new Map<string, number>();
 
-  const [curAdAgg, prevAdAgg, curCbByStore, prevCbByStore] = await Promise.all([
-    aggregateAdSpendWithKillClip(stores, effectiveCurrentSlice),
-    aggregateAdSpendWithKillClip(stores, effectivePrevSlice),
-    sumChargebacksByStore(storeOids, effectiveCurrentSlice, storeTz),
-    sumChargebacksByStore(storeOids, effectivePrevSlice, storeTz),
+  const profitChartTask = (async (): Promise<{
+    points: ProfitChartPoint[];
+    series?: ProfitChartSeries[];
+  }> => {
+    if (!scoped && stores.length > 1) {
+      const consolidated = await buildConsolidatedDailyProfitSeries(
+        wsId,
+        stores,
+        storeColorMap,
+        chartSlice,
+        fmtMoney,
+        storeTz,
+        expenseRows,
+      );
+      return { points: consolidated.points, series: consolidated.series };
+    }
+    const points = await buildDailyProfitSeries(
+      wsId,
+      storeOids,
+      scoped ? effectiveChartSlice : chartSlice,
+      fmtMoney,
+      storeTz,
+      scoped ? scopedCogsMode : null,
+      expenseRows,
+      scopedStoreId,
+    );
+    return { points };
+  })();
+
+  const prevByStorePromise =
+    !scoped
+      ? aggregateStoreAggsWithKillClip(
+          wsId,
+          stores,
+          effectivePrevSlice,
+          aggregateStoreAggs,
+          storeTz,
+        )
+      : null;
+
+  const [
+    [curAdAgg, prevAdAgg, curCbByStore, prevCbByStore],
+    [missingCogsCount, missingAdSpendDays],
+    sparklinesByStore,
+  ] = await Promise.all([
+    Promise.all([
+      aggregateAdSpendWithKillClip(stores, effectiveCurrentSlice),
+      aggregateAdSpendWithKillClip(stores, effectivePrevSlice),
+      sumChargebacksByStore(storeOids, effectiveCurrentSlice, storeTz),
+      sumChargebacksByStore(storeOids, effectivePrevSlice, storeTz),
+    ]),
+    Promise.all([
+      scoped
+        ? scopedCogsMode === "order"
+          ? countOrdersMissingManualCogs(
+              [scoped._id],
+              effectiveCurrentSlice,
+              storeTz,
+            )
+          : scopedCogsMode === "day"
+            ? countMissingCogsDays(scoped, effectiveCurrentSlice)
+            : countSoldVariantsMissingCost(
+                [scoped._id],
+                effectiveCurrentSlice,
+              )
+        : countMissingCogsForStores(stores, effectiveCurrentSlice),
+      sumMissingAdSpendDays(stores, currency),
+    ]),
+    sparklinesPromise,
   ]);
   const adSpend = curAdAgg.total;
   const prevAdSpend = prevAdAgg.total;
@@ -2843,38 +3262,10 @@ export async function buildWorkspaceSummary(
   const scopedPrevAdSpendKnown = scoped
     ? (prevAdSpendEntryByStore.get(String(scoped._id)) ?? 0) > 0
     : false;
-
-  const [missingCogsCount, missingAdSpendDays] = await Promise.all([
-    scoped
-      ? scopedCogsMode === "order"
-        ? countOrdersMissingManualCogs(
-            [scoped._id],
-            effectiveCurrentSlice,
-            storeTz,
-          )
-        : scopedCogsMode === "day"
-          ? countMissingCogsDays(scoped, effectiveCurrentSlice)
-          : countSoldVariantsMissingCost(
-              [scoped._id],
-              effectiveCurrentSlice,
-            )
-      : countMissingCogsForStores(stores, effectiveCurrentSlice),
-    sumMissingAdSpendDays(stores, currency),
-  ]);
   const cogsIncomplete = missingCogsCount > 0;
   const missingCogsMessage = scoped
     ? formatMissingCogsWarning(missingCogsCount, scopedCogsMode)
     : formatMissingCogsWarning(missingCogsCount);
-
-  const sparklinesByStore =
-    !scoped && stores.length > 0
-      ? await buildStoreSparklinesBatch(
-          wsId,
-          stores,
-          effectiveCurrentSlice,
-          storeTz,
-        )
-      : null;
 
   const summaryStores: SummaryStore[] = stores
     .map((s) => {
@@ -2954,35 +3345,6 @@ export async function buildWorkspaceSummary(
   const money = (v: number): SummaryKpi["value"] =>
     formatCurrency(v, currency);
   const deltaSuffix = `var. % vs ${prevPeriodLabel}`;
-
-  const profitChartTask = (async (): Promise<{
-    points: ProfitChartPoint[];
-    series?: ProfitChartSeries[];
-  }> => {
-    if (!scoped && stores.length > 1) {
-      const consolidated = await buildConsolidatedDailyProfitSeries(
-        wsId,
-        stores,
-        storeColorMap,
-        chartSlice,
-        fmtMoney,
-        storeTz,
-        expenseRows,
-      );
-      return { points: consolidated.points, series: consolidated.series };
-    }
-    const points = await buildDailyProfitSeries(
-      wsId,
-      storeOids,
-      scoped ? effectiveChartSlice : chartSlice,
-      fmtMoney,
-      storeTz,
-      scoped ? scopedCogsMode : null,
-      expenseRows,
-      scopedStoreId,
-    );
-    return { points };
-  })();
 
   let kpis: SummaryKpi[];
   let extendedKpis: SummaryKpi[] = [];
@@ -3152,13 +3514,7 @@ export async function buildWorkspaceSummary(
       },
     ];
     const curAll = totals;
-    const prevByStore = await aggregateStoreAggsWithKillClip(
-      wsId,
-      stores,
-      effectivePrevSlice,
-      aggregateStoreAggs,
-      storeTz,
-    );
+    const prevByStore = (await prevByStorePromise) ?? new Map<string, StoreAgg>();
     const prevAll = [...prevByStore.values()].reduce(
       (acc, a) => {
         acc.revenue += a.revenue;
@@ -3564,11 +3920,25 @@ export async function buildWorkspaceSummary(
     profitChart = annotateProfitChartConsolidation(profitChart, refundWindowDays);
   }
 
-  const reminderStoreIds = stores.map((s) => s._id);
-  const collectionReminders = await listCollectionRemindersForWorkspace(
-    workspaceId,
-    reminderStoreIds,
+  const costBreakdownAdKnown = scoped
+    ? scopedAdSpendKnown
+    : curAdSpendKnownWorkspace;
+  const costBreakdown = buildCostBreakdown(
+    scopedCurAgg ?? totals,
+    costBreakdownAdKnown ? adSpend : 0,
+    costBreakdownAdKnown,
+    curOperatingExpenses,
+    netProfit,
+    fmtMoney,
+    scoped ? (curCbByStore.get(String(scoped._id)) ?? 0) : curChargebacks,
   );
+
+  const [collectionReminders, lastSyncedAt, monthlyGoals] = await Promise.all([
+    collectionRemindersPromise,
+    lastSyncedAtPromise,
+    monthlyGoalsPromise,
+  ]);
+
   const operationContext = {
     exclusionNote: financialSplit
       ? operationExclusionNote(
@@ -3585,24 +3955,6 @@ export async function buildWorkspaceSummary(
       : null,
     collectionReminders,
   };
-
-  const costBreakdownAdKnown = scoped
-    ? scopedAdSpendKnown
-    : curAdSpendKnownWorkspace;
-  const costBreakdown = buildCostBreakdown(
-    scopedCurAgg ?? totals,
-    costBreakdownAdKnown ? adSpend : 0,
-    costBreakdownAdKnown,
-    curOperatingExpenses,
-    netProfit,
-    fmtMoney,
-    scoped ? (curCbByStore.get(String(scoped._id)) ?? 0) : curChargebacks,
-  );
-
-  const syncStoreIds = storeId
-    ? [storeId]
-    : accessibleStores.map((s) => String(s._id));
-  const lastSyncedAt = await resolveLastSyncedAtForStoreIds(syncStoreIds);
 
   return {
     kpis,
@@ -3627,11 +3979,7 @@ export async function buildWorkspaceSummary(
     profitWindowNote: profitWindowNoteText,
     generatedAt: new Date().toISOString(),
     lastSyncedAt,
-    monthlyGoals: await buildMonthlyGoalsProgress(
-      workspaceId,
-      storeId,
-      storeAccess,
-    ),
+    monthlyGoals,
     operationContext,
   };
 }
