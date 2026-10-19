@@ -141,6 +141,23 @@ export function fullyCoveredHistKeys(
   return { covered, missing };
 }
 
+/**
+ * true se `keys` preenche todos os dias civis entre min e max (UTC date math).
+ * Usado para decidir se um live-slice hybrid pode ser um range contínuo
+ * sem `specificDates` (evitar double-count com snapshots).
+ */
+export function dateKeysFormContiguousSpan(keys: string[]): boolean {
+  const sorted = [...new Set(keys)].sort();
+  if (sorted.length <= 1) return true;
+  const start = Date.parse(`${sorted[0]}T00:00:00Z`);
+  const end = Date.parse(`${sorted[sorted.length - 1]}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return false;
+  }
+  const spanDays = Math.round((end - start) / 86_400_000) + 1;
+  return spanDays === sorted.length;
+}
+
 export function sumDayAggs(
   byDate: Map<string, DailyMetricDayAgg>,
   keys: string[],

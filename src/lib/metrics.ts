@@ -467,13 +467,12 @@ async function aggregateStoreAggs(
 
   if (liveKeySet.size === 0) return result;
 
-  const liveKeys = [...liveKeySet].sort();
-  const liveSlice = sliceFromDateKeys(liveKeys, tz);
-  const liveMap = await aggregateStoreAggsFromOrders(
+  const liveMap = await aggregateStoreAggsFromOrdersForKeys(
     wsId,
     stores,
-    liveSlice,
+    [...liveKeySet],
     sharedTimeZone,
+    tz,
   );
   for (const [sid, live] of liveMap) {
     const agg = result.get(sid) ?? emptyStoreAgg();
@@ -1591,12 +1590,24 @@ async function buildConsolidatedDailyProfitSeries(
     Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
   >();
   let adByStoreDay = new Map<string, number>();
-  if (liveKeySet.size > 0) {
-    const liveSlice = sliceFromDateKeys([...liveKeySet].sort(), tzNorm);
-    [ordersByStoreDay, adByStoreDay] = await Promise.all([
-      aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone),
-      aggregateDailyAdSpendByStore(storeOids, liveSlice, storeTimeZone),
+  {
+    const liveSlice =
+      liveKeySet.size > 0
+        ? sliceFromDateKeys([...liveKeySet].sort(), tzNorm)
+        : null;
+    const [orders, ads] = await Promise.all([
+      liveSlice
+        ? aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone)
+        : Promise.resolve(
+            new Map<
+              string,
+              Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
+            >(),
+          ),
+      aggregateDailyAdSpendByStore(storeOids, slice, storeTimeZone),
     ]);
+    ordersByStoreDay = orders;
+    adByStoreDay = ads;
   }
 
   const zeros = {
@@ -1655,23 +1666,25 @@ async function buildConsolidatedDailyProfitSeries(
         if (dateKey > killKey) continue;
       }
 
-      let profit: number;
-      let revenue: number;
-      if (snap && dateKey < todayKey) {
-        profit = snap.netProfit;
-        revenue = snap.revenue;
-      } else {
-        const o = ordersByStoreDay.get(storeDay) ?? zeros;
-        const hasEntry = adByStoreDay.has(storeDay);
-        const ad = hasEntry ? adByStoreDay.get(storeDay)! : 0;
-        const storeOpEx = sumLoadedExpensesForDay(
-          expenseRows,
-          dateKey,
-          meta.storeId,
-        );
-        profit = calcDailyProfit(o, hasEntry ? ad : 0, storeOpEx);
-        revenue = o.revenue;
-      }
+      const o =
+        snap && dateKey < todayKey
+          ? {
+              revenue: snap.revenue,
+              cogs: snap.cogs,
+              shipping: snap.shipping,
+              fees: snap.fees,
+              refunds: snap.refunds,
+            }
+          : (ordersByStoreDay.get(storeDay) ?? zeros);
+      const hasEntry = adByStoreDay.has(storeDay);
+      const ad = hasEntry ? adByStoreDay.get(storeDay)! : 0;
+      const storeOpEx = sumLoadedExpensesForDay(
+        expenseRows,
+        dateKey,
+        meta.storeId,
+      );
+      const profit = calcDailyProfit(o, hasEntry ? ad : 0, storeOpEx);
+      const revenue = o.revenue;
       byStore.push({
         storeId: meta.storeId,
         name: meta.name,
@@ -1740,17 +1753,85 @@ function dayKeysInSlice(slice: PeriodSlice, storeTimeZone?: string | null): stri
   return keys;
 }
 
+/**
+ * Slice para dias “live” no hybrid DailyMetric.
+ * Só omite `specificDates` quando a lista é um intervalo civil contínuo —
+ * senão um range [min,max] puxava dias já somados nos snapshots (double-count).
+ */
 function sliceFromDateKeys(
   dateKeys: string[],
   storeTimeZone: string,
 ): PeriodSlice {
-  const sorted = [...dateKeys].sort();
-  const start = zonedStartOfDay(sorted[0], storeTimeZone);
-  const end = zonedEndOfDay(sorted[sorted.length - 1], storeTimeZone);
-  if (sorted.length <= 31) {
-    return { start, end, specificDates: sorted };
+  const sorted = [...new Set(dateKeys)].sort();
+  if (!sorted.length) {
+    const fallback = zonedStartOfDay(
+      dateKeyInTimezone(new Date(), storeTimeZone),
+      storeTimeZone,
+    );
+    return { start: fallback, end: fallback, specificDates: [] };
   }
-  return { start, end };
+  const startKey = sorted[0]!;
+  const endKey = sorted[sorted.length - 1]!;
+  const start = zonedStartOfDay(startKey, storeTimeZone);
+  const end = zonedEndOfDay(endKey, storeTimeZone);
+  const span = dayKeysBetweenInTimezone(start, end, storeTimeZone);
+  if (span.length === sorted.length) {
+    return {
+      start,
+      end,
+      startDateKey: startKey,
+      endDateKey: endKey,
+    };
+  }
+  return {
+    start,
+    end,
+    startDateKey: startKey,
+    endDateKey: endKey,
+    specificDates: sorted,
+  };
+}
+
+/** Agrega Orders em chunks de specificDates (evita $or gigante). */
+async function aggregateStoreAggsFromOrdersForKeys(
+  wsId: mongoose.Types.ObjectId,
+  stores: StoreCogsCtx[],
+  liveKeys: string[],
+  sharedTimeZone: string | null | undefined,
+  tz: string,
+): Promise<Map<string, StoreAgg>> {
+  const sorted = [...new Set(liveKeys)].sort();
+  if (!sorted.length) return new Map();
+
+  const slice = sliceFromDateKeys(sorted, tz);
+  if (!slice.specificDates?.length) {
+    return aggregateStoreAggsFromOrders(wsId, stores, slice, sharedTimeZone);
+  }
+
+  const CHUNK = 31;
+  const merged = new Map<string, StoreAgg>();
+  for (const s of stores) merged.set(String(s._id), emptyStoreAgg());
+
+  for (let i = 0; i < sorted.length; i += CHUNK) {
+    const chunk = sorted.slice(i, i + CHUNK);
+    const part = await aggregateStoreAggsFromOrders(
+      wsId,
+      stores,
+      sliceFromDateKeys(chunk, tz),
+      sharedTimeZone,
+    );
+    for (const [sid, live] of part) {
+      const agg = merged.get(sid) ?? emptyStoreAgg();
+      agg.revenue += live.revenue;
+      agg.orders += live.orders;
+      agg.cogs += live.cogs;
+      agg.shipping += live.shipping;
+      agg.fees += live.fees;
+      agg.refunds += live.refunds;
+      merged.set(sid, agg);
+    }
+  }
+  return merged;
 }
 
 async function buildDailyProfitSeries(
@@ -1808,28 +1889,33 @@ async function buildDailyProfitSeries(
   let adByDay = new Map<string, number>();
   let chargebacksByDay = new Map<string, number>();
 
-  if (liveKeys.length > 0) {
-    const liveSlice =
-      tz && liveKeys.length
-        ? sliceFromDateKeys([...liveKeys].sort(), tz)
-        : slice;
-    const [orders, ads, cbs] = await Promise.all([
-      aggregateDailyOrders(
-        wsId,
-        storeOids,
-        liveSlice,
-        storeTimeZone,
-        cogsMode,
-      ),
-      aggregateDailyAdSpend(storeOids, liveSlice, storeTimeZone),
-      storeTimeZone
-        ? sumChargebacksByDayKey(storeOids, liveSlice, storeTimeZone)
-        : Promise.resolve(new Map<string, number>()),
-    ]);
-    orderByDay = orders;
-    adByDay = ads;
-    chargebacksByDay = cbs;
-  }
+  const [orders, ads, cbs] = await Promise.all([
+    liveKeys.length > 0
+      ? aggregateDailyOrders(
+          wsId,
+          storeOids,
+          tz ? sliceFromDateKeys([...liveKeys].sort(), tz) : slice,
+          storeTimeZone,
+          cogsMode,
+        )
+      : Promise.resolve(
+          new Map<
+            string,
+            Pick<
+              StoreAgg,
+              "revenue" | "cogs" | "shipping" | "fees" | "refunds" | "orders"
+            >
+          >(),
+        ),
+    /** Ads/CB no período inteiro — lucro do snap usa componentes + ads live (como os KPIs). */
+    aggregateDailyAdSpend(storeOids, slice, storeTimeZone),
+    storeTimeZone
+      ? sumChargebacksByDayKey(storeOids, slice, storeTimeZone)
+      : Promise.resolve(new Map<string, number>()),
+  ]);
+  orderByDay = orders;
+  adByDay = ads;
+  chargebacksByDay = cbs;
 
   const periodStart =
     slice.startDateKey ??
@@ -1845,20 +1931,15 @@ async function buildDailyProfitSeries(
   const finalKeys = [...keySet].sort();
 
   return finalKeys.map((dateKey) => {
-    if (coveredHist.has(dateKey)) {
-      const snap = snapsByDate.get(dateKey)!;
-      return {
-        dateKey,
-        label: formatDateKeyLabel(dateKey),
-        dateLabel: formatDateKeyLabel(dateKey, { withYear: true }),
-        profit: snap.netProfit,
-        profitFmt: fmtMoney(snap.netProfit),
-        revenue: snap.revenue,
-        revenueFmt: fmtMoney(snap.revenue),
-      };
-    }
-
-    const o = orderByDay.get(dateKey) ?? zeroAgg;
+    const o = coveredHist.has(dateKey)
+      ? {
+          revenue: snapsByDate.get(dateKey)!.revenue,
+          cogs: snapsByDate.get(dateKey)!.cogs,
+          shipping: snapsByDate.get(dateKey)!.shipping,
+          fees: snapsByDate.get(dateKey)!.fees,
+          refunds: snapsByDate.get(dateKey)!.refunds,
+        }
+      : (orderByDay.get(dateKey) ?? zeroAgg);
     const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
     const dayOpEx = sumLoadedExpensesForDay(
       expenseRows,
@@ -1971,9 +2052,7 @@ async function buildStoreDailyMetrics(
             cogsDayOpts,
           )
         : Promise.resolve(new Map()),
-      liveKeys.length > 0
-        ? aggregateDailyAdSpend([storeOid], liveSlice, storeTimeZone)
-        : Promise.resolve(new Map<string, number>()),
+      aggregateDailyAdSpend([storeOid], slice, storeTimeZone),
       liveKeys.length > 0
         ? loadDailySessionCountsForSlice(
             storeOid,
@@ -1990,68 +2069,36 @@ async function buildStoreDailyMetrics(
   return dateKeys
     .map((dateKey) => {
       const snap = snapByDay.get(dateKey);
-      if (snap) {
-        const o = {
-          revenue: snap.revenue,
-          cogs: snap.cogs,
-          shipping: snap.shipping,
-          fees: snap.fees,
-          refunds: snap.refunds,
-          orders: snap.orders,
-        };
-        const ad = snap.adSpend;
-        const dayOpEx = snap.operatingExpenses;
-        const profit = snap.netProfit;
-        const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
-        const dayNeedsManual =
-          cogsMode === "day" && (!fromKey || dateKey >= fromKey);
-        const missingCogs =
-          dayNeedsManual && o.orders > 0 && o.cogs === 0
-            ? 1
-            : missingCogsByDay.get(dateKey) ?? 0;
-        let profitTitle = formatProfitBreakdown(o, ad, fmtMoney, {
-          adSpendKnown: true,
-          operatingExpenses: dayOpEx,
-          chargebacks: snap.chargebacks,
-        });
-        if (missingCogs > 0) {
-          profitTitle += ` · ${missingCogsNote(missingCogs, cogsMode ?? undefined)}`;
-        }
-        return {
-          dateKey,
-          dateLabel: formatDateKeyLabel(dateKey, { withYear: true }),
-          revenue: fmtMoney(o.revenue),
-          cogs: fmtMoney(o.cogs),
-          refunds: fmtMoney(o.refunds),
-          adSpend: formatAdSpendCell(true, ad, fmtMoney),
-          profit: fmtMoney(profit),
-          profitPositive: profit >= 0,
-          profitTitle,
-          ordersCount: o.orders,
-          sessions: snap.sessions,
-          atcPct:
-            snap.atcPct != null ? formatPercent(snap.atcPct) : "—",
-          checkoutPct: "—",
-          cvrPct:
-            snap.cvrPct != null ? formatPercent(snap.cvrPct) : "—",
-        };
-      }
-
-      const o = orderByDay.get(dateKey) ?? {
-        revenue: 0,
-        cogs: 0,
-        shipping: 0,
-        fees: 0,
-        refunds: 0,
-        orders: 0,
-      };
+      const o = snap
+        ? {
+            revenue: snap.revenue,
+            cogs: snap.cogs,
+            shipping: snap.shipping,
+            fees: snap.fees,
+            refunds: snap.refunds,
+            orders: snap.orders,
+          }
+        : (orderByDay.get(dateKey) ?? {
+            revenue: 0,
+            cogs: 0,
+            shipping: 0,
+            fees: 0,
+            refunds: 0,
+            orders: 0,
+          });
       const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
       const dayOpEx = sumLoadedExpensesForDay(
         expenseRows,
         dateKey,
         String(storeOid),
       );
-      const profit = calcDailyProfit(o, hasEntry ? ad : 0, dayOpEx);
+      const dayCb = snap?.chargebacks ?? 0;
+      const profit = calcDailyProfit(
+        o,
+        hasEntry ? ad : 0,
+        dayOpEx,
+        snap ? dayCb : 0,
+      );
       const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
       const dayNeedsManual =
         cogsMode === "day" && (!fromKey || dateKey >= fromKey);
@@ -2059,14 +2106,15 @@ async function buildStoreDailyMetrics(
         dayNeedsManual && o.orders > 0 && o.cogs === 0
           ? 1
           : missingCogsByDay.get(dateKey) ?? 0;
-      const sess = sessionsByDay.get(dateKey);
       let profitTitle = formatProfitBreakdown(o, ad, fmtMoney, {
         adSpendKnown: hasEntry,
         operatingExpenses: dayOpEx,
+        chargebacks: snap ? dayCb : 0,
       });
       if (missingCogs > 0) {
         profitTitle += ` · ${missingCogsNote(missingCogs, cogsMode ?? undefined)}`;
       }
+      const sess = sessionsByDay.get(dateKey);
       return {
         dateKey,
         dateLabel: formatDateKeyLabel(dateKey, { withYear: true }),
@@ -2078,12 +2126,26 @@ async function buildStoreDailyMetrics(
         profitPositive: profit >= 0,
         profitTitle,
         ordersCount: o.orders,
-        sessions: sess?.sessions ?? null,
-        atcPct: sess ? pctFmtFromCounts(sess.cart, sess.sessions) : "—",
-        checkoutPct: sess
-          ? pctFmtFromCounts(sess.checkout, sess.sessions)
-          : "—",
-        cvrPct: sess ? pctFmtFromCounts(sess.completed, sess.sessions) : "—",
+        sessions: snap ? snap.sessions : (sess?.sessions ?? null),
+        atcPct: snap
+          ? snap.atcPct != null
+            ? formatPercent(snap.atcPct)
+            : "—"
+          : sess
+            ? pctFmtFromCounts(sess.cart, sess.sessions)
+            : "—",
+        checkoutPct: snap
+          ? "—"
+          : sess
+            ? pctFmtFromCounts(sess.checkout, sess.sessions)
+            : "—",
+        cvrPct: snap
+          ? snap.cvrPct != null
+            ? formatPercent(snap.cvrPct)
+            : "—"
+          : sess
+            ? pctFmtFromCounts(sess.completed, sess.sessions)
+            : "—",
       };
     })
     .reverse();
@@ -2175,12 +2237,25 @@ async function buildStoreSparklinesBatch(
     Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
   >();
   let adByStoreDay = new Map<string, number>();
-  if (liveKeySet.size > 0) {
-    const liveSlice = sliceFromDateKeys([...liveKeySet].sort(), tz);
-    [ordersByStoreDay, adByStoreDay] = await Promise.all([
-      aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone),
-      aggregateDailyAdSpendByStore(storeOids, liveSlice, storeTimeZone),
+  {
+    const liveSlice =
+      liveKeySet.size > 0
+        ? sliceFromDateKeys([...liveKeySet].sort(), tz)
+        : null;
+    const clippedSlice = sliceFromDateKeys(tailKeys, tz);
+    const [orders, ads] = await Promise.all([
+      liveSlice
+        ? aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone)
+        : Promise.resolve(
+            new Map<
+              string,
+              Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
+            >(),
+          ),
+      aggregateDailyAdSpendByStore(storeOids, clippedSlice, storeTimeZone),
     ]);
+    ordersByStoreDay = orders;
+    adByStoreDay = ads;
   }
 
   const zeroRow = () => ({
@@ -2195,9 +2270,18 @@ async function buildStoreSparklinesBatch(
     const sid = String(s._id);
     const profits = tailKeys.map((dateKey) => {
       const snap = byStoreDay.get(`${dateKey}:${sid}`);
-      if (snap) return snap.netProfit;
-      const o = ordersByStoreDay.get(storeDayKey(dateKey, sid)) ?? zeroRow();
-      const { amount: ad, hasEntry } = resolveDailyAdSpend(adByStoreDay, dateKey);
+      const storeDay = storeDayKey(dateKey, sid);
+      const o = snap
+        ? {
+            revenue: snap.revenue,
+            cogs: snap.cogs,
+            shipping: snap.shipping,
+            fees: snap.fees,
+            refunds: snap.refunds,
+          }
+        : (ordersByStoreDay.get(storeDay) ?? zeroRow());
+      const hasEntry = adByStoreDay.has(storeDay);
+      const ad = hasEntry ? adByStoreDay.get(storeDay)! : 0;
       return calcDailyProfit(o, hasEntry ? ad : 0, 0);
     });
     out.set(sid, profits);
@@ -2444,6 +2528,7 @@ export type PnlLine = {
   refunds: number;
   adSpend: number;
   operatingExpenses: number;
+  chargebacks: number;
   netProfit: number;
   margin: number;
   orders: number;
@@ -2509,6 +2594,7 @@ export async function buildWorkspacePnl(
       refunds: 0,
       adSpend: 0,
       operatingExpenses: 0,
+      chargebacks: 0,
       netProfit: 0,
       margin: 0,
       orders: 0,
@@ -2604,6 +2690,7 @@ export async function buildWorkspacePnl(
       refunds: a.refunds,
       adSpend: storeAd,
       operatingExpenses,
+      chargebacks: storeCb,
       netProfit,
       margin: a.revenue > 0 ? (netProfit / a.revenue) * 100 : 0,
       orders: a.orders,
@@ -2672,6 +2759,7 @@ export async function buildWorkspacePnl(
       ...t,
       adSpend: totalAdSpend,
       operatingExpenses: totalOperatingExpenses,
+      chargebacks: totalChargebacks,
       netProfit,
       margin: t.revenue > 0 ? (netProfit / t.revenue) * 100 : 0,
     },
@@ -3097,10 +3185,25 @@ export async function buildWorkspaceSummary(
       orders: 0,
     };
     if (liveKeys.length) {
-      livePart = await aggregateOrdersFromOrders(
-        sliceFromDateKeys([...liveKeys].sort(), storeTz),
-        storeOid,
-      );
+      const sortedLive = [...new Set(liveKeys)].sort();
+      const liveSlice = sliceFromDateKeys(sortedLive, storeTz);
+      if (!liveSlice.specificDates?.length) {
+        livePart = await aggregateOrdersFromOrders(liveSlice, storeOid);
+      } else {
+        const CHUNK = 31;
+        for (let i = 0; i < sortedLive.length; i += CHUNK) {
+          const chunk = await aggregateOrdersFromOrders(
+            sliceFromDateKeys(sortedLive.slice(i, i + CHUNK), storeTz),
+            storeOid,
+          );
+          livePart.revenue += chunk.revenue;
+          livePart.cogs += chunk.cogs;
+          livePart.shipping += chunk.shipping;
+          livePart.fees += chunk.fees;
+          livePart.refunds += chunk.refunds;
+          livePart.orders += chunk.orders;
+        }
+      }
     }
 
     return {

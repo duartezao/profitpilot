@@ -56,17 +56,20 @@ export function ConsolidatedCashSection({
         </div>
         <div className="rounded-lg border border-border bg-background p-4 sm:p-5">
           <p className="text-[13px] font-medium text-muted-foreground">
-            Com a receber
+            A receber (Shopify)
           </p>
           <p
             className="mt-1 text-2xl font-semibold tabular-nums"
-            title={totals.projectedCashTitle}
+            title={totals.shopifyPendingFmt}
             data-sensitive
           >
-            {totals.projectedCashFmt}
+            {totals.shopifyPendingFmt}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Em conta + Shopify por pagar
+            Conta + a receber:{" "}
+            <span className="font-medium text-foreground tabular-nums" data-sensitive>
+              {totals.projectedCashFmt}
+            </span>
           </p>
         </div>
         <div className="rounded-lg border border-border bg-background p-4 sm:p-5">

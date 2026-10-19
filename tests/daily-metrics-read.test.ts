@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   aggregateSnapsByDate,
+  dateKeysFormContiguousSpan,
   fullyCoveredHistKeys,
   sumDayAggs,
   type DailyMetricSnap,
@@ -67,5 +68,16 @@ describe("daily-metrics-read", () => {
     const sum = sumDayAggs(byDate, ["2026-06-01", "2026-06-02"]);
     assert.equal(sum.revenue, 300);
     assert.equal(sum.netProfit, 30);
+  });
+
+  it("detects contiguous vs gapped live day keys (hybrid double-count guard)", () => {
+    assert.equal(
+      dateKeysFormContiguousSpan(["2026-06-01", "2026-06-02", "2026-06-03"]),
+      true,
+    );
+    assert.equal(
+      dateKeysFormContiguousSpan(["2026-06-01", "2026-06-03"]),
+      false,
+    );
   });
 });
