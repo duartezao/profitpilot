@@ -211,7 +211,7 @@ export async function syncAdAccountsSpendForStore(
 ): Promise<ApiAdSpendSyncResult> {
   const { Store } = await import("@/models/Store");
   const store = await Store.findById(storeId)
-    .select("workspaceId ianaTimezone")
+    .select("workspaceId ianaTimezone importStartDate createdAt")
     .lean();
   if (!store) {
     return {
@@ -229,6 +229,20 @@ export async function syncAdAccountsSpendForStore(
   const storeTz = normalizeStoreTimezone(store.ianaTimezone);
   const dateKey =
     options?.dateKey ?? dateKeyInTimezone(new Date(), storeTz);
+
+  const importFloor = store.importStartDate
+    ? dateKeyInTimezone(new Date(store.importStartDate), storeTz)
+    : store.createdAt
+      ? dateKeyInTimezone(new Date(store.createdAt), storeTz)
+      : null;
+  if (importFloor && dateKey < importFloor) {
+    return {
+      storeId,
+      today: dateKey,
+      updated: false,
+      skippedReason: "no_data",
+    };
+  }
 
   const accounts = await loadSyncAdAccountsForStore(store._id);
   if (!accounts.length) {
@@ -369,9 +383,21 @@ export async function syncAdAccountsSpendForStore(
     };
   }
 
-  const campaignKeys = options?.campaignDateKeys?.length
+  const campaignKeysRaw = options?.campaignDateKeys?.length
     ? options.campaignDateKeys
     : [dateKey];
+  const campaignKeys = importFloor
+    ? campaignKeysRaw.filter((k) => k >= importFloor)
+    : campaignKeysRaw;
+  if (!campaignKeys.length && !canWriteSpend) {
+    return {
+      storeId,
+      today: dateKey,
+      updated: false,
+      campaignsSynced: 0,
+      skippedReason: "no_data",
+    };
+  }
   const campaignOptions = {
     ...(options?.campaignPlatforms?.length
       ? { platforms: options.campaignPlatforms }
@@ -380,24 +406,26 @@ export async function syncAdAccountsSpendForStore(
     force: Boolean(options?.force) || googleAllowedThisCycle || !googleThrottleToday,
   };
   let campaignsSynced = 0;
-  try {
-    if (campaignKeys.length === 1) {
-      const r = await syncAdCampaignMetricsForStoreDay(
-        storeId,
-        campaignKeys[0],
-        campaignOptions,
-      );
-      campaignsSynced = r.campaignsSynced;
-    } else {
-      const r = await syncAdCampaignMetricsForStoreDays(
-        storeId,
-        campaignKeys,
-        campaignOptions,
-      );
-      campaignsSynced = r.campaignsSynced;
+  if (campaignKeys.length > 0) {
+    try {
+      if (campaignKeys.length === 1) {
+        const r = await syncAdCampaignMetricsForStoreDay(
+          storeId,
+          campaignKeys[0]!,
+          campaignOptions,
+        );
+        campaignsSynced = r.campaignsSynced;
+      } else {
+        const r = await syncAdCampaignMetricsForStoreDays(
+          storeId,
+          campaignKeys,
+          campaignOptions,
+        );
+        campaignsSynced = r.campaignsSynced;
+      }
+    } catch {
+      /* campanhas — não bloqueia spend */
     }
-  } catch {
-    /* campanhas — não bloqueia spend */
   }
 
   // Marca sync só no fim (gasto + campanhas) — senão o throttle mata as campanhas.

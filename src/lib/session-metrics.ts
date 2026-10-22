@@ -101,10 +101,7 @@ function resolveSyncRange(
     fromKey = addDaysToDateKey(todayKey, -60, tz);
   }
 
-  if (fromKey > yesterdayKey) {
-    fromKey = yesterdayKey;
-  }
-
+  // Respeitar piso de importação — não puxar sessões para trás de fromKey.
   const from = zonedStartOfDay(fromKey, tz);
   const to = zonedEndOfDay(yesterdayKey, tz);
 
