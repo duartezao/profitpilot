@@ -27,6 +27,7 @@ import { formatDateInput, parseDateInput } from "@/lib/period";
 import { resolveAdSpendRange } from "@/lib/ad-spend";
 import { findStoreForUser } from "@/lib/store-scope";
 import { parseLocaleNumber } from "@/lib/parse-number";
+import { upsertDayMetrics } from "@/lib/daily-metrics-snapshot";
 
 export type CostState = { ok?: boolean; error?: string };
 
@@ -340,6 +341,7 @@ export async function saveManualCogsDayAction(
       new mongoose.Types.ObjectId(user.id),
       note,
     );
+    await upsertDayMetrics(user.workspaceId, String(store._id), date);
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falha ao guardar COGS." };
   }
