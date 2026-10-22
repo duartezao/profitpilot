@@ -1,7 +1,8 @@
 import "server-only";
-import type { Types } from "mongoose";
+import mongoose, { type Types } from "mongoose";
 import type { CurrentUser } from "@/lib/auth";
 import { ManualAdSpend } from "@/models/ManualAdSpend";
+import { AdCampaignDay } from "@/models/AdCampaignDay";
 import { Order } from "@/models/Order";
 import {
   addDays,
@@ -36,7 +37,11 @@ export type AdSpendRange = {
   toKey: string;
 };
 
-/** Intervalo de dias a preencher: desde a data de importação (setup) até ontem (fuso da loja). */
+/**
+ * Intervalo de dias a preencher: desde a data de importação (setup) até ontem
+ * (fuso da loja). Se a importação começa hoje ou no futuro relativo a ontem,
+ * `fromKey > toKey` — calendário/vazio, **sem** puxar dias anteriores ao piso.
+ */
 export function resolveAdSpendRange(
   importStartDate?: Date | null,
   storeCreatedAt?: Date | null,
@@ -53,10 +58,6 @@ export function resolveAdSpendRange(
     fromKey = dateKeyInTimezone(new Date(storeCreatedAt), tz);
   } else {
     fromKey = addDaysToDateKey(todayKey, -AD_SPEND_LOOKBACK_DAYS, tz);
-  }
-
-  if (fromKey > yesterdayKey) {
-    fromKey = yesterdayKey;
   }
 
   return {
@@ -561,4 +562,37 @@ export async function listAdSpendForExport(
   });
 
   return { rows, storeName: store.name };
+}
+
+/**
+ * Apaga ad spend + métricas de campanha com dateKey anterior ao piso de importação.
+ * Usado ao reconfigurar a data de importação (nada antes do piso deve contar).
+ */
+export async function purgeAdDataBeforeImportDate(
+  storeId: Types.ObjectId | string,
+  importFloorKey: string,
+): Promise<{ spendDeleted: number; campaignsDeleted: number }> {
+  if (!importFloorKey) {
+    return { spendDeleted: 0, campaignsDeleted: 0 };
+  }
+  const sid =
+    typeof storeId === "string"
+      ? new mongoose.Types.ObjectId(storeId)
+      : storeId;
+
+  const [spend, campaigns] = await Promise.all([
+    ManualAdSpend.deleteMany({
+      storeId: sid,
+      dateKey: { $lt: importFloorKey },
+    }),
+    AdCampaignDay.deleteMany({
+      storeId: sid,
+      dateKey: { $lt: importFloorKey },
+    }),
+  ]);
+
+  return {
+    spendDeleted: spend.deletedCount ?? 0,
+    campaignsDeleted: campaigns.deletedCount ?? 0,
+  };
 }

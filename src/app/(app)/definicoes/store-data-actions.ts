@@ -25,6 +25,7 @@ import {
   deleteOrdersBeforeImportDate,
   recalculateStoreOrderFees,
 } from "@/lib/store-fees-recalc";
+import { purgeAdDataBeforeImportDate } from "@/lib/ad-spend";
 import { syncsShopifyProductCosts } from "@/lib/cogs-modes";
 import {
   backfillAllOrderShippingCountriesForStore,
@@ -258,6 +259,13 @@ export async function reconfigureStoreImportAction(
     },
   );
 
+  const adsPurged = await purgeAdDataBeforeImportDate(store._id, newFloorKey);
+  const { DailyMetric } = await import("@/models/DailyMetric");
+  const dmPurged = await DailyMetric.deleteMany({
+    storeId: store._id,
+    dateKey: { $lt: newFloorKey },
+  });
+
   let recalculated = 0;
   if (d.recalculateFees) {
     recalculated = await recalculateStoreOrderFees(d.storeId);
@@ -274,6 +282,16 @@ export async function reconfigureStoreImportAction(
   if (trimmed > 0) {
     parts.push(
       `${trimmed} encomenda${trimmed === 1 ? "" : "s"} anteriores à nova data removidas.`,
+    );
+  }
+  if (adsPurged.spendDeleted > 0 || adsPurged.campaignsDeleted > 0) {
+    parts.push(
+      `Ads anteriores ao piso removidos (${adsPurged.spendDeleted} dias de spend, ${adsPurged.campaignsDeleted} campanhas).`,
+    );
+  }
+  if ((dmPurged.deletedCount ?? 0) > 0) {
+    parts.push(
+      `${dmPurged.deletedCount} snapshot${dmPurged.deletedCount === 1 ? "" : "s"} diário(s) anteriores removido(s).`,
     );
   }
 
