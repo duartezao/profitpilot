@@ -465,25 +465,27 @@ async function aggregateStoreAggs(
     agg.refunds += snap.refunds;
   }
 
-  if (liveKeySet.size === 0) return result;
-
-  const liveMap = await aggregateStoreAggsFromOrdersForKeys(
-    wsId,
-    stores,
-    [...liveKeySet],
-    sharedTimeZone,
-    tz,
-  );
-  for (const [sid, live] of liveMap) {
-    const agg = result.get(sid) ?? emptyStoreAgg();
-    agg.revenue += live.revenue;
-    agg.orders += live.orders;
-    agg.cogs += live.cogs;
-    agg.shipping += live.shipping;
-    agg.fees += live.fees;
-    agg.refunds += live.refunds;
-    result.set(sid, agg);
+  if (liveKeySet.size > 0) {
+    const liveMap = await aggregateStoreAggsFromOrdersForKeys(
+      wsId,
+      stores,
+      [...liveKeySet],
+      sharedTimeZone,
+      tz,
+    );
+    for (const [sid, live] of liveMap) {
+      const agg = result.get(sid) ?? emptyStoreAgg();
+      agg.revenue += live.revenue;
+      agg.orders += live.orders;
+      agg.cogs += live.cogs;
+      agg.shipping += live.shipping;
+      agg.fees += live.fees;
+      agg.refunds += live.refunds;
+      result.set(sid, agg);
+    }
   }
+
+  await overwriteDayModeStoreCogs(wsId, stores, slice, sharedTimeZone, result);
   return result;
 }
 
@@ -564,8 +566,6 @@ async function aggregateStoreAggsFromOrders(
   const orderOids = stores
     .filter((s) => storeCogsMode(s) === "order")
     .map((s) => s._id);
-  const dayStores = stores.filter((s) => storeCogsMode(s) === "day");
-
   if (shopifyVariantOids.length) {
     const cogsRows = await Order.aggregate<{
       _id: mongoose.Types.ObjectId;
@@ -604,6 +604,45 @@ async function aggregateStoreAggsFromOrders(
     }
   }
 
+  await overwriteDayModeStoreCogs(
+    wsId,
+    stores,
+    slice,
+    sharedTimeZone,
+    result,
+  );
+
+  await Promise.all(
+    stores
+      .filter((s) => appliesEuCategoryFees(storeCogsMode(s)))
+      .map(async (s) => {
+        const tz = normalizeStoreTimezone(s.ianaTimezone);
+        const fees = await sumEuCategoryFeesForPeriod(
+          [s._id],
+          slice,
+          sharedTimeZone ?? tz,
+        );
+        result.get(String(s._id))!.cogs += fees;
+      }),
+  );
+
+  return result;
+}
+
+/**
+ * COGS modo `day` vem de ManualCogsDay — nunca confiar no cogs do snapshot
+ * (pode ter ficado 0 se o dia foi snapshotted antes do registo manual).
+ */
+async function overwriteDayModeStoreCogs(
+  wsId: mongoose.Types.ObjectId,
+  stores: StoreCogsCtx[],
+  slice: PeriodSlice,
+  sharedTimeZone: string | null | undefined,
+  result: Map<string, StoreAgg>,
+): Promise<void> {
+  const dayStores = stores.filter((s) => storeCogsMode(s) === "day");
+  if (!dayStores.length) return;
+
   await Promise.all(
     dayStores.map(async (s) => {
       const tz = normalizeStoreTimezone(s.ianaTimezone);
@@ -612,7 +651,8 @@ async function aggregateStoreAggsFromOrders(
       const priorMode = isCogsMode(s.cogsModePriorToDayForce ?? "")
         ? (s.cogsModePriorToDayForce as CogsMode)
         : "shopify";
-      const agg = result.get(String(s._id))!;
+      const agg = result.get(String(s._id));
+      if (!agg) return;
 
       if (!fromKey) {
         agg.cogs = await sumManualCogsForPeriod([s._id], slice, zone);
@@ -658,22 +698,6 @@ async function aggregateStoreAggsFromOrders(
       agg.cogs = cogs;
     }),
   );
-
-  await Promise.all(
-    stores
-      .filter((s) => appliesEuCategoryFees(storeCogsMode(s)))
-      .map(async (s) => {
-        const tz = normalizeStoreTimezone(s.ianaTimezone);
-        const fees = await sumEuCategoryFeesForPeriod(
-          [s._id],
-          slice,
-          sharedTimeZone ?? tz,
-        );
-        result.get(String(s._id))!.cogs += fees;
-      }),
-  );
-
-  return result;
 }
 
 function calcProfit(
@@ -1531,6 +1555,8 @@ async function buildConsolidatedDailyProfitSeries(
     importStartDate?: Date | null;
     createdAt?: Date;
     cogsMode?: string | null;
+    cogsDayFromKey?: string | null;
+    cogsModePriorToDayForce?: string | null;
     ianaTimezone?: string | null;
     operationStatus?: string | null;
     operationKilledAt?: Date | null;
@@ -1585,17 +1611,20 @@ async function buildConsolidatedDailyProfitSeries(
     }
   }
 
+  const dayModeStores = stores.filter((s) => storeCogsMode(s) === "day");
   let ordersByStoreDay = new Map<
     string,
     Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
   >();
   let adByStoreDay = new Map<string, number>();
+  let chargebacksByDay = new Map<string, number>();
+  const dayModeManualCogs = new Map<string, number>();
   {
     const liveSlice =
       liveKeySet.size > 0
         ? sliceFromDateKeys([...liveKeySet].sort(), tzNorm)
         : null;
-    const [orders, ads] = await Promise.all([
+    const [orders, ads, cbs] = await Promise.all([
       liveSlice
         ? aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone)
         : Promise.resolve(
@@ -1605,9 +1634,24 @@ async function buildConsolidatedDailyProfitSeries(
             >(),
           ),
       aggregateDailyAdSpendByStore(storeOids, slice, storeTimeZone),
+      storeTimeZone
+        ? sumChargebacksByDayKey(storeOids, slice, storeTimeZone)
+        : Promise.resolve(new Map<string, number>()),
+      (async () => {
+        await Promise.all(
+          dayModeStores.map(async (s) => {
+            const byDay = await sumManualCogsByDay(s._id, dateKeys);
+            const sid = String(s._id);
+            for (const [dk, amt] of byDay) {
+              dayModeManualCogs.set(storeDayKey(dk, sid), amt);
+            }
+          }),
+        );
+      })(),
     ]);
     ordersByStoreDay = orders;
     adByStoreDay = ads;
+    chargebacksByDay = cbs;
   }
 
   const zeros = {
@@ -1666,7 +1710,7 @@ async function buildConsolidatedDailyProfitSeries(
         if (dateKey > killKey) continue;
       }
 
-      const o =
+      let o =
         snap && dateKey < todayKey
           ? {
               revenue: snap.revenue,
@@ -1676,6 +1720,14 @@ async function buildConsolidatedDailyProfitSeries(
               refunds: snap.refunds,
             }
           : (ordersByStoreDay.get(storeDay) ?? zeros);
+
+      if (storeCogsMode(storeRef) === "day") {
+        const fromKey = storeRef.cogsDayFromKey ?? null;
+        if (!fromKey || dateKey >= fromKey) {
+          o = { ...o, cogs: dayModeManualCogs.get(storeDay) ?? 0 };
+        }
+      }
+
       const hasEntry = adByStoreDay.has(storeDay);
       const ad = hasEntry ? adByStoreDay.get(storeDay)! : 0;
       const storeOpEx = sumLoadedExpensesForDay(
@@ -1701,13 +1753,14 @@ async function buildConsolidatedDailyProfitSeries(
     }
 
     const workspaceOpEx = sumWorkspaceExpensesForDay(expenseRows, dateKey);
+    const dayCb = chargebacksByDay.get(dateKey) ?? 0;
     const hasActiveStore = byStore.length > 0;
 
     point.label = formatDateKeyLabel(dateKey);
     point.dateLabel = formatDateKeyLabel(dateKey, { withYear: true });
 
     if (hasActiveStore) {
-      totalProfit -= workspaceOpEx;
+      totalProfit -= workspaceOpEx + dayCb;
       point.profit = totalProfit;
       point.profitFmt = fmtMoney(totalProfit);
       point.revenue = totalRevenue;
@@ -1930,8 +1983,13 @@ async function buildDailyProfitSeries(
   for (const k of coveredHist) keySet.add(k);
   const finalKeys = [...keySet].sort();
 
+  const manualDayCogs =
+    cogsMode === "day" && storeOids.length === 1
+      ? await sumManualCogsByDay(storeOids[0]!, finalKeys)
+      : null;
+
   return finalKeys.map((dateKey) => {
-    const o = coveredHist.has(dateKey)
+    let o = coveredHist.has(dateKey)
       ? {
           revenue: snapsByDate.get(dateKey)!.revenue,
           cogs: snapsByDate.get(dateKey)!.cogs,
@@ -1940,6 +1998,9 @@ async function buildDailyProfitSeries(
           refunds: snapsByDate.get(dateKey)!.refunds,
         }
       : (orderByDay.get(dateKey) ?? zeroAgg);
+    if (manualDayCogs) {
+      o = { ...o, cogs: manualDayCogs.get(dateKey) ?? 0 };
+    }
     const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
     const dayOpEx = sumLoadedExpensesForDay(
       expenseRows,
@@ -2040,7 +2101,7 @@ async function buildStoreDailyMetrics(
       ? sliceFromDateKeys([...liveKeys].sort(), tz)
       : slice;
 
-  const [orderByDay, adByDay, sessionsByDay, missingCogsByDay] =
+  const [orderByDay, adByDay, sessionsByDay, missingCogsByDay, manualDayCogs] =
     await Promise.all([
       liveKeys.length > 0
         ? aggregateDailyOrders(
@@ -2064,12 +2125,15 @@ async function buildStoreDailyMetrics(
       cogsMode === "order" || cogsMode === "day"
         ? Promise.resolve(new Map<string, number>())
         : countMissingCogsByDay([storeOid], slice, storeTimeZone),
+      cogsMode === "day"
+        ? sumManualCogsByDay(storeOid, dateKeys)
+        : Promise.resolve(null as Map<string, number> | null),
     ]);
 
   return dateKeys
     .map((dateKey) => {
       const snap = snapByDay.get(dateKey);
-      const o = snap
+      let o = snap
         ? {
             revenue: snap.revenue,
             cogs: snap.cogs,
@@ -2086,6 +2150,10 @@ async function buildStoreDailyMetrics(
             refunds: 0,
             orders: 0,
           });
+      const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
+      if (manualDayCogs && (!fromKey || dateKey >= fromKey)) {
+        o = { ...o, cogs: manualDayCogs.get(dateKey) ?? 0 };
+      }
       const { amount: ad, hasEntry } = resolveDailyAdSpend(adByDay, dateKey);
       const dayOpEx = sumLoadedExpensesForDay(
         expenseRows,
@@ -2099,7 +2167,6 @@ async function buildStoreDailyMetrics(
         dayOpEx,
         snap ? dayCb : 0,
       );
-      const fromKey = cogsDayOpts?.cogsDayFromKey ?? null;
       const dayNeedsManual =
         cogsMode === "day" && (!fromKey || dateKey >= fromKey);
       const missingCogs =
@@ -2237,12 +2304,14 @@ async function buildStoreSparklinesBatch(
     Pick<StoreAgg, "revenue" | "cogs" | "shipping" | "fees" | "refunds">
   >();
   let adByStoreDay = new Map<string, number>();
+  const dayModeManualCogs = new Map<string, number>();
   {
     const liveSlice =
       liveKeySet.size > 0
         ? sliceFromDateKeys([...liveKeySet].sort(), tz)
         : null;
     const clippedSlice = sliceFromDateKeys(tailKeys, tz);
+    const dayModeStores = stores.filter((s) => storeCogsMode(s) === "day");
     const [orders, ads] = await Promise.all([
       liveSlice
         ? aggregateDailyOrdersByStore(wsId, stores, liveSlice, storeTimeZone)
@@ -2253,6 +2322,17 @@ async function buildStoreSparklinesBatch(
             >(),
           ),
       aggregateDailyAdSpendByStore(storeOids, clippedSlice, storeTimeZone),
+      (async () => {
+        await Promise.all(
+          dayModeStores.map(async (s) => {
+            const byDay = await sumManualCogsByDay(s._id, tailKeys);
+            const sid = String(s._id);
+            for (const [dk, amt] of byDay) {
+              dayModeManualCogs.set(storeDayKey(dk, sid), amt);
+            }
+          }),
+        );
+      })(),
     ]);
     ordersByStoreDay = orders;
     adByStoreDay = ads;
@@ -2268,10 +2348,11 @@ async function buildStoreSparklinesBatch(
 
   for (const s of stores) {
     const sid = String(s._id);
+    const fromKey = s.cogsDayFromKey ?? null;
     const profits = tailKeys.map((dateKey) => {
       const snap = byStoreDay.get(`${dateKey}:${sid}`);
       const storeDay = storeDayKey(dateKey, sid);
-      const o = snap
+      let o = snap
         ? {
             revenue: snap.revenue,
             cogs: snap.cogs,
@@ -2280,6 +2361,9 @@ async function buildStoreSparklinesBatch(
             refunds: snap.refunds,
           }
         : (ordersByStoreDay.get(storeDay) ?? zeroRow());
+      if (storeCogsMode(s) === "day" && (!fromKey || dateKey >= fromKey)) {
+        o = { ...o, cogs: dayModeManualCogs.get(storeDay) ?? 0 };
+      }
       const hasEntry = adByStoreDay.has(storeDay);
       const ad = hasEntry ? adByStoreDay.get(storeDay)! : 0;
       return calcDailyProfit(o, hasEntry ? ad : 0, 0);
@@ -3298,7 +3382,11 @@ export async function buildWorkspaceSummary(
       scoped ? effectiveChartSlice : chartSlice,
       fmtMoney,
       storeTz,
-      scoped ? scopedCogsMode : null,
+      scoped
+        ? scopedCogsMode
+        : stores.length === 1
+          ? storeCogsMode(stores[0]!)
+          : null,
       expenseRows,
       scopedStoreId,
     );
