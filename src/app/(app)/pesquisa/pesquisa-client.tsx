@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ExternalLink, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  ExternalLink,
+  Globe2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
 import type { ResearchItemView } from "@/lib/research";
 import {
@@ -206,9 +214,18 @@ export function PesquisaClient({
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        Product & Collection Research
-      </h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Product & Collection Research
+        </h1>
+        <Link
+          href="/pesquisa/mapa"
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
+        >
+          <Globe2 className="h-4 w-4" />
+          Mapa competitors (Google Ads)
+        </Link>
+      </div>
 
       {error && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
