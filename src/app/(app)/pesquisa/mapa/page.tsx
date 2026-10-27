@@ -6,7 +6,7 @@ import { getCompetitorMapData } from "@/lib/competitor-ads/discovery";
 import { MapaClient } from "./mapa-client";
 
 export const metadata: Metadata = {
-  title: "Mapa competitors · Pesquisa PR · ProfitPilot",
+  title: "Google Competitors · Pesquisa PR · ProfitPilot",
 };
 
 export const dynamic = "force-dynamic";
@@ -19,12 +19,7 @@ export default async function PesquisaMapaPage() {
   const canEdit = roleRank(user.role) >= roleRank("editor");
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">
-          Mapa competitors (Google Ads)
-        </h1>
-      </header>
+    <div className="flex w-full min-w-0 flex-col">
       <MapaClient
         companies={data.companies}
         domains={data.domains}

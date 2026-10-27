@@ -1,15 +1,25 @@
 import "server-only";
 import {
+  assertTransparencyAllowed,
+  getTransparencyProvider,
+  markTransparencyBlocked,
+  markTransparencyOk,
+} from "./transparency-gate";
+import {
   isNoiseLegalName,
   isPlausibleStoreHost,
   normalizeHost,
   normalizeLegalName,
 } from "./normalize";
+import {
+  searchSerpTransparencyByAdvertiser,
+  searchSerpTransparencyByDomain,
+} from "./serpapi-transparency";
 
 /**
- * Google Ads Transparency Center — RPC interno (best-effort, sem API oficial).
- * POST form-urlencoded `f.req=<json protobuf>` em /anji/_/rpc/...
- * Mundo: sem filtro de região (anywhere).
+ * Google Ads Transparency.
+ * Preferência: SerpAPI (SERPAPI_API_KEY) — sem flag no IP do servidor.
+ * Fallback: RPC directo só com COMPETITOR_TRANSPARENCY_DIRECT=1 (risco 429).
  */
 
 export type TransparencyCreative = {
@@ -98,14 +108,14 @@ async function postRpc(
     if (
       res.status === 429 ||
       /\/sorry\//i.test(res.url) ||
-      /unusual traffic|captcha/i.test(text.slice(0, 500))
+      /unusual traffic|captcha/i.test(text.slice(0, 500)) ||
+      text.startsWith("<!") ||
+      text.startsWith("<html")
     ) {
+      await markTransparencyBlocked(`http_${res.status}`);
       return { __blocked: true };
     }
     if (!res.ok) return null;
-    if (text.startsWith("<!") || text.startsWith("<html")) {
-      return { __blocked: true };
-    }
     try {
       return JSON.parse(text);
     } catch {
@@ -186,9 +196,11 @@ function parseCreative(raw: Record<string, unknown>): TransparencyCreative {
     }
     const videoOrHtml = (block3["1"] as { "4"?: string } | undefined)?.["4"];
     if (typeof videoOrHtml === "string") {
-      landingUrl = videoOrHtml.startsWith("http") ? videoOrHtml : null;
-      if (!previewUrl && videoOrHtml.includes("content.js")) {
-        previewUrl = videoOrHtml;
+      // content.js / googleusercontent = preview, NÃO URL de destino da loja
+      if (videoOrHtml.includes("content.js") || /googleusercontent|googlesyndication/i.test(videoOrHtml)) {
+        if (!previewUrl) previewUrl = videoOrHtml;
+      } else if (videoOrHtml.startsWith("http")) {
+        landingUrl = videoOrHtml;
       }
     }
   }
@@ -290,10 +302,21 @@ async function collectCreatives(opts: {
   blocked: boolean;
   note: string | null;
 }> {
+  const gate = await assertTransparencyAllowed();
+  if (!gate.ok) {
+    return {
+      creatives: [],
+      hosts: [],
+      blocked: true,
+      note: gate.reason,
+    };
+  }
+
   const all: TransparencyCreative[] = [];
   const hosts = new Set<string>();
   let cursor: string | null = null;
-  const maxPages = opts.maxPages ?? 5;
+  // Poucas páginas = menos flag. Previews content.js só sob pedido explícito.
+  const maxPages = opts.maxPages ?? 2;
 
   for (let page = 0; page < maxPages; page++) {
     if (page > 0) await sleep(400);
@@ -325,17 +348,25 @@ async function collectCreatives(opts: {
     if (!cursor) break;
   }
 
-  // Enrich subset of content.js previews (domínios de landing)
-  if (opts.enrichPreviews !== false) {
-    const previews = all
-      .map((c) => c.previewUrl)
-      .filter((u): u is string => Boolean(u && u.includes("content.js")))
-      .slice(0, 12);
+  // content.js = única forma de descobrir landing domains quando o RPC
+  // por advertiser não devolve campo 14. Poucos + espaçados = menos 429.
+  if (opts.enrichPreviews) {
+    const seenPreview = new Set<string>();
+    const previews: string[] = [];
+    for (const c of all) {
+      const u = c.previewUrl;
+      if (!u || !u.includes("content.js") || seenPreview.has(u)) continue;
+      seenPreview.add(u);
+      previews.push(u);
+      if (previews.length >= 10) break;
+    }
     for (const url of previews) {
       await enrichHostsFromPreview(url, hosts);
-      await sleep(250);
+      await sleep(1200);
     }
   }
+
+  if (all.length > 0) await markTransparencyOk();
 
   return {
     creatives: all,
@@ -345,14 +376,44 @@ async function collectCreatives(opts: {
   };
 }
 
+function emptyTransparency(
+  query: string,
+  mode: "domain" | "advertiser",
+  note: string,
+): TransparencyResult {
+  return {
+    query,
+    mode,
+    activeAdCount: 0,
+    advertisers: [],
+    advertiserIds: [],
+    creatives: [],
+    discoveredHosts: [],
+    note,
+  };
+}
+
 export async function searchTransparencyByDomain(
   domainInput: string,
 ): Promise<TransparencyResult> {
   const host = normalizeHost(domainInput);
+  const provider = getTransparencyProvider();
+
+  if (provider === "serpapi") {
+    return searchSerpTransparencyByDomain(host);
+  }
+  if (provider !== "direct") {
+    return emptyTransparency(
+      host,
+      "domain",
+      "Sem SERPAPI_API_KEY — ads auto desligados (evita flag no IP).",
+    );
+  }
+
   const collected = await collectCreatives({
     domain: host,
-    maxPages: 4,
-    enrichPreviews: true,
+    maxPages: 2,
+    enrichPreviews: false,
   });
 
   const advertisers = new Set<string>();
@@ -384,35 +445,41 @@ export async function searchTransparencyByAdvertiser(
   legalName: string,
 ): Promise<TransparencyResult> {
   const name = legalName.trim();
+  const provider = getTransparencyProvider();
+
+  if (provider === "serpapi") {
+    return searchSerpTransparencyByAdvertiser(name);
+  }
+  if (provider !== "direct") {
+    return emptyTransparency(
+      name,
+      "advertiser",
+      "Sem SERPAPI_API_KEY — ads auto desligados (evita flag no IP).",
+    );
+  }
+
   const suggestions = await searchSuggestions(name);
   await sleep(300);
 
-  // Preferir o advertiser com mais ads (range high)
   const sorted = [...suggestions].sort(
     (a, b) => (b.adCountHigh ?? 0) - (a.adCountHigh ?? 0),
   );
   const ids = sorted.map((s) => s.advertiserId).slice(0, 5);
 
   if (!ids.length) {
-    return {
-      query: name,
-      mode: "advertiser",
-      activeAdCount: 0,
-      advertisers: [],
-      advertiserIds: [],
-      creatives: [],
-      discoveredHosts: [],
-      note: "Sem advertisers Transparency para este nome",
-    };
+    return emptyTransparency(
+      name,
+      "advertiser",
+      "Sem advertisers Transparency para este nome",
+    );
   }
 
   const collected = await collectCreatives({
-    advertiserIds: ids,
-    maxPages: 6,
+    advertiserIds: ids.slice(0, 2),
+    maxPages: 3,
     enrichPreviews: true,
   });
 
-  // Estimativa de ads do suggestion range (UI) se RPC devolver pouco
   const suggestedHigh = Math.max(
     0,
     ...sorted.map((s) => s.adCountHigh ?? 0),
