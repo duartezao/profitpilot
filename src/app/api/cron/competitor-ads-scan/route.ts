@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Discovery diário de competitors Google Ads (mundo / region=anywhere).
+ * Discovery diário: seeds + Impressum (sem Transparency / sem flag no IP).
  * Authorization: Bearer CRON_SECRET
  */
 export async function GET(request: Request) {
@@ -47,6 +47,7 @@ export async function GET(request: Request) {
         trigger: "cron",
         maxDepth: 2,
         maxDomains: 40,
+        includeAds: true,
       });
       results.push({
         workspaceId: String(ws._id),

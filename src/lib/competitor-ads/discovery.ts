@@ -12,7 +12,12 @@ import {
   searchTransparencyByDomain,
 } from "./transparency";
 import {
+  assertTransparencyAllowed,
+  isTransparencyEnabledByEnv,
+} from "./transparency-gate";
+import {
   countryFromTld,
+  extractCanonicalLegalName,
   isNoiseLegalName,
   isPlausibleStoreHost,
   normalizeHost,
@@ -50,34 +55,80 @@ export async function ensureCompany(
     registryCountry?: string | null;
     notes?: string;
     seedHosts?: string[];
+    /** Manual: grava o nome exacto (sem extractCanonical). */
+    exactName?: boolean;
   },
 ) {
-  if (isNoiseLegalName(legalName)) return null;
+  const trimmed = legalName.trim().replace(/\s+/g, " ");
+  if (!trimmed) return null;
+
+  let displayName: string;
+  if (opts?.exactName) {
+    displayName = trimmed;
+  } else {
+    const canonical = extractCanonicalLegalName(trimmed);
+    if (!canonical || isNoiseLegalName(canonical)) return null;
+    displayName = canonical;
+  }
+
   await connectToDatabase();
   const ws = oid(workspaceId);
-  const key = normalizeLegalName(legalName);
-  const doc = await CompetitorCompany.findOneAndUpdate(
-    { workspaceId: ws, legalNameKey: key, deletedAt: null },
-    {
-      $setOnInsert: {
-        workspaceId: ws,
-        legalName: legalName.trim(),
-        legalNameKey: key,
+  const key = normalizeLegalName(displayName);
+
+  // Revive soft-delete ou actualiza activo (evita falha de unique / null do upsert)
+  const existing = await CompetitorCompany.findOne({
+    workspaceId: ws,
+    legalNameKey: key,
+  });
+
+  if (existing) {
+    const seedHosts = opts?.seedHosts?.length
+      ? [
+          ...new Set([
+            ...(existing.seedHosts ?? []),
+            ...opts.seedHosts.map(normalizeHost),
+          ]),
+        ]
+      : existing.seedHosts ?? [];
+    await CompetitorCompany.updateOne(
+      { _id: existing._id },
+      {
+        $set: {
+          legalName: displayName,
+          legalNameKey: key,
+          seedHosts,
+          ...(opts?.entityId ? { entityId: opts.entityId } : {}),
+          ...(opts?.registryCountry
+            ? { registryCountry: opts.registryCountry }
+            : {}),
+          ...(opts?.notes != null ? { notes: opts.notes } : {}),
+        },
+        $unset: { deletedAt: "" },
       },
-      $set: {
-        ...(opts?.entityId ? { entityId: opts.entityId } : {}),
-        ...(opts?.registryCountry
-          ? { registryCountry: opts.registryCountry }
-          : {}),
-        ...(opts?.notes != null ? { notes: opts.notes } : {}),
-      },
-      ...(opts?.seedHosts?.length
-        ? { $addToSet: { seedHosts: { $each: opts.seedHosts.map(normalizeHost) } } }
-        : {}),
-    },
-    { upsert: true, returnDocument: "after" },
-  );
-  return doc;
+    );
+    return CompetitorCompany.findById(existing._id);
+  }
+
+  try {
+    return await CompetitorCompany.create({
+      workspaceId: ws,
+      legalName: displayName,
+      legalNameKey: key,
+      entityId: opts?.entityId ?? null,
+      registryCountry: opts?.registryCountry ?? null,
+      notes: opts?.notes ?? "",
+      seedHosts: (opts?.seedHosts ?? []).map(normalizeHost),
+    });
+  } catch (e) {
+    // Corrida de unique: ler o doc criado
+    const again = await CompetitorCompany.findOne({
+      workspaceId: ws,
+      legalNameKey: key,
+      deletedAt: null,
+    });
+    if (again) return again;
+    throw e;
+  }
 }
 
 /**
@@ -99,17 +150,30 @@ export async function ensureShopifyDomain(
   const host = normalizeHost(hostInput);
   if (!isPlausibleStoreHost(host)) return null;
 
+  // Nunca tratar as tuas lojas Shopify como competitor
+  const { Store } = await import("@/models/Store");
+  const own = await Store.findOne({
+    workspaceId: ws,
+    deletedAt: null,
+    displayUrl: host,
+  })
+    .select("_id")
+    .lean();
+  if (own) return null;
+
   const impressum = await crawlImpressum(host);
-  if (!impressum.isShopify) {
-    // Soft-delete se já existia como lixo
-    await CompetitorDomain.updateOne(
-      { workspaceId: ws, host, deletedAt: null },
-      { $set: { deletedAt: new Date(), isShopify: false, isActive: false } },
-    );
+  // null = crawl falhou — não marcar como lixo nem soft-delete
+  if (impressum.isShopify !== true) {
+    if (impressum.isShopify === false) {
+      await CompetitorDomain.updateOne(
+        { workspaceId: ws, host, deletedAt: null, isShopify: { $ne: true } },
+        { $set: { deletedAt: new Date(), isShopify: false, isActive: false } },
+      );
+    }
     return null;
   }
 
-  const country = countryFromTld(host);
+  const country = impressum.country ?? countryFromTld(host);
   const doc = await CompetitorDomain.findOneAndUpdate(
     { workspaceId: ws, host, deletedAt: null },
     {
@@ -201,7 +265,25 @@ export async function purgeNonShopifyJunk(workspaceId: WsId) {
     .lean();
   let removedCompanies = 0;
   for (const c of companies) {
-    if (!isNoiseLegalName(c.legalName)) continue;
+    const canonical = extractCanonicalLegalName(c.legalName);
+    const junk =
+      !canonical ||
+      isNoiseLegalName(c.legalName) ||
+      normalizeLegalName(c.legalName) !== canonical;
+    if (!junk) continue;
+
+    // Antes de apagar: mover lojas Shopify para a empresa canónica
+    if (canonical) {
+      const target = await ensureCompany(ws, canonical);
+      if (target) {
+        await CompetitorDomain.updateMany(
+          { workspaceId: ws, companyId: c._id, deletedAt: null },
+          { $set: { companyId: target._id } },
+        );
+        await refreshCompanyAggregates(ws, target._id);
+      }
+    }
+
     await CompetitorCompany.updateOne(
       { _id: c._id },
       { $set: { deletedAt: new Date() } },
@@ -262,8 +344,8 @@ type RunEvent = {
 };
 
 /**
- * Loop: empresa → Transparency (mundo) → domains → Impressum → novas empresas → …
- * maxDepth limita explosão.
+ * Loop: seeds → Transparency (auto) → Impressum → novas lojas Shopify.
+ * Circuit-breaker após 429. Desligar Google: COMPETITOR_TRANSPARENCY=0.
  */
 export async function runCompetitorDiscovery(
   workspaceId: WsId,
@@ -272,12 +354,17 @@ export async function runCompetitorDiscovery(
     companyId?: string;
     maxDepth?: number;
     maxDomains?: number;
+    /** Default true — o Scan vai buscar lojas/ads sozinho. */
+    includeAds?: boolean;
   },
 ) {
   await connectToDatabase();
   const ws = oid(workspaceId);
   const maxDepth = opts?.maxDepth ?? 2;
-  const maxDomains = opts?.maxDomains ?? 40;
+  // Sem tecto artificial de lojas irmãs — só evita reprocessar hosts já vistos.
+  const maxDomains = opts?.maxDomains ?? 10_000;
+  const wantAds =
+    opts?.includeAds !== false && isTransparencyEnabledByEnv();
 
   const run = await CompetitorDiscoveryRun.create({
     workspaceId: ws,
@@ -290,6 +377,26 @@ export async function runCompetitorDiscovery(
   const push = (e: RunEvent) => {
     events.push({ ...e, meta: e.meta ?? {} });
   };
+
+  let adsAllowed = false;
+  if (wantAds) {
+    const gate = await assertTransparencyAllowed();
+    adsAllowed = gate.ok;
+    if (!adsAllowed) {
+      push({
+        kind: "info",
+        message:
+          "ok" in gate && !gate.ok
+            ? gate.reason
+            : "Transparency indisponível.",
+      });
+    } else {
+      push({
+        kind: "info",
+        message: "Transparency ativo — a descobrir lojas via Google Ads.",
+      });
+    }
+  }
 
   let companiesScanned = 0;
   let domainsScanned = 0;
@@ -382,48 +489,28 @@ export async function runCompetitorDiscovery(
         );
       }
 
-      // Transparency by advertiser name — WORLD (RPC f.req)
-      const byAdv = await searchTransparencyByAdvertiser(company.legalName);
-      push({
-        kind: "info",
-        message: `Transparency «${company.legalName}»: ~${byAdv.activeAdCount} ads, ${byAdv.discoveredHosts.length} hosts, ids=${byAdv.advertiserIds.length}`,
-        companyId: company._id,
-        legalName: company.legalName,
-        meta: {
-          note: byAdv.note,
-          hosts: byAdv.discoveredHosts.slice(0, 20),
-          advertiserIds: byAdv.advertiserIds,
-        },
-      });
-
-      if (
-        byAdv.discoveredHosts.length === 0 &&
-        !(company.seedHosts ?? []).length
-      ) {
+      // Ads Google — automático (nome legal → advertiser → landing hosts)
+      if (adsAllowed) {
+        const byAdv = await searchTransparencyByAdvertiser(company.legalName);
         push({
           kind: "info",
-          message:
-            "Sem hosts descobertos. Adiciona domains seed (ex. loja Shopify conhecida) e volta a fazer Scan.",
+          message: `Transparency «${company.legalName}»: ~${byAdv.activeAdCount} ads, ${byAdv.discoveredHosts.length} hosts`,
           companyId: company._id,
+          legalName: company.legalName,
+          meta: { note: byAdv.note },
         });
-      }
-
-      for (const host of byAdv.discoveredHosts) {
-        if (seenHosts.has(host) || domainsScanned >= maxDomains) continue;
-        if (!isPlausibleStoreHost(host)) continue;
-        seenHosts.add(host);
-        const existed = await CompetitorDomain.findOne({
-          workspaceId: ws,
-          host,
-          deletedAt: null,
-          isShopify: true,
-        }).lean();
-        const domain = await ensureShopifyDomain(ws, host, {
-          companyId: company._id,
-          discoverySource: "transparency",
-        });
-        if (!domain) continue;
-        if (!existed) {
+        if (byAdv.note?.includes("429") || byAdv.note?.includes("captcha")) {
+          adsAllowed = false;
+        }
+        for (const host of byAdv.discoveredHosts) {
+          if (seenHosts.has(host) || domainsScanned >= maxDomains) continue;
+          if (!isPlausibleStoreHost(host)) continue;
+          seenHosts.add(host);
+          const domain = await ensureShopifyDomain(ws, host, {
+            companyId: company._id,
+            discoverySource: "transparency",
+          });
+          if (!domain) continue;
           newDomains++;
           push({
             kind: "domain_found",
@@ -432,26 +519,47 @@ export async function runCompetitorDiscovery(
             domainId: domain._id,
             host,
           });
+          await upsertLink(
+            ws,
+            "company",
+            company._id,
+            "domain",
+            domain._id,
+            "ads_landing",
+            { via: "advertiser_search" },
+          );
         }
-        await upsertLink(
-          ws,
-          "company",
-          company._id,
-          "domain",
-          domain._id,
-          "ads_landing",
-          { via: "advertiser_search" },
-        );
+      } else if (wantAds) {
+        push({
+          kind: "info",
+          message:
+            "Transparency em cooldown / desligado — scan só com seeds + Impressum.",
+          companyId: company._id,
+        });
       }
 
-      // Scan só lojas Shopify desta empresa
+      // Lojas desta empresa + órfãs Shopify (companyId null / empresa apagada)
+      const orphanIds = (
+        await CompetitorCompany.find({
+          workspaceId: ws,
+          deletedAt: { $ne: null },
+        })
+          .select("_id")
+          .lean()
+      ).map((x) => x._id);
+
       const domains = await CompetitorDomain.find({
         workspaceId: ws,
-        companyId: company._id,
         deletedAt: null,
         isShopify: true,
+        $or: [
+          { companyId: company._id },
+          { companyId: null },
+          ...(orphanIds.length
+            ? [{ companyId: { $in: orphanIds } }]
+            : []),
+        ],
       })
-        .limit(30)
         .lean();
 
       for (const d of domains) {
@@ -460,7 +568,9 @@ export async function runCompetitorDiscovery(
         seenHosts.add(d.host);
 
         const impressum = await crawlImpressum(d.host);
-        if (!impressum.isShopify) {
+        // Só remover quando o crawl confirma explicitamente não-Shopify.
+        // null = host inacessível / detecção falhou — NÃO apagar lojas existentes.
+        if (impressum.isShopify === false) {
           await CompetitorDomain.updateOne(
             { _id: d._id },
             {
@@ -480,6 +590,19 @@ export async function runCompetitorDiscovery(
           });
           continue;
         }
+        if (impressum.isShopify == null) {
+          push({
+            kind: "info",
+            message: `Impressum inconclusivo (mantido): ${d.host}`,
+            domainId: d._id as mongoose.Types.ObjectId,
+            host: d.host,
+          });
+          await CompetitorDomain.updateOne(
+            { _id: d._id },
+            { $set: { lastScannedAt: new Date() } },
+          );
+          continue;
+        }
 
         await CompetitorDomain.updateOne(
           { _id: d._id },
@@ -490,18 +613,25 @@ export async function runCompetitorDiscovery(
               ...(impressum.brandName
                 ? { brandName: impressum.brandName }
                 : {}),
+              ...(impressum.country ? { country: impressum.country } : {}),
             },
           },
         );
 
+        // Só o canónico curto (ex. CAVALEIRUS LLC). Nunca gravar blobs Impressum.
+        const seenLegal = new Set<string>();
         for (const legal of impressum.legalNames) {
-          if (isNoiseLegalName(legal)) continue;
+          const canonical = extractCanonicalLegalName(legal);
+          if (!canonical || isNoiseLegalName(canonical)) continue;
+          if (seenLegal.has(canonical)) continue;
+          seenLegal.add(canonical);
+
           const before = await CompetitorCompany.findOne({
             workspaceId: ws,
-            legalNameKey: normalizeLegalName(legal),
+            legalNameKey: normalizeLegalName(canonical),
             deletedAt: null,
           }).lean();
-          const linked = await ensureCompany(ws, legal, {
+          const linked = await ensureCompany(ws, canonical, {
             entityId: impressum.entityId,
           });
           if (!linked) continue;
@@ -509,20 +639,42 @@ export async function runCompetitorDiscovery(
             newCompanies++;
             push({
               kind: "company_found",
-              message: `Empresa via Impressum ${d.host}: ${legal}`,
+              message: `Empresa via Impressum ${d.host}: ${canonical}`,
               companyId: linked._id,
               domainId: d._id,
               host: d.host,
-              legalName: legal,
+              legalName: canonical,
             });
             if (item.depth < maxDepth) {
               queue.push({ companyId: linked._id, depth: item.depth + 1 });
             }
           }
-          await CompetitorDomain.updateOne(
-            { _id: d._id },
-            { $set: { companyId: linked._id } },
-          );
+          // Não saltar companyId entre várias empresas no mesmo Impressum —
+          // só atribuir se a loja ainda não tem empresa válida.
+          const current = await CompetitorDomain.findById(d._id)
+            .select("companyId")
+            .lean();
+          const curId = current?.companyId
+            ? String(current.companyId)
+            : null;
+          let keepCurrent = false;
+          if (curId) {
+            const curCo = await CompetitorCompany.findOne({
+              _id: current!.companyId,
+              deletedAt: null,
+            })
+              .select("legalName")
+              .lean();
+            keepCurrent = Boolean(
+              curCo && !isNoiseLegalName(curCo.legalName),
+            );
+          }
+          if (!keepCurrent) {
+            await CompetitorDomain.updateOne(
+              { _id: d._id },
+              { $set: { companyId: linked._id } },
+            );
+          }
           await upsertLink(
             ws,
             "company",
@@ -533,7 +685,42 @@ export async function runCompetitorDiscovery(
           );
         }
 
+        // Hosts irmãos mencionados no Impressum / privacy
+        for (const host of impressum.relatedHosts) {
+          if (seenHosts.has(host) || domainsScanned >= maxDomains) continue;
+          seenHosts.add(host);
+          const domain = await ensureShopifyDomain(ws, host, {
+            companyId: company._id,
+            discoverySource: "impressum",
+          });
+          if (!domain) continue;
+          newDomains++;
+          push({
+            kind: "domain_found",
+            message: `Loja Shopify via Impressum: ${host}`,
+            companyId: company._id,
+            domainId: domain._id,
+            host,
+          });
+          await upsertLink(
+            ws,
+            "company",
+            company._id,
+            "domain",
+            domain._id,
+            "same_legal",
+            { via: "impressum_related" },
+          );
+        }
+
+        // Ads por domain — só modo includeAds + gate
+        if (!adsAllowed) continue;
+
         const byDom = await searchTransparencyByDomain(d.host);
+        if (byDom.note?.includes("429") || byDom.note?.includes("captcha")) {
+          adsAllowed = false;
+          continue;
+        }
         const dateKey = todayKey();
         await CompetitorAdSnapshot.findOneAndUpdate(
           {
@@ -572,72 +759,38 @@ export async function runCompetitorDiscovery(
 
         push({
           kind: "ads_updated",
-          message: `${d.host}: ${byDom.activeAdCount} ads Google (mundo)`,
+          message: `${d.host}: ${byDom.activeAdCount} ads Google`,
           domainId: d._id as mongoose.Types.ObjectId,
           host: d.host,
-          meta: {
-            creatives: byDom.creatives.length,
-            advertisers: byDom.advertisers,
-          },
         });
 
-        for (const adv of byDom.advertisers) {
-          if (isNoiseLegalName(adv)) continue;
-          const before = await CompetitorCompany.findOne({
-            workspaceId: ws,
-            legalNameKey: normalizeLegalName(adv),
-            deletedAt: null,
-          }).lean();
-          const linked = await ensureCompany(ws, adv);
-          if (!linked) continue;
-          if (!before) {
-            newCompanies++;
-            push({
-              kind: "company_found",
-              message: `Advertiser Google: ${adv}`,
-              companyId: linked._id,
-              host: d.host,
-              legalName: adv,
-            });
-            if (item.depth < maxDepth) {
-              queue.push({ companyId: linked._id, depth: item.depth + 1 });
-            }
-          }
-          await upsertLink(
-            ws,
-            "company",
-            linked._id,
-            "domain",
-            d._id as mongoose.Types.ObjectId,
-            "same_advertiser",
-          );
-        }
-
+        // Landing / display hosts extra nos creatives deste domain
         for (const host of byDom.discoveredHosts) {
           if (seenHosts.has(host) || domainsScanned >= maxDomains) continue;
           if (!isPlausibleStoreHost(host)) continue;
           seenHosts.add(host);
-          const existed = await CompetitorDomain.findOne({
-            workspaceId: ws,
-            host,
-            deletedAt: null,
-            isShopify: true,
-          }).lean();
           const domain = await ensureShopifyDomain(ws, host, {
             companyId: company._id,
             discoverySource: "loop",
           });
           if (!domain) continue;
-          if (!existed) {
-            newDomains++;
-            push({
-              kind: "domain_found",
-              message: `Loja Shopify loop: ${host}`,
-              companyId: company._id,
-              domainId: domain._id,
-              host,
-            });
-          }
+          newDomains++;
+          push({
+            kind: "domain_found",
+            message: `Loja Shopify via ads loop: ${host}`,
+            companyId: company._id,
+            domainId: domain._id,
+            host,
+          });
+          await upsertLink(
+            ws,
+            "company",
+            company._id,
+            "domain",
+            domain._id,
+            "ads_landing",
+            { via: "domain_creatives" },
+          );
         }
       }
 
@@ -726,8 +879,64 @@ export async function getCompetitorMapData(workspaceId: WsId) {
     ]),
   ]);
 
-  // Todas as empresas (exceto lixo) — seeds sem lojas Shopify ainda têm de aparecer
-  const companies = companiesRaw.filter((c) => !isNoiseLegalName(c.legalName));
+  // Não esconder empresas manuais: o filtro de noise só remove lixo óbvio
+  // (nomes sem forma societária). O resto fica visível no mapa.
+  const companiesClean = companiesRaw.filter((c) => {
+    const name = (c.legalName ?? "").trim();
+    if (!name) return false;
+    // Lixo curto sem LLC/Ltd/etc. — esconder
+    if (
+      isNoiseLegalName(name) &&
+      !/\b(LLC|L\.L\.C\.|LIMITED|LTD\.?|INC\.?|GMBH)\b/i.test(name)
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const byLegalKey = new Map(
+    companiesClean.map((c) => [normalizeLegalName(c.legalName), c] as const),
+  );
+  const activeCompanyIds = new Set(companiesClean.map((c) => String(c._id)));
+
+  // Domínios apontam para empresas-lixo filtradas → remapar para o canónico
+  const companyIdByDomain = new Map<string, string | null>();
+  for (const d of domains) {
+    const rawCid = d.companyId ? String(d.companyId) : null;
+    if (rawCid && activeCompanyIds.has(rawCid)) {
+      companyIdByDomain.set(String(d._id), rawCid);
+      continue;
+    }
+    let resolved: string | null = null;
+    if (rawCid) {
+      const junk = companiesRaw.find((c) => String(c._id) === rawCid);
+      const canonical = junk
+        ? extractCanonicalLegalName(junk.legalName)
+        : null;
+      if (canonical) {
+        const good = byLegalKey.get(normalizeLegalName(canonical));
+        if (good) resolved = String(good._id);
+      }
+    }
+    companyIdByDomain.set(String(d._id), resolved);
+  }
+
+  const liveByCompany = new Map<
+    string,
+    { stores: number; ads: number; countries: Set<string> }
+  >();
+  for (const d of domains) {
+    const cid = companyIdByDomain.get(String(d._id));
+    if (!cid) continue;
+    const row = liveByCompany.get(cid) ?? {
+      stores: 0,
+      ads: 0,
+      countries: new Set<string>(),
+    };
+    row.stores += 1;
+    row.ads += d.activeAdCount ?? 0;
+    if (d.country) row.countries.add(d.country);
+    liveByCompany.set(cid, row);
+  }
 
   const snapByDomain = new Map(
     latestSnaps.map((s) => [String(s._id), s] as const),
@@ -750,27 +959,34 @@ export async function getCompetitorMapData(workspaceId: WsId) {
   }
 
   const domainIds = new Set(domains.map((d) => String(d._id)));
+  // Mostrar todas as empresas limpas (incl. acabadas de adicionar, sem lojas ainda)
+  const companies = companiesClean;
   const companyIds = new Set(companies.map((c) => String(c._id)));
 
   return {
-    companies: companies.map((c) => ({
-      id: String(c._id),
-      legalName: c.legalName,
-      entityId: c.entityId ?? null,
-      registryCountry: c.registryCountry ?? null,
-      storeCount: c.storeCount ?? 0,
-      activeAdCount: c.activeAdCount ?? 0,
-      countries: c.countries ?? [],
-      seedHosts: c.seedHosts ?? [],
-      lastScannedAt: c.lastScannedAt?.toISOString() ?? null,
-      notes: c.notes ?? "",
-    })),
+    companies: companies.map((c) => {
+      const live = liveByCompany.get(String(c._id));
+      return {
+        id: String(c._id),
+        legalName: c.legalName,
+        entityId: c.entityId ?? null,
+        registryCountry: c.registryCountry ?? null,
+        storeCount: live?.stores ?? 0,
+        activeAdCount: live?.ads ?? 0,
+        countries: live ? [...live.countries].sort() : (c.countries ?? []),
+        seedHosts: c.seedHosts ?? [],
+        lastScannedAt: c.lastScannedAt?.toISOString() ?? null,
+        notes: c.notes ?? "",
+      };
+    }),
     domains: domains.map((d) => {
       const snap = snapByDomain.get(String(d._id));
+      const companyId = companyIdByDomain.get(String(d._id)) ?? null;
       return {
         id: String(d._id),
         host: d.host,
-        companyId: d.companyId ? String(d.companyId) : null,
+        companyId:
+          companyId && companyIds.has(companyId) ? companyId : companyId,
         brandName: d.brandName ?? null,
         country: d.country ?? null,
         isShopify: true as const,

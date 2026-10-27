@@ -1,11 +1,17 @@
-/** Normaliza host de loja (sem protocolo / www / path). */
+/** Normaliza host de loja (sem protocolo / www / path / lixo de UI). */
 export function normalizeHost(input: string): string {
   let s = input.trim().toLowerCase();
+  // Reticências / underscores / zero-width que às vezes vêm de logs/UI
+  s = s.replace(/[\u2026\u2025\u22ef\u00b7\u200b-\u200f\u2028\u2029\ufeff]/g, "");
   s = s.replace(/^https?:\/\//, "");
   s = s.replace(/^www\./, "");
   s = s.split("/")[0] ?? s;
   s = s.split("?")[0] ?? s;
-  s = s.replace(/\.$/, "");
+  s = s.split("#")[0] ?? s;
+  s = s.replace(/[._]+$/g, "");
+  // Só labels DNS válidos
+  s = s.replace(/[^a-z0-9.-]/g, "");
+  s = s.replace(/\.{2,}/g, ".").replace(/^\.+|\.+$/g, "");
   return s;
 }
 
@@ -46,20 +52,206 @@ export function normalizeLegalName(name: string): string {
     .toUpperCase();
 }
 
+const ENTITY_SUFFIX =
+  "(?:LLC|L\\.L\\.C\\.|LIMITED|LTD\\.?|INC\\.?|GMBH|S\\.?A\\.?|S\\.?L\\.?|B\\.?V\\.?|SAS|SARL|OY|AB|PTY\\s+LTD)";
+
+/**
+ * Extrai o nome legal canónico curto (ex. «CAVALEIRUS LLC») de um blob de texto.
+ * Para cada sufixo societário, fica só com 1–3 palavras imediatamente antes
+ * (evita «THE WYOMING ADDRESS … OF CAVALEIRUS LLC»).
+ */
+export function extractCanonicalLegalName(raw: string): string | null {
+  const key = normalizeLegalName(raw);
+  if (!key || key.length < 5) return null;
+
+  const suffixRe = new RegExp(`\\b${ENTITY_SUFFIX}\\b`, "g");
+  const tokens = key.split(/\s+/);
+  const candidates = new Set<string>();
+
+  for (const m of key.matchAll(suffixRe)) {
+    const suffix = m[0]!;
+    const before = key.slice(0, m.index).trim();
+    const beforeTokens = before.split(/\s+/).filter(Boolean);
+    // 1 a 3 tokens antes do sufixo
+    for (let n = 1; n <= 3; n++) {
+      if (beforeTokens.length < n) break;
+      const namePart = beforeTokens.slice(-n).join(" ");
+      // Evitar preposições / lixo como último token do nome
+      if (
+        /^(OF|DER|DES|THE|A|AN|AND|UND|EIN|EINE|NAME|TRADE|FOR|MIT|VON)$/.test(
+          namePart.split(/\s+/).pop() ?? "",
+        )
+      ) {
+        continue;
+      }
+      if (
+        /^(OF|DER|DES|THE|A|AN|AND|UND|EIN|EINE|NAME|TRADE|FOR|MIT|VON)\b/.test(
+          namePart,
+        )
+      ) {
+        continue;
+      }
+      candidates.add(normalizeLegalName(`${namePart} ${suffix}`));
+    }
+  }
+
+  // Também: se o raw já é curto e limpo
+  if (tokens.length <= 4) {
+    candidates.add(key);
+  }
+
+  let best: string | null = null;
+  let bestWords = Infinity;
+  for (const c of candidates) {
+    if (isNoiseLegalName(c)) continue;
+    const words = c.split(/\s+/).length;
+    if (words < bestWords) {
+      bestWords = words;
+      best = c;
+    }
+  }
+  return best;
+}
+
 /** Advertisers / nomes legais que não são competitors ecom. */
 export function isNoiseLegalName(name: string): boolean {
   const key = normalizeLegalName(name);
-  if (key.length < 4) return true;
-  return (
-    /\bGOOGLE\b/.test(key) ||
-    /\bMETA\s+PLATFORMS\b/.test(key) ||
-    /\bFACEBOOK\b/.test(key) ||
-    /\bSHOPIFY\b/.test(key) ||
-    /\bCOPYRIGHT\b/.test(key) ||
-    /\bSPHERITY\b/.test(key) ||
-    key === "LLC" ||
-    key === "LIMITED"
-  );
+  if (key.length < 5 || key.length > 60) return true;
+
+  // Tem de acabar em forma societária
+  if (
+    !/\b(LLC|L\.L\.C\.|LIMITED|LTD\.?|INC\.?|GMBH|S\.?A\.?|S\.?L\.?|B\.?V\.?|SAS|SARL|OY|AB|PTY\s+LTD)$/.test(
+      key,
+    )
+  ) {
+    return true;
+  }
+
+  // Nome legal real: tipicamente 2–4 tokens (ACME LLC / ACME HANDELS GMBH)
+  const words = key.split(/\s+/);
+  if (words.length > 5) return true;
+
+  // Boilerplate / lixo típico de Impressum / promo / UI scrap
+  if (
+    /\b(ADDRESS|REGISTERED|BUSINESS|STREET|AVENUE|AVE|SUITE|STE|SHERIDAN|CASPER|WYOMING|COFFEEN|HANDELSNAME|HANDELSMARKE|IST\s+EIN|MODEHAUS|COPYRIGHT|GOOGLE|FACEBOOK|INSTAGRAM|META\s+PLATFORMS|SHOPIFY|SPHERITY|ABOVE|BELOW|PRIVACY|POLICY|DATENSCHUTZ|TRADE\s+NAME|TRADEMARK|TRADEMARKED|RABATT|VERSAND|GRATIS|POST|EXTRA|CKGABERECH|CKGABERECHT|R[UÜ]CKGABE|MEDIENG|@MEDIA|INFORMATION|ELOISE|VIEW\s*ALL|PRODUCTS|NAMES\s+ARE|WENDOUGEE|OCTOBER|COMPANY\s+INFORMATION|SOFORT|ANALYTICS|GDPR|SCHEMA|CLOUDFLARE|MICROSOFT|APPLE|AMAZON|TWITTER|TIKTOK|KLAVIYO|HOTJAR)\b/.test(
+      key,
+    )
+  ) {
+    return true;
+  }
+
+  // «AB» sueco quase só gera falsos positivos em texto DE (Rabatt ab, …)
+  if (/\bAB$/.test(key) && words.length <= 3) return true;
+
+  // Promo / lixo que acaba em AB (Suécia) por acidente
+  if (/\b(RABATT|VERSAND|GRATIS|POST|EXTRA)\b/.test(key) && /\bAB$/.test(key)) {
+    return true;
+  }
+
+  // Só dígitos + LLC
+  if (/^\d/.test(key)) return true;
+
+  if (key === "LLC" || key === "LIMITED" || key === "GMBH" || key === "AB") {
+    return true;
+  }
+
+  // Nome demasiado genérico / 1 token + AB curto
+  if (
+    words.length <= 2 &&
+    /^(RABATT|VERSAND|POST|EXTRA|CKGABERECH|ECOM)\b/.test(key)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Nome legal curto e plausível (pronto a gravar). */
+export function isPlausibleLegalName(name: string): boolean {
+  const canonical = extractCanonicalLegalName(name);
+  return Boolean(canonical) && !isNoiseLegalName(canonical!);
+}
+
+const LANG_TO_COUNTRY: Record<string, string> = {
+  de: "DE",
+  at: "AT",
+  ch: "CH",
+  nl: "NL",
+  be: "BE",
+  fr: "FR",
+  it: "IT",
+  es: "ES",
+  pt: "PT",
+  pl: "PL",
+  se: "SE",
+  sv: "SE",
+  da: "DK",
+  dk: "DK",
+  no: "NO",
+  nb: "NO",
+  nn: "NO",
+  fi: "FI",
+  hu: "HU",
+  cs: "CZ",
+  sk: "SK",
+  sl: "SI",
+  hr: "HR",
+  ro: "RO",
+  bg: "BG",
+  el: "GR",
+  gr: "GR",
+  lt: "LT",
+  lv: "LV",
+  et: "EE",
+  ee: "EE",
+  uk: "GB",
+  en: "XX", // inglês genérico — país vem do TLD / locale region
+  ga: "IE",
+  ie: "IE",
+  ca: "ES", // catalão → ES (mercado tipicamente ES)
+  eu: "ES",
+  gl: "ES",
+  ja: "JP",
+  ko: "KR",
+  zh: "CN",
+  th: "TH",
+  vi: "VN",
+  id: "ID",
+  ms: "MY",
+  tr: "TR",
+  ru: "RU",
+  ukr: "UA",
+  ar: "AE",
+  he: "IL",
+  hi: "IN",
+  br: "BR",
+  mx: "MX",
+  au: "AU",
+  nz: "NZ",
+  us: "US",
+  gb: "GB",
+};
+
+/**
+ * País a partir de `lang` / locale da loja.
+ * Aceita: "es", "es-ES", "de-AT", "fr_BE", "pt-PT".
+ * Prioriza a região (ES, AT, BE…) quando existe; senão o idioma.
+ */
+export function countryFromLang(langInput: string | null | undefined): string | null {
+  if (!langInput) return null;
+  const raw = langInput.trim().replace(/_/g, "-").toLowerCase();
+  if (!raw) return null;
+  const [lang, region] = raw.split("-");
+  if (region && /^[a-z]{2}$/.test(region)) {
+    const fromRegion = LANG_TO_COUNTRY[region] ?? region.toUpperCase();
+    // en-US → US; en-GB → GB; en-AU → AU
+    if (fromRegion !== "XX") return fromRegion.length === 2 ? fromRegion : region.toUpperCase();
+    return region.toUpperCase();
+  }
+  if (!lang) return null;
+  const mapped = LANG_TO_COUNTRY[lang];
+  if (!mapped || mapped === "XX") return null;
+  return mapped;
 }
 
 /** País ISO a partir do TLD quando possível; .com/.net ficam null (mundo). */
@@ -134,6 +326,22 @@ export function countryFromTld(host: string): string | null {
     ee: "EE",
   };
   return map[tld] ?? tld.toUpperCase();
+}
+
+/**
+ * País da loja: 1) lang/locale do HTML  2) TLD
+ * Ex.: sofia-barcelona.com com lang=es → ES (não XX).
+ */
+export function countryFromStoreSignals(opts: {
+  host: string;
+  htmlLang?: string | null;
+  ogLocale?: string | null;
+}): string | null {
+  return (
+    countryFromLang(opts.ogLocale) ||
+    countryFromLang(opts.htmlLang) ||
+    countryFromTld(opts.host)
+  );
 }
 
 export function todayKey(d = new Date()): string {
