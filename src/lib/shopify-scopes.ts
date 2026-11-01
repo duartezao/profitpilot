@@ -1,7 +1,6 @@
 /** Scopes Admin API necessários (só leitura). Fonte única para setup e validação. */
 export const SHOPIFY_REQUIRED_SCOPES = [
   "read_orders",
-  "read_all_orders",
   "read_products",
   "read_inventory",
   "read_fulfillments",
@@ -13,6 +12,12 @@ export const SHOPIFY_REQUIRED_SCOPES = [
   "read_shopify_payments_disputes",
   "read_reports",
 ] as const;
+
+/**
+ * Opcional: estende `read_orders` para além dos 60 dias.
+ * Não é obrigatório no setup — o import usa a janela normal.
+ */
+export const SHOPIFY_OPTIONAL_SCOPES = ["read_all_orders"] as const;
 
 export const SHOPIFY_PAYOUTS_SCOPES = [
   "read_shopify_payments_accounts",

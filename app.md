@@ -204,7 +204,8 @@ Futuro:
 
 **Scopes (permissões) necessários — só leitura**
 
-* `read_orders` — vendas, reembolsos, descontos (revenue, refunds, AOV, CVR)
+* `read_orders` — vendas, reembolsos, descontos (revenue, refunds, AOV, CVR). Cobre os **últimos 60 dias**; suficiente para o import normal.
+* `read_all_orders` — **opcional** (não obrigatório). Só se quiseres estender `read_orders` a encomendas com mais de 60 dias.
 * `read_products`, `read_inventory` — produtos e **custo por artigo (cost per item)** para o COGS
 * `read_shopify_payments_accounts` — saldo Shopify Payments (`shopifyPaymentsAccount`)
 * `read_shopify_payments_payouts` — **obrigatório** para payouts e balance transactions (sem este scope: «Access denied for payouts field»)
@@ -241,7 +242,7 @@ Futuro:
 
 **Scopes a ativar (a app mostra a lista com botão "copiar"):**
 
-* `read_orders` — vendas, reembolsos e descontos
+* `read_orders` — vendas, reembolsos e descontos (últimos 60 dias; suficiente no setup)
 * `read_products` — produtos
 * `read_inventory` — custo por artigo (COGS)
 * `read_shopify_payments_accounts` — saldo na Shopify (por pagar)
@@ -249,6 +250,7 @@ Futuro:
 * `read_shopify_payments_disputes` — chargebacks
 * `read_customers` — clientes e LTV
 * `read_reports` / `read_analytics` — sessões e funil (ATC, checkout, CVR)
+* `read_all_orders` — opcional (só para histórico > 60 dias; não é exigido na validação)
 
 **Na app:**
 
