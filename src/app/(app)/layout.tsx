@@ -33,12 +33,13 @@ export default async function AppLayout({
   const storeQuery = activeStoreQueryForUser(user);
 
   const storeDocs = await Store.find(storeQuery)
-    .select("name operationStatus operationKilledAt")
+    .select("name status operationStatus operationKilledAt")
     .sort({ name: 1 })
     .lean();
   const stores = storeDocs.map((s) => ({
     id: String(s._id),
     name: s.name,
+    status: (s.status ?? "active") as StoreOption["status"],
     operationStatus: s.operationStatus as StoreOption["operationStatus"],
     operationKilledAt: s.operationKilledAt?.toISOString() ?? null,
   }));
