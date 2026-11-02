@@ -253,7 +253,7 @@ export async function syncAdAccountsSpendForStore(
   /**
    * Throttle Google só no refresh de **hoje**.
    * Dias em lacuna/parciais e campanhas do mesmo ciclo passam sempre —
-   * senão o markAdAccountSync do gasto saltava as campanhas .
+   * senão o markAdAccountSync do gasto saltava as campanhas.
    */
   const googleThrottleToday =
     !options?.force && dateKey === todayKey;

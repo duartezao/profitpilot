@@ -47,14 +47,27 @@ next-env.d.ts
 /scripts/md-to-pdf.py
 
 # Scripts de diagnóstico / one-off (podem expor lojas, IDs, dados reais)
-/scripts/diag-*.ts
-/scripts/debug-*.ts
-/scripts/check-*.ts
-/scripts/probe-*.ts
-/scripts/verify-*.ts
-/scripts/raw-*.ts
-/scripts/compare-*.ts
-/scripts/investigate-*.ts
+/scripts/diag-*.{ts,mjs,js}
+/scripts/debug-*.{ts,mjs,js}
+/scripts/check-*.{ts,mjs,js}
+/scripts/probe-*.{ts,mjs,js}
+/scripts/verify-*.{ts,mjs,js}
+/scripts/raw-*.{ts,mjs,js}
+/scripts/compare-*.{ts,mjs,js}
+/scripts/investigate-*.{ts,mjs,js}
+/scripts/purge-*.{ts,mjs,js}
+/scripts/cleanup-*.{ts,mjs,js}
+/scripts/list-*.{ts,mjs,js}
+/scripts/seed-*.{ts,mjs,js}
+/scripts/expand-*.{ts,mjs,js}
+/scripts/refresh-*.{ts,mjs,js}
+/scripts/relink-*.{ts,mjs,js}
+/scripts/restore-*.{ts,mjs,js}
+/scripts/fix-*.{ts,mjs,js}
+/scripts/test-add-*.{ts,mjs,js}
+/scripts/inspect-*.{ts,mjs,js}
+/scripts/soft-delete-*.{ts,mjs,js}
+/scripts/clear-*.{ts,mjs,js}
 
 # Prints, screenshots e dumps locais
 /prints/

@@ -36,7 +36,7 @@ describe("collection-briefing", () => {
       periodFromLabel: "11 Jul 2026",
       periodToLabel: "17 Jul 2026",
       adAccount: "Store Google",
-      storeDomain: "exemplo.com",
+      storeDomain: "example-store.com",
       campaignNames: ["04-07 - Mocassins #3", "04-07 - Mocassins #4"],
       revenueFmt: "1.034,49 €",
       spendFmt: "586,54 €",
@@ -45,7 +45,7 @@ describe("collection-briefing", () => {
     });
     assert.match(text, /Day 11 Jul 2026 to 17 Jul 2026/);
     assert.match(text, /Ad account: Store Google/);
-    assert.match(text, /Store: marie-bruxelles\.com/);
+    assert.match(text, /Store: example-store\.com/);
     assert.match(text, /Campaign: Mocassins\n/);
     assert.match(text, /overall collection ROAS is 1,76×/);
     assert.doesNotMatch(text, /scale, descale or kill/);
@@ -57,7 +57,7 @@ describe("collection-briefing", () => {
       periodFromLabel: "11 Jul 2026",
       periodToLabel: "17 Jul 2026",
       adAccount: "Store Google",
-      storeDomain: "exemplo.com",
+      storeDomain: "example-store.com",
       campaignNames: ["Mocassins #1"],
       revenueFmt: "100 €",
       spendFmt: "50 €",
@@ -74,7 +74,7 @@ describe("collection-briefing", () => {
       periodFromLabel: "13 Jul 2026",
       periodToLabel: "17 Jul 2026",
       adAccount: "Store Google",
-      storeDomain: "exemplo.com",
+      storeDomain: "example-store.com",
       campaignNames: ["Mocassins"],
       revenueFmt: "100 €",
       spendFmt: "50 €",
