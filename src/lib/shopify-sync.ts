@@ -86,6 +86,8 @@ import {
 export type StoreSyncPersist = {
   scopes?: string[];
   ianaTimezone?: string | null;
+  /** Moeda da loja Shopify (`shop.currencyCode`). */
+  currency?: string | null;
   lastSyncAt?: Date;
   lastSyncError?: string | null;
   payoutsError?: string | null;
@@ -1437,7 +1439,6 @@ export async function syncOrdersPage(
     .select("baseCurrency")
     .lean();
   const baseCurrency = workspace?.baseCurrency ?? "EUR";
-  const storeCurrency = (store.currency ?? "EUR").toUpperCase();
 
   const tz = normalizeStoreTimezone(store.ianaTimezone);
 
@@ -1672,6 +1673,12 @@ export async function syncOrdersPage(
         ? null
         : (existingManualCogs.get(o.id) ?? null);
       const cogsForBase = manualCogs != null ? manualCogs : cogs;
+      // Moeda real da encomenda (shopMoney) — não a do doc Store (pode estar desactualizada).
+      const currency = (
+        o.currentTotalPriceSet?.shopMoney.currencyCode ??
+        store.currency ??
+        "EUR"
+      ).toUpperCase();
       const amountsBase = await buildOrderAmountsBase(
         {
           subtotal,
@@ -1682,7 +1689,7 @@ export async function syncOrdersPage(
           shipping,
           fees: feesForBase,
         },
-        storeCurrency,
+        currency,
         baseCurrency,
         orderDate,
         tz,
@@ -1695,13 +1702,10 @@ export async function syncOrdersPage(
 
       const refundLines = await buildRefundLines(
         o.refunds ?? [],
-        storeCurrency,
+        currency,
         baseCurrency,
         tz,
       );
-
-      const currency =
-        o.currentTotalPriceSet?.shopMoney.currencyCode ?? store.currency;
       const payload: OrderSetPayload = {
         name: o.name,
         orderDate,
@@ -2316,25 +2320,33 @@ export async function prepareShopifySyncContext(storeId: string): Promise<{
     .filter(Boolean);
 
   let ianaTimezone = store.ianaTimezone ?? undefined;
+  let shopCurrency = store.currency ?? undefined;
   // Override manual do utilizador tem prioridade — não sobrescrever com o da Shopify.
-  if (store.timezoneSource !== "manual") {
-    try {
-      const shop = await testShopifyConnection(domain, accessToken);
-      if (shop.ianaTimezone) {
-        ianaTimezone = shop.ianaTimezone;
-      }
-    } catch {
-      /* sync continua se o ping da shop falhar */
+  try {
+    const shop = await testShopifyConnection(domain, accessToken);
+    if (store.timezoneSource !== "manual" && shop.ianaTimezone) {
+      ianaTimezone = shop.ianaTimezone;
     }
+    if (shop.currencyCode) {
+      shopCurrency = shop.currencyCode.toUpperCase();
+    }
+  } catch {
+    /* sync continua se o ping da shop falhar */
   }
 
   await persistStoreSyncFields(store._id, {
     scopes,
     ...(ianaTimezone ? { ianaTimezone } : {}),
+    ...(shopCurrency ? { currency: shopCurrency } : {}),
   });
 
   return {
-    store: { ...store, scopes, ...(ianaTimezone ? { ianaTimezone } : {}) },
+    store: {
+      ...store,
+      scopes,
+      ...(ianaTimezone ? { ianaTimezone } : {}),
+      ...(shopCurrency ? { currency: shopCurrency } : {}),
+    },
     domain,
     accessToken,
   };
