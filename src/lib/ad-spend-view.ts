@@ -73,7 +73,7 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
   await connectToDatabase();
 
   const stores = await Store.find(activeStoreQueryForUser(user))
-    .select("name currency importStartDate createdAt ianaTimezone")
+    .select("name currency importStartDate createdAt ianaTimezone status")
     .sort({ name: 1 })
     .lean();
 
@@ -147,9 +147,12 @@ export async function buildAdSpendView(storeId?: string): Promise<AdSpendView | 
     };
   }
 
-  const summaries = stores.length > 0
-    ? await buildStoreAdSpendSummaries(stores, baseCurrency)
-    : [];
+  // Overview: ocultar pausadas (sync das contas API continua).
+  const overviewStores = stores.filter((s) => s.status !== "paused");
+  const summaries =
+    overviewStores.length > 0
+      ? await buildStoreAdSpendSummaries(overviewStores, baseCurrency)
+      : [];
   return {
     mode: "overview",
     lastSyncedAt: lastSyncedAll,

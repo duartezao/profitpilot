@@ -3458,7 +3458,9 @@ export async function buildWorkspaceSummary(
     ? formatMissingCogsWarning(missingCogsCount, scopedCogsMode)
     : formatMissingCogsWarning(missingCogsCount);
 
+  // Tabela «Lojas» na overview: ocultar pausadas (sync/KPIs consolidados mantêm-se).
   const summaryStores: SummaryStore[] = stores
+    .filter((s) => s.status !== "paused")
     .map((s) => {
       const a = byStore.get(String(s._id)) ?? {
         revenue: 0,
