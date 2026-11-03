@@ -25,10 +25,12 @@ import {
   type CogsMode,
 } from "@/lib/cogs-modes";
 import {
+  addDaysToDateKey,
   dayKeysBetweenInTimezone,
   dateKeyInTimezone,
   normalizeStoreTimezone,
   orderDateMatchInTimezone,
+  zonedStartOfDay,
 } from "@/lib/store-timezone";
 import type { PeriodSlice } from "@/lib/ad-spend";
 import { countSoldVariantsMissingCost } from "@/lib/cogs";
@@ -75,29 +77,32 @@ export type OrderCogsRow = {
   missing: boolean;
 };
 
+/** Intervalo COGS até ontem no **fuso da loja** (igual ao ad spend). */
 export function resolveCogsRange(
   importStartDate?: Date | null,
   storeCreatedAt?: Date | null,
+  storeTimeZone?: string | null,
 ): { from: Date; to: Date; fromKey: string; toKey: string } {
-  const today = startOfDay(new Date());
-  const yesterday = addDays(today, -1);
+  const tz = normalizeStoreTimezone(storeTimeZone);
+  const todayKey = dateKeyInTimezone(new Date(), tz);
+  const yesterdayKey = addDaysToDateKey(todayKey, -1, tz);
 
-  let from: Date;
+  let fromKey: string;
   if (importStartDate) {
-    from = startOfDay(new Date(importStartDate));
+    fromKey = dateKeyInTimezone(new Date(importStartDate), tz);
   } else if (storeCreatedAt) {
-    from = startOfDay(new Date(storeCreatedAt));
+    fromKey = dateKeyInTimezone(new Date(storeCreatedAt), tz);
   } else {
-    from = addDays(today, -COGS_LOOKBACK_DAYS);
+    fromKey = addDaysToDateKey(todayKey, -COGS_LOOKBACK_DAYS, tz);
   }
 
-  if (from > yesterday) from = yesterday;
+  if (fromKey > yesterdayKey) fromKey = yesterdayKey;
 
   return {
-    from,
-    to: yesterday,
-    fromKey: formatDateInput(from),
-    toKey: formatDateInput(yesterday),
+    from: zonedStartOfDay(fromKey, tz),
+    to: zonedStartOfDay(yesterdayKey, tz),
+    fromKey,
+    toKey: yesterdayKey,
   };
 }
 
@@ -229,7 +234,11 @@ export async function buildCogsDayRows(
   baseCurrency: string,
 ): Promise<CogsDayRow[]> {
   const tz = normalizeStoreTimezone(store.ianaTimezone);
-  const { from, to, toKey } = resolveCogsRange(store.importStartDate, store.createdAt);
+  const { from, to, toKey } = resolveCogsRange(
+    store.importStartDate,
+    store.createdAt,
+    store.ianaTimezone,
+  );
   const dayKeys = dayKeysBetweenInTimezone(from, to, tz);
   const yesterdayKey = dayKeys[dayKeys.length - 1] ?? toKey;
 
