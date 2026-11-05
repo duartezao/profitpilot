@@ -240,13 +240,23 @@ export async function buildCogsDayRows(
   baseCurrency: string,
 ): Promise<CogsDayRow[]> {
   const tz = normalizeStoreTimezone(store.ianaTimezone);
+  // Garante o piso híbrido mesmo se o caller não seleccionou o campo.
+  let dayFloor = store.cogsDayFromKey?.trim() || null;
+  if (dayFloor === null && store.cogsDayFromKey === undefined) {
+    const fresh = await Store.findById(store._id)
+      .select("cogsDayFromKey")
+      .lean();
+    dayFloor = fresh?.cogsDayFromKey?.trim() || null;
+  }
   const { from, to, toKey } = resolveCogsRange(
     store.importStartDate,
     store.createdAt,
     store.ianaTimezone,
-    store.cogsDayFromKey,
+    dayFloor,
   );
-  const dayKeys = dayKeysBetweenInTimezone(from, to, tz);
+  const dayKeys = dayKeysBetweenInTimezone(from, to, tz).filter(
+    (k) => !dayFloor || k >= dayFloor,
+  );
   const yesterdayKey = dayKeys[dayKeys.length - 1] ?? toKey;
 
   const [manualRows, orderDays] = await Promise.all([
@@ -433,6 +443,17 @@ export async function countMissingCogsDays(
         : dayKeysBetweenInTimezone(period.start, period.end, tz),
     );
     missing = missing.filter((r) => periodKeys.has(r.dateKey));
+  }
+  // Dias anteriores ao corte híbrido usam COGS automático — nunca «em falta» manual.
+  let dayFloor = store.cogsDayFromKey?.trim() || null;
+  if (dayFloor === null && store.cogsDayFromKey === undefined) {
+    const fresh = await Store.findById(store._id)
+      .select("cogsDayFromKey")
+      .lean();
+    dayFloor = fresh?.cogsDayFromKey?.trim() || null;
+  }
+  if (dayFloor) {
+    missing = missing.filter((r) => r.dateKey >= dayFloor);
   }
   return missing.length;
 }
