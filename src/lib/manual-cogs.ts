@@ -82,6 +82,8 @@ export function resolveCogsRange(
   importStartDate?: Date | null,
   storeCreatedAt?: Date | null,
   storeTimeZone?: string | null,
+  /** Piso do modo híbrido `day` — calendário manual só a partir desta data. */
+  cogsDayFromKey?: string | null,
 ): { from: Date; to: Date; fromKey: string; toKey: string } {
   const tz = normalizeStoreTimezone(storeTimeZone);
   const todayKey = dateKeyInTimezone(new Date(), tz);
@@ -95,6 +97,9 @@ export function resolveCogsRange(
   } else {
     fromKey = addDaysToDateKey(todayKey, -COGS_LOOKBACK_DAYS, tz);
   }
+
+  const dayFloor = cogsDayFromKey?.trim() || null;
+  if (dayFloor && dayFloor > fromKey) fromKey = dayFloor;
 
   if (fromKey > yesterdayKey) fromKey = yesterdayKey;
 
@@ -230,6 +235,7 @@ export async function buildCogsDayRows(
     importStartDate?: Date | null;
     createdAt?: Date | null;
     ianaTimezone?: string | null;
+    cogsDayFromKey?: string | null;
   },
   baseCurrency: string,
 ): Promise<CogsDayRow[]> {
@@ -238,6 +244,7 @@ export async function buildCogsDayRows(
     store.importStartDate,
     store.createdAt,
     store.ianaTimezone,
+    store.cogsDayFromKey,
   );
   const dayKeys = dayKeysBetweenInTimezone(from, to, tz);
   const yesterdayKey = dayKeys[dayKeys.length - 1] ?? toKey;
@@ -411,6 +418,7 @@ export async function countMissingCogsDays(
     importStartDate?: Date | null;
     createdAt?: Date | null;
     ianaTimezone?: string | null;
+    cogsDayFromKey?: string | null;
   },
   period?: PeriodSlice,
 ): Promise<number> {
@@ -461,6 +469,7 @@ export async function countMissingCogsForStore(
     importStartDate?: Date | null;
     createdAt?: Date | null;
     ianaTimezone?: string | null;
+    cogsDayFromKey?: string | null;
   },
   period?: PeriodSlice,
 ): Promise<number> {

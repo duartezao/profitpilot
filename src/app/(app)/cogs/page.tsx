@@ -44,7 +44,9 @@ export default async function CogsPage({
   if (!user) return null;
 
   const stores = await Store.find(activeStoreQueryForUser(user))
-    .select("name currency cogsMode cogsInputCurrency workspaceId importStartDate createdAt ianaTimezone")
+    .select(
+      "name currency cogsMode cogsInputCurrency cogsDayFromKey workspaceId importStartDate createdAt ianaTimezone",
+    )
     .lean();
   const scoped =
     storeId && canAccessStore(user.storeAccess, storeId)
