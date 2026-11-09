@@ -489,20 +489,56 @@ async function aggregateStoreAggs(
   return result;
 }
 
-/** Agrega métricas por loja com COGS conforme o modo (shopify/variant/order/day). */
+/**
+ * Agrega métricas por loja com COGS conforme o modo (shopify/variant/order/day).
+ * Cada loja usa o **próprio** fuso (`ianaTimezone`) nos limites do dia — alinhado
+ * com o admin Shopify dessa loja. O `sharedTimeZone` só define quais dateKeys
+ * entram no período (vista consolidada); não desloca a meia-noite da loja.
+ */
 async function aggregateStoreAggsFromOrders(
   wsId: mongoose.Types.ObjectId,
   stores: StoreCogsCtx[],
   slice: PeriodSlice,
-  sharedTimeZone?: string | null,
+  _sharedTimeZone?: string | null,
 ): Promise<Map<string, StoreAgg>> {
   const result = new Map<string, StoreAgg>();
   if (!stores.length) return result;
 
+  const byTz = new Map<string, StoreCogsCtx[]>();
+  for (const s of stores) {
+    const tz = normalizeStoreTimezone(s.ianaTimezone);
+    const list = byTz.get(tz);
+    if (list) list.push(s);
+    else byTz.set(tz, [s]);
+  }
+
+  await Promise.all(
+    [...byTz.entries()].map(async ([tz, group]) => {
+      const part = await aggregateStoreAggsFromOrdersInTimezone(
+        wsId,
+        group,
+        slice,
+        tz,
+      );
+      for (const [sid, agg] of part) result.set(sid, agg);
+    }),
+  );
+
+  return result;
+}
+
+async function aggregateStoreAggsFromOrdersInTimezone(
+  wsId: mongoose.Types.ObjectId,
+  stores: StoreCogsCtx[],
+  slice: PeriodSlice,
+  timeZone: string,
+): Promise<Map<string, StoreAgg>> {
+  const result = new Map<string, StoreAgg>();
+  if (!stores.length) return result;
+
+  const tz = normalizeStoreTimezone(timeZone);
   const storeOids = stores.map((s) => s._id);
-  const dateMatch = sharedTimeZone
-    ? orderDateMatchInTimezone(slice, sharedTimeZone)
-    : orderDateMatch(slice);
+  const dateMatch = orderDateMatchInTimezone(slice, tz);
 
   const baseRows = await Order.aggregate<
     { _id: mongoose.Types.ObjectId } & StoreAgg
@@ -531,7 +567,7 @@ async function aggregateStoreAggsFromOrders(
     wsId,
     storeOids,
     slice,
-    sharedTimeZone,
+    tz,
   );
 
   for (const r of baseRows) {
@@ -604,24 +640,14 @@ async function aggregateStoreAggsFromOrders(
     }
   }
 
-  await overwriteDayModeStoreCogs(
-    wsId,
-    stores,
-    slice,
-    sharedTimeZone,
-    result,
-  );
+  await overwriteDayModeStoreCogs(wsId, stores, slice, null, result);
 
   await Promise.all(
     stores
       .filter((s) => appliesEuCategoryFees(storeCogsMode(s)))
       .map(async (s) => {
-        const tz = normalizeStoreTimezone(s.ianaTimezone);
-        const fees = await sumEuCategoryFeesForPeriod(
-          [s._id],
-          slice,
-          sharedTimeZone ?? tz,
-        );
+        const storeTz = normalizeStoreTimezone(s.ianaTimezone);
+        const fees = await sumEuCategoryFeesForPeriod([s._id], slice, storeTz);
         result.get(String(s._id))!.cogs += fees;
       }),
   );
@@ -646,7 +672,9 @@ async function overwriteDayModeStoreCogs(
   await Promise.all(
     dayStores.map(async (s) => {
       const tz = normalizeStoreTimezone(s.ianaTimezone);
-      const zone = sharedTimeZone ?? tz;
+      // Sempre o fuso da loja — o shared só escolhe dateKeys do período.
+      const zone = tz;
+      void sharedTimeZone;
       const fromKey = s.cogsDayFromKey ?? null;
       const priorMode = isCogsMode(s.cogsModePriorToDayForce ?? "")
         ? (s.cogsModePriorToDayForce as CogsMode)
@@ -1411,7 +1439,9 @@ async function aggregateDailyOrdersByStore(
   await Promise.all(
     stores.map(async (store) => {
       const sid = String(store._id);
-      const tz = sharedTimeZone ?? normalizeStoreTimezone(store.ianaTimezone);
+      // DateKeys do período vêm da vista consolidada; a meia-noite é da loja.
+      void sharedTimeZone;
+      const tz = normalizeStoreTimezone(store.ianaTimezone);
       const mode = storeCogsMode(store);
       const fromKey = store.cogsDayFromKey ?? null;
       const priorMode = isCogsMode(store.cogsModePriorToDayForce ?? "")
