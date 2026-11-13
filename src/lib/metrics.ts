@@ -70,7 +70,7 @@ import {
   dateKeyInTimezone,
   zonedStartOfDay,
   zonedEndOfDay,
-  DEFAULT_STORE_TIMEZONE,
+  dominantStoreTimezone,
 } from "@/lib/store-timezone";
 import {
   canAccessStore,
@@ -2660,29 +2660,6 @@ export type WorkspacePnl = {
   missingCogsMessage: string;
   missingAdSpendDays: number;
 };
-
-/**
- * Fuso para a vista consolidada: o mais comum entre as lojas acessíveis
- * (determinístico, independente do fuso do servidor). Fallback: default.
- */
-function dominantStoreTimezone(
-  stores: Array<{ ianaTimezone?: string | null }>,
-): string {
-  const counts = new Map<string, number>();
-  for (const s of stores) {
-    const tz = normalizeStoreTimezone(s.ianaTimezone);
-    counts.set(tz, (counts.get(tz) ?? 0) + 1);
-  }
-  let best = DEFAULT_STORE_TIMEZONE;
-  let bestCount = -1;
-  for (const [tz, n] of counts) {
-    if (n > bestCount) {
-      best = tz;
-      bestCount = n;
-    }
-  }
-  return best;
-}
 
 /**
  * P&L (lucro real) por workspace a partir das orders sincronizadas.

@@ -454,22 +454,33 @@ export function importDateKey(
   return formatDateInput(new Date(d));
 }
 
-/** Fuso mais comum entre lojas (vista consolidada). */
+/**
+ * Fuso do selector de período na vista consolidada.
+ * Só usa um fuso de loja se tiver **maioria absoluta** (>50%).
+ * Caso contrário (portfolio multi-fuso tipico) fica em `DEFAULT_STORE_TIMEZONE`
+ * (`Europe/Lisbon`) — evita «Hoje» preso no fuso US quando 2 lojas NY
+ * batem 1× cada fuso EU e o dia civil europeu já avançou.
+ */
 export function dominantStoreTimezone(
   stores: Array<{ ianaTimezone?: string | null }>,
 ): string {
+  if (!stores.length) return DEFAULT_STORE_TIMEZONE;
+
   const counts = new Map<string, number>();
   for (const s of stores) {
     const tz = normalizeStoreTimezone(s.ianaTimezone);
     counts.set(tz, (counts.get(tz) ?? 0) + 1);
   }
+
   let best = DEFAULT_STORE_TIMEZONE;
   let bestCount = -1;
   for (const [tz, n] of counts) {
-    if (n > bestCount) {
+    if (n > bestCount || (n === bestCount && tz === DEFAULT_STORE_TIMEZONE)) {
       best = tz;
       bestCount = n;
     }
   }
-  return best;
+
+  if (bestCount * 2 > stores.length) return best;
+  return DEFAULT_STORE_TIMEZONE;
 }
