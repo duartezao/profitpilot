@@ -3,9 +3,9 @@
 import { useActionState } from "react";
 import { useSearchParams } from "next/navigation";
 import { loginAction, type AuthState } from "./actions";
-
-const inputCls =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export function LoginForm() {
   const searchParams = useSearchParams();
@@ -23,36 +23,30 @@ export function LoginForm() {
           {state.error}
         </p>
       )}
-      <div>
-        <label className="mb-1 block text-sm font-medium">
-          Email ou utilizador
-        </label>
-        <input
+      <div className="space-y-1.5">
+        <Label htmlFor="identifier">Email ou utilizador</Label>
+        <Input
+          id="identifier"
           name="identifier"
           type="text"
           autoComplete="username"
           required
           placeholder="tu@email.com ou nome.utilizador"
-          className={inputCls}
         />
       </div>
-      <div>
-        <label className="mb-1 block text-sm font-medium">Password</label>
-        <input
+      <div className="space-y-1.5">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
           name="password"
           type="password"
           autoComplete="current-password"
           required
-          className={inputCls}
         />
       </div>
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
-      >
+      <Button type="submit" disabled={pending} className="w-full">
         {pending ? "A entrar…" : "Entrar"}
-      </button>
+      </Button>
     </form>
   );
 }

@@ -28,6 +28,7 @@ import { OrderCogsPanel } from "./order-cogs-panel";
 import { DayCogsPanel } from "./day-cogs-panel";
 import { CogsView } from "@/components/cogs/cogs-view";
 import { PageTabCard } from "@/components/page-tabs";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Custos (COGS)" };
 
@@ -165,28 +166,30 @@ export default async function CogsPage({
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {scoped ? (
+      <PageHeader
+        title={
+          scoped ? (
             <>
               COGS · <span data-sensitive>{scoped.name}</span>
             </>
           ) : (
             "Custos (COGS)"
-          )}
-        </h1>
-        {scoped && activeMode && (
-          <p className="mt-1 text-sm text-muted-foreground">
-            Modo: {COGS_MODE_LABELS[activeMode]}
-            {scoped.cogsInputCurrency && activeMode !== "shopify"
-              ? ` · entrada em ${scoped.cogsInputCurrency}`
-              : ""}
-            {baseCurrency !== (scoped.currency ?? "EUR")
-              ? ` · dashboard em ${baseCurrency}`
-              : ""}
-          </p>
-        )}
-      </div>
+          )
+        }
+        description={
+          scoped && activeMode ? (
+            <>
+              Modo: {COGS_MODE_LABELS[activeMode]}
+              {scoped.cogsInputCurrency && activeMode !== "shopify"
+                ? ` · entrada em ${scoped.cogsInputCurrency}`
+                : ""}
+              {baseCurrency !== (scoped.currency ?? "EUR")
+                ? ` · dashboard em ${baseCurrency}`
+                : ""}
+            </>
+          ) : undefined
+        }
+      />
 
       <CogsView
         mode={

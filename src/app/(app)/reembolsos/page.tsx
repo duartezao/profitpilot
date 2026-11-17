@@ -7,6 +7,7 @@ import { canAccessStore } from "@/lib/store-access";
 import { listStoreRefunds } from "@/lib/orders";
 import { scopeQueryFromInput } from "@/lib/scope-query";
 import { CollapsibleSection } from "@/components/collapsible-section";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Reembolsos" };
 export const dynamic = "force-dynamic";
@@ -54,14 +55,16 @@ export default async function ReembolsosPage({
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Reembolsos · <span data-sensitive>{storeName || "Loja"}</span>
-        </h1>
-        {rows.length > 0 && (
-        <ExportFormatLinks href={exportHref} />
-        )}
-      </div>
+      <PageHeader
+        title={
+          <>
+            Reembolsos · <span data-sensitive>{storeName || "Loja"}</span>
+          </>
+        }
+        actions={
+          rows.length > 0 ? <ExportFormatLinks href={exportHref} /> : undefined
+        }
+      />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {kpis.map((k) => (

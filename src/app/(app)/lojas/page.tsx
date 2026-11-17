@@ -8,6 +8,7 @@ import { Store } from "@/models/Store";
 import { storeQueryForUser } from "@/lib/store-scope";
 import { SyncButton } from "./sync-button";
 import { getStoreDisplayUrl } from "@/lib/store-display";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Lojas" };
 
@@ -36,16 +37,18 @@ export default async function LojasPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Lojas</h1>
-        <Link
-          href="/lojas/nova"
-          className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
-        >
-          <Plus className="h-4 w-4" />
-          Adicionar loja
-        </Link>
-      </div>
+      <PageHeader
+        title="Lojas"
+        actions={
+          <Link
+            href="/lojas/nova"
+            className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
+          >
+            <Plus className="h-4 w-4" />
+            Adicionar loja
+          </Link>
+        }
+      />
 
       {stores.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface p-12 text-center">

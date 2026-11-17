@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Globe } from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { SummaryKpi } from "@/lib/metrics";
 import { combineKpisForPanel, orderKpisForPanel } from "@/lib/metric-panel";
 import { DashboardKpiCard } from "@/components/dashboard/dashboard-kpi-card";
+import { Button } from "@/components/ui/button";
 
 /** Ordem e conjunto dos KPIs primários (dashboard limpo). */
 const PRIMARY_KPI_ORDER = [
@@ -39,7 +39,6 @@ export function DashboardKpiSection({
   variant = "store",
   showExtended,
   orderedMetricIds,
-  emphasizeLabel,
 }: {
   kpis: SummaryKpi[];
   extendedKpis?: SummaryKpi[];
@@ -50,7 +49,7 @@ export function DashboardKpiSection({
   showExtended?: boolean;
   /** Painel personalizado — filtra e ordena numa única grelha. */
   orderedMetricIds?: string[];
-  /** Realça o card com este label (ex. "Net Profit"). */
+  /** @deprecated Combo 3 — cards clean iguais; ignorado. */
   emphasizeLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -134,10 +133,12 @@ export function DashboardKpiSection({
       <div className="space-y-3">
         {hasMore && (
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setOpen((v) => !v)}
-              className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+              className="h-8 gap-1 text-muted-foreground"
             >
               {open ? (
                 <>
@@ -150,7 +151,7 @@ export function DashboardKpiSection({
                   Mais métricas
                 </>
               )}
-            </button>
+            </Button>
           </div>
         )}
 
@@ -160,7 +161,6 @@ export function DashboardKpiSection({
               key={k.label}
               {...k}
               layout={isStore ? "store" : "workspace"}
-              emphasis={emphasizeLabel === k.label}
               density="primary"
             />
           ))}

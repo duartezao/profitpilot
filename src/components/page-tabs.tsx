@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { Card, CardContent } from "@/components/ui/card";
 
 export type PageTab = {
   id: string;
@@ -31,10 +32,10 @@ export function PageTabs({
           type="button"
           onClick={() => onChange(t.id)}
           className={cn(
-            "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+            "inline-flex shrink-0 items-center gap-1.5 rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors",
             active === t.id
-              ? "border-accent text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground",
+              ? "border-accent bg-accent/15 font-semibold text-accent"
+              : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground",
           )}
         >
           {t.label}
@@ -47,8 +48,8 @@ export function PageTabs({
 
 export function PageTabCard({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 sm:p-5">
-      {children}
-    </div>
+    <Card>
+      <CardContent className="p-4 pt-4 sm:p-5 sm:pt-5">{children}</CardContent>
+    </Card>
   );
 }

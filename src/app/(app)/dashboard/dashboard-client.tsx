@@ -17,6 +17,7 @@ import {
 } from "@/components/dashboard/store-dashboard-view";
 import { StoresComparisonTable } from "@/components/dashboard/stores-comparison-table";
 import { WorkspacesComparisonTable } from "@/components/dashboard/workspaces-comparison-table";
+import { PageHeader } from "@/components/page-header";
 import { Sensitive } from "@/components/privacy-mode";
 import { useWorkspace } from "@/components/workspace-context";
 import {
@@ -196,19 +197,15 @@ export function DashboardClient() {
   if (isPortfolio) {
     return (
       <div className={cn("mx-auto max-w-7xl space-y-4", fetchingDim)}>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Portfolio
-            </h1>
-            {portfolioData?.portfolioLabel ? (
-              <p className="text-sm text-muted-foreground">
-                <Sensitive as="span">{portfolioData.portfolioLabel}</Sensitive>
-              </p>
-            ) : null}
-          </div>
-          {liveActions}
-        </div>
+        <PageHeader
+          title="Portfolio"
+          description={
+            portfolioData?.portfolioLabel ? (
+              <Sensitive as="span">{portfolioData.portfolioLabel}</Sensitive>
+            ) : undefined
+          }
+          actions={liveActions}
+        />
 
         {isError && (
           <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">
@@ -296,12 +293,7 @@ export function DashboardClient() {
         </>
       ) : (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Dashboard
-            </h1>
-            {liveActions}
-          </div>
+          <PageHeader title="Dashboard" actions={liveActions} />
 
           {isError && (
             <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">

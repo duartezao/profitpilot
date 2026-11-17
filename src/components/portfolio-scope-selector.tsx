@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Briefcase, ChevronDown, Check } from "lucide-react";
 import type { UserWorkspace } from "@/lib/auth";
@@ -13,8 +19,31 @@ import {
 import { periodQueryFromSearchParams } from "@/lib/period";
 import { cn } from "@/lib/utils";
 
-const menuPanelCls =
-  "z-[210] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 max-md:fixed max-md:inset-x-3 max-md:top-[5.75rem] md:absolute md:top-full md:mt-1 md:max-h-96";
+function menuPositionFromTrigger(rect: DOMRect): CSSProperties {
+  const gap = 4;
+  const width = Math.max(rect.width, 288);
+  let left = rect.left;
+  if (left + width > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - width - 8);
+  }
+  const spaceBelow = window.innerHeight - rect.bottom - gap - 12;
+  const spaceAbove = rect.top - 12;
+  const openUp = spaceBelow < 280 && spaceAbove > spaceBelow;
+  const maxHeight = Math.min(
+    420,
+    Math.max(160, openUp ? spaceAbove - gap : spaceBelow),
+  );
+  return {
+    position: "fixed",
+    left,
+    width,
+    maxHeight,
+    zIndex: 9999,
+    ...(openUp
+      ? { bottom: window.innerHeight - rect.top + gap }
+      : { top: rect.bottom + gap }),
+  };
+}
 
 export function PortfolioScopeSelector({
   workspaces,
@@ -30,11 +59,31 @@ export function PortfolioScopeSelector({
   const params = useSearchParams();
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const portfolioRaw = params.get("portfolio");
   const portfolioParsed = parsePortfolioParam(portfolioRaw);
   const isPortfolio = portfolioParsed !== null;
   const isAll = portfolioParsed === "all";
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    function updatePosition() {
+      const el = triggerRef.current;
+      if (!el) return;
+      setMenuStyle(menuPositionFromTrigger(el.getBoundingClientRect()));
+    }
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -124,6 +173,7 @@ export function PortfolioScopeSelector({
   return (
     <div className={cn("relative", className)}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
@@ -141,55 +191,60 @@ export function PortfolioScopeSelector({
       {open && (
         <>
           <div
-            className="fixed inset-0 z-[200] bg-black/20 dark:bg-black/40"
+            className="fixed inset-0 z-[9998] bg-black/40"
             onClick={() => setOpen(false)}
             aria-hidden
           />
           <div
-            className={cn(menuPanelCls, "left-0 w-full min-w-[16rem] md:w-72")}
+            className="flex flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-lg"
+            style={menuStyle}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <p className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
-              Comparar workspaces
-            </p>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted"
-              onClick={selectActiveOnly}
-            >
-              Só este workspace
-              {!isPortfolio && <Check className="h-4 w-4 shrink-0 text-accent" />}
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted"
-              onClick={selectAll}
-            >
-              Todos os workspaces
-              {isAll && <Check className="h-4 w-4 shrink-0 text-accent" />}
-            </button>
-
-            <div className="my-1 border-t border-border" />
-            <p className="px-2.5 py-1 text-xs text-muted-foreground">
-              Ou escolhe 2+ workspaces
-            </p>
-            {workspaces.map((w) => (
-              <label
-                key={w.id}
-                className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-muted"
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+              <p className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+                Comparar workspaces
+              </p>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted"
+                onClick={selectActiveOnly}
               >
-                <input
-                  type="checkbox"
-                  checked={picked.has(w.id)}
-                  onChange={() => toggleWorkspace(w.id)}
-                  className="h-4 w-4 rounded border-border"
-                />
-                <Sensitive className="min-w-0 flex-1 truncate">
-                  {w.name}
-                </Sensitive>
-              </label>
-            ))}
-            <div className="border-t border-border p-2">
+                Só este workspace
+                {!isPortfolio && (
+                  <Check className="h-4 w-4 shrink-0 text-accent" />
+                )}
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted"
+                onClick={selectAll}
+              >
+                Todos os workspaces
+                {isAll && <Check className="h-4 w-4 shrink-0 text-accent" />}
+              </button>
+
+              <div className="my-1 border-t border-border" />
+              <p className="px-2.5 py-1 text-xs text-muted-foreground">
+                Ou escolhe 2+ workspaces
+              </p>
+              {workspaces.map((w) => (
+                <label
+                  key={w.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-muted"
+                >
+                  <input
+                    type="checkbox"
+                    checked={picked.has(w.id)}
+                    onChange={() => toggleWorkspace(w.id)}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                  <Sensitive className="min-w-0 flex-1 truncate">
+                    {w.name}
+                  </Sensitive>
+                </label>
+              ))}
+            </div>
+            <div className="shrink-0 border-t border-border bg-popover p-2">
               <button
                 type="button"
                 onClick={applySelection}

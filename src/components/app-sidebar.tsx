@@ -9,6 +9,7 @@ import { useAppViewModeContext } from "@/components/app-view-mode-provider";
 import { homePathForMode } from "@/lib/app-view-mode";
 import { hrefWithScope } from "@/lib/scope-query";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useSearchParams } from "next/navigation";
 
 const STORAGE_KEY = "pp-sidebar-collapsed";
@@ -74,8 +75,8 @@ export function AppSidebar() {
   return (
     <aside
       className={cn(
-        "hidden h-dvh shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-200 ease-out lg:flex lg:overflow-hidden",
-        collapsed ? "w-16" : "w-60 xl:w-64",
+        "glass-nav hidden h-dvh shrink-0 flex-col border-r transition-[width] duration-200 ease-out lg:flex lg:overflow-hidden",
+        collapsed ? "w-[4.5rem]" : "w-60 xl:w-64",
         !ready && "opacity-0",
       )}
     >
@@ -89,15 +90,17 @@ export function AppSidebar() {
           <SidebarLogo collapsed={collapsed} />
         </Suspense>
         {!collapsed && !hasStore && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={toggle}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="h-8 w-8 shrink-0 text-muted-foreground"
             aria-label="Fechar menu lateral"
             title="Fechar menu"
           >
             <PanelLeftClose className="h-4 w-4" />
-          </button>
+          </Button>
         )}
       </div>
 
@@ -125,15 +128,17 @@ export function AppSidebar() {
 
       {collapsed && (
         <div className="shrink-0 border-t border-border p-2">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={toggle}
-            className="inline-flex h-10 w-full items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="h-10 w-full text-muted-foreground"
             aria-label="Abrir menu lateral"
             title="Abrir menu"
           >
             <PanelLeft className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
       )}
     </aside>

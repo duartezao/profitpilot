@@ -109,7 +109,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * **Sem emojis** na interface. Ícones consistentes de uma única biblioteca (ex.: Lucide), monocromáticos.
 * **Sem gradientes**, sem sombras exageradas, sem cores "neon". Superfícies planas.
 * **Paleta sóbria e neutra** — fundo neutro, 1 cor de destaque discreta, verde/vermelho apenas para indicar lucro/prejuízo.
-* **Tipografia limpa** (ex.: Inter / Geist), números tabulares alinhados para ler valores rapidamente.
+* **Tipografia limpa** (SF Pro no Apple / Inter no resto), números tabulares alinhados para ler valores rapidamente.
 * **Densidade controlada** — tabelas e dashboards densos mas legíveis, estilo painel financeiro (ex.: Linear, Stripe Dashboard).
 * **Consistência total** — mesmos espaçamentos, mesmos cantos, mesmos componentes em toda a app.
 * **Dark mode e light mode** sóbrios.
@@ -122,7 +122,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 
 > Resumo abaixo. A **fonte completa e canónica** (cores hex, tipografia, componentes, Tailwind config e variáveis CSS) está em **`design-system.md`** — seguir esse ficheiro a 100%.
 
-* **Tipografia**: Inter (ou Geist). Números **tabulares** (`font-variant-numeric: tabular-nums`). Títulos semibold, corpo regular.
+* **Tipografia**: SF Pro (Apple) / Inter (resto). Números **tabulares**. UI **Apple dark + soft glass**, accent **System Blue** (`#0A84FF`); sem gradientes roxos / neon. Ver `design-system.md`.
 * **Cores (light)**: fundo principal `#F2F2F4`, sidebar `#EEEEF0`, cartões `#FAFAFA` com borda `#DDDDE1`, texto principal `#18181B`, texto secundário `#71717A`, muted `#EAEAEC`.
 * **Cores (dark)**: fundo quase preto `#09090B`, sidebar `#0C0C0E`, cartão `#141416`, borda `#27272A`, texto `#FAFAFA`, muted `#1A1820`. Accent índigo `#9B9AD4`.
 * **Accent** (discreto): índigo seco `#5B5EA6` light / `#9B9AD4` dark (item ativo, links, seleção, gráficos).
@@ -1297,7 +1297,7 @@ Lucro após taxas =
 * `workspaceId`
 * `name`
 * `platform`
-* `status` (active / paused / archived)
+* `status` (active / paused / archived). **Tabela «Lojas» (overview):** `paused` só aparece se tiver **revenue > 0** no período da topbar (ex. vista ano); sem vendas no intervalo continua oculta. Sync/KPIs consolidados mantêm a loja na agregação. Selector de loja continua a esconder `paused`.
 * `operationStatus` (running / waiting / killed — pipeline operacional; `null` = inferido de `status`)
 * `operationKilledAt` (data em que passou a «matada» — métricas financeiras só até ao fim deste dia, inclusive; limpa-se ao sair de `killed`)
 * `collectionTestCycleDays` (dias por ciclo de teste de coleção; defeito 5)

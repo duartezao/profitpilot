@@ -30,6 +30,7 @@ import {
   resolvePeriodForStore,
 } from "@/lib/store-timezone";
 import { storeQueryForUser } from "@/lib/store-scope";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Lucro & Finanças" };
 export const dynamic = "force-dynamic";
@@ -448,37 +449,39 @@ export default async function FinancasPage({
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {scopeName ? (
+      <PageHeader
+        title={
+          scopeName ? (
             <>
               Resumo · <span data-sensitive>{scopeName}</span>
             </>
           ) : (
             "Lucro & Finanças"
-          )}
-        </h1>
-        <div className="flex flex-wrap items-center gap-3">
-          {!storeId && (
-            <Suspense fallback={null}>
-              <FinancasModeToggle />
-            </Suspense>
-          )}
-          <ExportFormatLinks href={pnlExportHref} />
-          <ScopeLink
-            href="/cogs"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            COGS
-          </ScopeLink>
-          <Link
-            href={adsHref}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Ad Spend
-          </Link>
-        </div>
-      </div>
+          )
+        }
+        actions={
+          <>
+            {!storeId && (
+              <Suspense fallback={null}>
+                <FinancasModeToggle />
+              </Suspense>
+            )}
+            <ExportFormatLinks href={pnlExportHref} />
+            <ScopeLink
+              href="/cogs"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              COGS
+            </ScopeLink>
+            <Link
+              href={adsHref}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Ad Spend
+            </Link>
+          </>
+        }
+      />
 
       <DataWarnings
         cogsIncomplete={pnl.cogsIncomplete}

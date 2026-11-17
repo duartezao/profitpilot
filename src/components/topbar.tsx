@@ -16,9 +16,9 @@ export function Topbar({
   workspaces: UserWorkspace[];
 }) {
   return (
-    <header className="sticky top-0 z-50 shrink-0 overflow-visible border-b border-border bg-background">
+    <header className="glass-nav z-50 shrink-0 overflow-visible border-b">
       {/* Telemóvel + tablet */}
-      <div className="flex flex-col gap-2 overflow-visible px-3 py-2 sm:px-4 lg:hidden">
+      <div className="flex flex-col gap-2 overflow-visible px-3 py-2.5 sm:px-4 lg:hidden">
         <div className="flex min-w-0 items-center gap-2">
           <Suspense
             fallback={
@@ -70,7 +70,7 @@ export function Topbar({
       </div>
 
       {/* Desktop — loja + período à vista; resto no menu «…» */}
-      <div className="hidden items-center justify-between gap-3 px-4 py-2 lg:flex lg:px-6">
+      <div className="hidden items-center justify-between gap-3 px-4 py-2.5 lg:flex lg:px-6">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Suspense
             fallback={

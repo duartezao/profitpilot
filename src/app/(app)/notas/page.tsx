@@ -11,6 +11,7 @@ import { DailyNoteForm } from "./daily-note-form";
 import { DailyReportPanel } from "@/components/dashboard/daily-report-panel";
 import { ShopifyExtraFeesSection } from "@/components/dashboard/shopify-extra-fees-section";
 import { NotasView } from "@/components/notas/notas-view";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Notas & Relatórios" };
 export const dynamic = "force-dynamic";
@@ -67,15 +68,17 @@ export default async function NotasPage({
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        {scopeName ? (
-          <>
-            Notas · <span data-sensitive>{scopeName}</span>
-          </>
-        ) : (
-          "Notas & Relatórios"
-        )}
-      </h1>
+      <PageHeader
+        title={
+          scopeName ? (
+            <>
+              Notas · <span data-sensitive>{scopeName}</span>
+            </>
+          ) : (
+            "Notas & Relatórios"
+          )
+        }
+      />
 
       <NotasView
         scopeName={scopeName}

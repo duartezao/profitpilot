@@ -3,9 +3,11 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
+/** Inter ≈ SF Pro em Windows/Android; no Apple usa-se SF via -apple-system. */
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -26,12 +28,12 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "ProfitPilot",
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#5b5ea6",
+  themeColor: "#000000",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -46,9 +48,9 @@ export default function RootLayout({
     <html
       lang="pt-PT"
       suppressHydrationWarning
-      className={`${inter.variable} h-full antialiased`}
+      className={`dark ${inter.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-background text-foreground">
+      <body className="min-h-full bg-background font-sans text-foreground">
         <Providers>{children}</Providers>
       </body>
     </html>

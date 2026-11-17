@@ -94,7 +94,7 @@ function BottomNavLinks() {
         items={overflowItems}
       />
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-border bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <nav className="glass-nav fixed inset-x-0 bottom-0 z-40 flex gap-0.5 border-t px-1 pt-1 pb-[env(safe-area-inset-bottom)] lg:hidden">
         {items.map((item, i) => {
           if (isMobileMoreNavItem(item)) {
             const Icon = item.icon;
@@ -107,9 +107,9 @@ function BottomNavLinks() {
                 aria-haspopup="dialog"
                 className={cn(
                   TAP_PRESS,
-                  "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium",
+                  "mx-0.5 flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
                   moreOpen || moreActive
-                    ? "text-accent"
+                    ? "bg-muted font-semibold text-accent"
                     : "text-muted-foreground",
                 )}
               >
@@ -130,8 +130,10 @@ function BottomNavLinks() {
               scroll={false}
               className={cn(
                 TAP_PRESS,
-                "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium",
-                active ? "text-accent" : "text-muted-foreground",
+                "mx-0.5 flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
+                active
+                  ? "bg-muted font-semibold text-accent"
+                  : "text-muted-foreground",
               )}
             >
               <NavItemInner label={item.label} icon={item.icon} />

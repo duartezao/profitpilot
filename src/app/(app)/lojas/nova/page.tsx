@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getCurrentUser, listStoreWritableWorkspaces } from "@/lib/auth";
+import { PageHeader } from "@/components/page-header";
 import { AddStoreForm } from "../add-store-form";
 
 export const metadata: Metadata = { title: "Adicionar loja" };
@@ -22,9 +23,7 @@ export default async function NovaLojaPage() {
           <ArrowLeft className="h-4 w-4" />
           Voltar às lojas
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">
-          Adicionar loja
-        </h1>
+        <PageHeader title="Adicionar loja" className="mt-2" />
       </div>
 
       <AddStoreForm

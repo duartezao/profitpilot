@@ -6,6 +6,7 @@ import { buildWorkspaceAlerts } from "@/lib/alerts";
 import { storeQueryForUser } from "@/lib/store-scope";
 import { canAccessStore } from "@/lib/store-access";
 import { AlertsList } from "./alerts-list";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Alertas" };
 export const dynamic = "force-dynamic";
@@ -34,9 +35,9 @@ export default async function AlertasPage({
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">
-        {store ? `Alertas · ${store.name}` : "Alertas"}
-      </h1>
+      <PageHeader
+        title={store ? `Alertas · ${store.name}` : "Alertas"}
+      />
       <AlertsList alerts={alerts} />
     </div>
   );

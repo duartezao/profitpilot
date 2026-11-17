@@ -36,7 +36,7 @@ export function Sparkline({
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       fill="none"
-      className={cn(!color && "text-accent", className)}
+      className={cn(!color && "text-muted-foreground", className)}
       preserveAspectRatio="none"
     >
       <polyline

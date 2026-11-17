@@ -34,7 +34,7 @@ export function CollapsibleSection({
   return (
     <section
       id={id}
-      className="scroll-mt-20 rounded-lg border border-border bg-surface"
+      className="glass scroll-mt-20 rounded-2xl"
     >
       <button
         type="button"

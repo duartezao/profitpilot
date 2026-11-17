@@ -15,6 +15,7 @@ import {
 import { useWorkspace } from "@/components/workspace-context";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { LastSyncBadge } from "@/components/last-sync-badge";
+import { PageHeader } from "@/components/page-header";
 import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 import { cn } from "@/lib/utils";
 
@@ -164,30 +165,32 @@ export function TreasuryClient() {
         Boolean(data) && isFetching && "opacity-[0.92] transition-opacity duration-150",
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {scopeStore ? (
+      <PageHeader
+        title={
+          scopeStore ? (
             <Sensitive as="span">{scopeStore.storeName}</Sensitive>
           ) : (
             "Tesouraria"
-          )}
-        </h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
-          <ScopeLink
-            href="/definicoes#capital-negocio"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Capital no negócio
-          </ScopeLink>
-          <ScopeLink
-            href="/definicoes"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Saldo inicial
-          </ScopeLink>
-        </div>
-      </div>
+          )
+        }
+        actions={
+          <>
+            <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
+            <ScopeLink
+              href="/definicoes#capital-negocio"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Capital no negócio
+            </ScopeLink>
+            <ScopeLink
+              href="/definicoes"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Saldo inicial
+            </ScopeLink>
+          </>
+        }
+      />
 
       {isError && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">

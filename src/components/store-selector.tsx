@@ -38,7 +38,7 @@ export type StoreOption = {
 };
 
 const menuPanelCls =
-  "overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-none";
+  "overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-lg";
 
 function menuPositionFromTrigger(rect: DOMRect): CSSProperties {
   const gap = 4;

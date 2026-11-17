@@ -46,7 +46,7 @@ function deltaTone(
 
 type DashboardKpiCardProps = SummaryKpi & {
   layout?: "store" | "workspace";
-  /** Realça o card (KPI principal). */
+  /** @deprecated Combo 3 — cards clean iguais; ignorado. */
   emphasis?: boolean;
   /** Variante compacta para métricas secundárias. */
   density?: "primary" | "secondary";
@@ -62,7 +62,6 @@ export function DashboardKpiCard({
   deltaInverted,
   trend,
   layout = "workspace",
-  emphasis = false,
   density = "primary",
 }: DashboardKpiCardProps) {
   const isStore = layout === "store";
@@ -114,39 +113,35 @@ export function DashboardKpiCard({
     </Sensitive>
   );
 
-  const valueClassName = cn(
-    "mt-1 block font-semibold tabular-nums leading-tight",
-    isSecondary
-      ? "text-base sm:text-lg"
-      : emphasis
-        ? "text-2xl sm:text-3xl"
-        : "text-xl sm:text-2xl",
-  );
-
-  // `emphasis` só aumenta tipografia — sem borda accent (accent raro).
   return (
     <div
       className={cn(
-        "flex h-full flex-col rounded-lg border border-border bg-surface",
-        isSecondary ? "p-3.5 sm:p-4" : "p-4 sm:p-5",
+        "glass relative flex h-full flex-col overflow-hidden rounded-2xl",
+        isSecondary ? "p-3 sm:p-3.5" : "p-4 sm:p-5",
       )}
     >
       <p
         className={cn(
-          "truncate font-medium text-muted-foreground",
-          isSecondary ? "text-xs" : "text-xs sm:text-[13px]",
+          "truncate font-medium tracking-[-0.01em] text-muted-foreground",
+          isSecondary ? "text-[11px]" : "text-[13px]",
         )}
       >
         {label}
       </p>
-      <Sensitive title={title ?? value} className={valueClassName}>
+      <Sensitive
+        title={title ?? value}
+        className={cn(
+          "mt-1 block font-semibold tabular-nums leading-none tracking-[-0.025em]",
+          isSecondary ? "text-lg sm:text-xl" : "text-[1.75rem] sm:text-[2rem]",
+        )}
+      >
         {value}
       </Sensitive>
       {deltaBlock}
 
       {Boolean(trend?.length) && !isSecondary && (
         <div className="mt-2 flex justify-end sm:mt-3" data-sensitive-chart>
-          <Sparkline data={trend!} width={80} height={22} />
+          <Sparkline data={trend!} width={80} height={22} color="var(--muted-foreground)" />
         </div>
       )}
     </div>

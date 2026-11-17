@@ -14,6 +14,7 @@ import {
   Plus,
   Store,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import type { OperationsTodayHub } from "@/lib/operation-today";
 import type { CollectionDecisionHint } from "@/lib/collection-decision";
 import {
@@ -164,26 +165,28 @@ export function OperacaoClient({
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Hoje</h1>
-        <div className="flex flex-wrap gap-3">
-          <QuickLink
-            href={hrefWithScope("/operacao/colecoes", searchParams)}
-            icon={Layers}
-            label="Coleções"
-          />
-          <QuickLink
-            href={hrefWithScope("/operacao/produtos", searchParams)}
-            icon={FlaskConical}
-            label="Produtos"
-          />
-          <QuickLink
-            href={hrefWithScope("/operacao/tarefas", searchParams)}
-            icon={ListTodo}
-            label="Quadro"
-          />
-        </div>
-      </div>
+      <PageHeader
+        title="Hoje"
+        actions={
+          <>
+            <QuickLink
+              href={hrefWithScope("/operacao/colecoes", searchParams)}
+              icon={Layers}
+              label="Coleções"
+            />
+            <QuickLink
+              href={hrefWithScope("/operacao/produtos", searchParams)}
+              icon={FlaskConical}
+              label="Produtos"
+            />
+            <QuickLink
+              href={hrefWithScope("/operacao/tarefas", searchParams)}
+              icon={ListTodo}
+              label="Quadro"
+            />
+          </>
+        }
+      />
 
       {error && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">

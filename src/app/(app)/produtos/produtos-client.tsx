@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { ExportFormatLinks } from "@/components/export-format-links";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { ProductsProfitTable } from "@/components/dashboard/products-profit-table";
+import { PageHeader } from "@/components/page-header";
 import { Sensitive } from "@/components/privacy-mode";
 import { useWorkspace } from "@/components/workspace-context";
 import { periodQueryFromSearchParams } from "@/lib/period";
@@ -67,21 +68,25 @@ export function ProdutosClient({ storeId }: { storeId: string }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Produtos ·{" "}
-          <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
-        </h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <Link
-            href={`/produtos/precos?store=${encodeURIComponent(storeId)}`}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Preço & COGS
-          </Link>
-          <ExportFormatLinks href={productsExportUrl(storeId, searchParams)} />
-        </div>
-      </div>
+      <PageHeader
+        title={
+          <>
+            Produtos ·{" "}
+            <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
+          </>
+        }
+        actions={
+          <>
+            <Link
+              href={`/produtos/precos?store=${encodeURIComponent(storeId)}`}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Preço & COGS
+            </Link>
+            <ExportFormatLinks href={productsExportUrl(storeId, searchParams)} />
+          </>
+        }
+      />
 
       <CollapsibleSection
         title="Ranking de produtos"

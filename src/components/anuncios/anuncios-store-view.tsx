@@ -11,6 +11,7 @@ import { AdAccountsPanel } from "@/components/anuncios/ad-accounts-panel";
 import { GoogleAdsStoreLink } from "@/components/anuncios/google-ads-store-link";
 import { CampaignsPanel } from "@/components/anuncios/campaigns-panel";
 import { LastSyncBadge } from "@/components/last-sync-badge";
+import { PageHeader } from "@/components/page-header";
 import { PageTabCard, PageTabs } from "@/components/page-tabs";
 import { DeleteAdAccountButton } from "@/components/anuncios/delete-ad-account-button";
 import { AdAccountFeesForm } from "@/components/anuncios/ad-account-fees-form";
@@ -43,17 +44,21 @@ export function AnunciosStoreView({
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Anúncios · <span data-sensitive>{s.storeName}</span>
-        </h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
-          <ExportFormatLinks
-            href={`/api/export/ad-spend?store=${encodeURIComponent(s.storeId)}`}
-          />
-        </div>
-      </div>
+      <PageHeader
+        title={
+          <>
+            Anúncios · <span data-sensitive>{s.storeName}</span>
+          </>
+        }
+        actions={
+          <>
+            <LastSyncBadge lastSyncedAt={lastSyncedAt} fetching={isFetching} />
+            <ExportFormatLinks
+              href={`/api/export/ad-spend?store=${encodeURIComponent(s.storeId)}`}
+            />
+          </>
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryCard

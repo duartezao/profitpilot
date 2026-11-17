@@ -1,49 +1,49 @@
 @import "tailwindcss";
 
-/* Dark mode por classe (next-themes) */
+/* Dark-only */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
-  Design tokens — ProfitPilot (ver design-system.md).
-  Light: slate frio (menos brilho). Accent índigo seco (não lavanda doce).
-  Sem gradientes, sem neon. Borda em vez de sombra.
+  ProfitPilot — paleta Apple Dark Mode (HIG / UIKit).
+  https://developer.apple.com/design/human-interface-guidelines/color
 */
-:root {
-  --background: #f2f2f4;
-  --sidebar: #eeeef0;
-  --surface: #fafafa;
-  --muted: #eaeaec;
-  --border: #dddde1;
-  --foreground: #18181b;
-  --muted-foreground: #71717a;
-  --accent: #5b5ea6;
-  --accent-foreground: #ffffff;
-  --positive: #16a34a;
-  --negative: #dc2626;
-  --warning: #d97706;
-  --chart-positive: #609060;
-  --chart-neutral: #8898a8;
-  --radius: 0.5rem;
-}
-
+:root,
 .dark {
-  --background: #09090b;
-  --sidebar: #0c0c0e;
-  --surface: #141416;
-  --muted: #1a1820;
-  --border: #27272a;
-  --foreground: #fafafa;
-  --muted-foreground: #a1a1aa;
-  --accent: #9b9ad4;
-  --accent-foreground: #0a0a0b;
-  --chart-positive: #6b9b6b;
-  --chart-neutral: #71717a;
+  /* System backgrounds */
+  --background: #000000;
+  --sidebar: rgba(28, 28, 30, 0.94);
+  /* secondarySystemGroupedBackground */
+  --surface: #1c1c1e;
+  /* tertiarySystemGroupedBackground — menus opacos */
+  --popover: #2c2c2e;
+  /* systemFill / tertiaryFill */
+  --muted: rgba(120, 120, 128, 0.24);
+  /* opaqueSeparator / separator */
+  --border: rgba(84, 84, 88, 0.65);
+  /* label */
+  --foreground: #ffffff;
+  /* secondaryLabel */
+  --muted-foreground: rgba(235, 235, 245, 0.6);
+  /* systemBlue (dark) */
+  --accent: #0a84ff;
+  --accent-foreground: #ffffff;
+  /* systemGreen / Red / Orange / Yellow (dark) */
+  --positive: #30d158;
+  --negative: #ff453a;
+  --warning: #ffd60a;
+  --chart-positive: #30d158;
+  /* tertiaryLabel-ish */
+  --chart-neutral: rgba(235, 235, 245, 0.3);
+  --radius: 0.75rem;
+  --glass-blur: 40px;
+  --glass-shine: rgba(255, 255, 255, 0.06);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-sidebar: var(--sidebar);
   --color-surface: var(--surface);
+  --color-popover: var(--popover);
   --color-muted: var(--muted);
   --color-border: var(--border);
   --color-foreground: var(--foreground);
@@ -57,21 +57,53 @@
   --color-chart-neutral: var(--chart-neutral);
 
   --radius-lg: var(--radius);
-  --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
+  /* SF Pro no Apple; Inter no resto */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    var(--font-inter), "Segoe UI", Roboto, "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+}
+
+html {
+  min-height: 100%;
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-inter), "Inter", system-ui, sans-serif;
+  font-family: var(--font-sans);
+  /* systemBackground — preto puro Apple dark */
+  background-color: var(--background);
+  background-image: none;
+  letter-spacing: -0.011em;
+  font-weight: 400;
 }
 
-/* Números tabulares para valores financeiros (obrigatório no design system) */
+/* Cards = secondarySystemGroupedBackground (#1C1C1E) */
+.glass {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  box-shadow: inset 0 0.5px 0 var(--glass-shine);
+}
+
+.glass-nav {
+  background: var(--sidebar);
+  border-color: var(--border);
+  backdrop-filter: blur(48px) saturate(1.8);
+  -webkit-backdrop-filter: blur(48px) saturate(1.8);
+  box-shadow: inset 0 0.5px 0 var(--glass-shine);
+}
+
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
-/* Modo apresentação — oculta valores e nomes sensíveis */
 html[data-privacy="true"] [data-sensitive] {
   filter: blur(7px);
   user-select: none;
@@ -91,7 +123,6 @@ html[data-privacy="true"] textarea[data-sensitive] {
   user-select: none;
 }
 
-/* Feedback de toque — navegação responsiva sem glow */
 .tap-press {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
@@ -100,6 +131,12 @@ html[data-privacy="true"] textarea[data-sensitive] {
 @media (prefers-reduced-motion: reduce) {
   .tap-press:active {
     transform: none !important;
+  }
+
+  .glass,
+  .glass-nav {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

@@ -31,11 +31,13 @@ export function StoreKpiCard({
   const period = periodFromDeltaLabel(deltaLabel);
 
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-surface p-5">
-      <p className="text-[13px] font-medium text-muted-foreground">{label}</p>
+    <div className="glass min-w-0 rounded-2xl p-4 sm:p-5">
+      <p className="text-[13px] font-medium tracking-[-0.01em] text-muted-foreground">
+        {label}
+      </p>
       <Sensitive
         title={title ?? value}
-        className="mt-1 block truncate text-xl font-semibold tabular-nums sm:text-2xl lg:text-3xl"
+        className="mt-1 block truncate text-[1.75rem] font-semibold tabular-nums leading-none tracking-[-0.025em] sm:text-[2rem]"
       >
         {value}
       </Sensitive>

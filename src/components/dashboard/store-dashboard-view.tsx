@@ -1,4 +1,5 @@
 import { Store } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { Sensitive } from "@/components/privacy-mode";
 import type { DashboardSummary } from "@/lib/metrics";
 import { DashboardKpiSection } from "@/components/dashboard/dashboard-kpi-section";
@@ -69,22 +70,27 @@ export function StoreDashboardView({ data }: { data: DashboardSummary }) {
 export function StoreDashboardHeader({
   title,
   actions,
+  className,
 }: {
   title: string;
   /** @deprecated Período já está na topbar — mantido por compatibilidade. */
   periodLabel?: string;
   prevPeriodLabel?: string;
   actions?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <Store className="h-5 w-5 shrink-0 text-muted-foreground" />
-        <Sensitive as="h1" className="truncate text-2xl font-semibold tracking-tight">
-          {title}
-        </Sensitive>
-      </div>
-      {actions ? <div className="flex flex-wrap items-center gap-3">{actions}</div> : null}
-    </div>
+    <PageHeader
+      className={className}
+      title={
+        <span className="flex min-w-0 items-center gap-2">
+          <Store className="h-5 w-5 shrink-0 text-muted-foreground" />
+          <Sensitive as="span" className="truncate">
+            {title}
+          </Sensitive>
+        </span>
+      }
+      actions={actions}
+    />
   );
 }

@@ -17,6 +17,7 @@ import {
   PipelineStatusPill,
   productPipelineTone,
 } from "@/components/operations/pipeline-status-pill";
+import { PageHeader } from "@/components/page-header";
 
 type StoreOption = { id: string; name: string };
 
@@ -56,15 +57,17 @@ export function ProdutosTesteClient({
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Produtos em teste</h1>
-        <Link
-          href="/operacao"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          Voltar a Hoje
-        </Link>
-      </div>
+      <PageHeader
+        title="Produtos em teste"
+        actions={
+          <Link
+            href="/operacao"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Voltar a Hoje
+          </Link>
+        }
+      />
 
       {error && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">

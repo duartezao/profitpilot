@@ -79,12 +79,12 @@ export default async function AppLayout({
         <ScopeSync workspaceId={user.workspaceId} storeIds={storeIds} />
         <ScopeRouteGuard />
       </Suspense>
-      <div className="flex min-h-screen lg:h-dvh lg:overflow-hidden">
+      <div className="flex h-dvh overflow-hidden">
         <AppSidebar />
-        <div className="flex min-w-0 flex-1 flex-col lg:overflow-y-auto">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Topbar user={user} stores={stores} workspaces={workspaces} />
           <PendingInvitesBanner count={pendingInviteCount} />
-          <main className="flex-1 p-4 pb-24 sm:p-5 lg:p-6 lg:pb-6">
+          <main className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-24 sm:p-5 lg:p-6 lg:pb-6">
             <PullToRefresh>{children}</PullToRefresh>
           </main>
         </div>

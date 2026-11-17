@@ -10,6 +10,7 @@ import type { AdSpendView } from "@/lib/ad-spend-view";
 import { AnunciosStoreView } from "@/components/anuncios/anuncios-store-view";
 import { LIVE_DATA_POLL_MS } from "@/lib/ad-sync-constants";
 import { LastSyncBadge } from "@/components/last-sync-badge";
+import { PageHeader } from "@/components/page-header";
 import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 
 async function fetchAdSpendView(storeId: string | null): Promise<AdSpendView> {
@@ -85,13 +86,15 @@ export function AnunciosClient() {
     const { summaries } = data.overview;
     return (
       <div className="mx-auto max-w-4xl space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Anúncios</h1>
-          <LastSyncBadge
-            lastSyncedAt={data.lastSyncedAt}
-            fetching={isFetching}
-          />
-        </div>
+        <PageHeader
+          title="Anúncios"
+          actions={
+            <LastSyncBadge
+              lastSyncedAt={data.lastSyncedAt}
+              fetching={isFetching}
+            />
+          }
+        />
 
         {summaries.length === 0 ? (
           <div className="rounded-lg border border-border bg-surface p-12 text-center text-sm text-muted-foreground">

@@ -3,10 +3,9 @@
 import { useState } from "react";
 import { useActionState } from "react";
 import { registerAction, type AuthState } from "./actions";
-import { cn } from "@/lib/utils";
-
-const inputCls =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type LoginMode = "username" | "email";
 
@@ -24,99 +23,88 @@ export function RegisterForm() {
           {state.error}
         </p>
       )}
-      <div>
-        <label className="mb-1 block text-sm font-medium">Nome</label>
-        <input name="name" type="text" autoComplete="name" required className={inputCls} />
+      <div className="space-y-1.5">
+        <Label htmlFor="name">Nome</Label>
+        <Input id="name" name="name" type="text" autoComplete="name" required />
       </div>
 
-      <div>
-        <p className="mb-2 text-sm font-medium">Como queres entrar?</p>
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">Como queres entrar?</p>
         <div className="flex gap-2">
-          <button
+          <Button
             type="button"
+            variant={mode === "username" ? "default" : "outline"}
+            className="flex-1"
             onClick={() => setMode("username")}
-            className={cn(
-              "flex-1 rounded-lg border px-3 py-2 text-sm font-medium",
-              mode === "username"
-                ? "border-accent bg-accent/10 text-accent"
-                : "border-border text-muted-foreground hover:bg-muted",
-            )}
           >
             Utilizador
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant={mode === "email" ? "default" : "outline"}
+            className="flex-1"
             onClick={() => setMode("email")}
-            className={cn(
-              "flex-1 rounded-lg border px-3 py-2 text-sm font-medium",
-              mode === "email"
-                ? "border-accent bg-accent/10 text-accent"
-                : "border-border text-muted-foreground hover:bg-muted",
-            )}
           >
             Email
-          </button>
+          </Button>
         </div>
       </div>
 
       {mode === "username" ? (
-        <div>
-          <label className="mb-1 block text-sm font-medium">Utilizador</label>
-          <input
+        <div className="space-y-1.5">
+          <Label htmlFor="username">Utilizador</Label>
+          <Input
+            id="username"
             name="username"
             type="text"
             autoComplete="username"
             required
             placeholder="nome.unico"
-            className={inputCls}
           />
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Único na plataforma — 3–30 caracteres (a-z, 0-9, . _ -).
           </p>
           <input type="hidden" name="email" value="" />
         </div>
       ) : (
-        <div>
-          <label className="mb-1 block text-sm font-medium">Email</label>
-          <input
+        <div className="space-y-1.5">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
             name="email"
             type="email"
             autoComplete="email"
             required
-            className={inputCls}
           />
           <input type="hidden" name="username" value="" />
         </div>
       )}
 
-      <div>
-        <label className="mb-1 block text-sm font-medium">Password</label>
-        <input
+      <div className="space-y-1.5">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
           name="password"
           type="password"
           autoComplete="new-password"
           required
-          className={inputCls}
         />
       </div>
-      <div>
-        <label className="mb-1 block text-sm font-medium">
-          Nome do workspace <span className="text-muted-foreground">(opcional)</span>
-        </label>
-        <input
+      <div className="space-y-1.5">
+        <Label htmlFor="workspaceName">
+          Nome do workspace{" "}
+          <span className="font-normal text-muted-foreground">(opcional)</span>
+        </Label>
+        <Input
+          id="workspaceName"
           name="workspaceName"
           type="text"
           placeholder="As minhas lojas"
-          className={inputCls}
         />
       </div>
-      <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-60"
-      >
+      <Button type="submit" disabled={pending} className="w-full">
         {pending ? "A criar conta…" : "Criar conta"}
-      </button>
+      </Button>
     </form>
   );
 }

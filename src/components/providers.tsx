@@ -7,6 +7,7 @@ import {
   hydrateLiveQueryCache,
   subscribeLiveQueryPersistence,
 } from "@/lib/live-query-persist";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -42,11 +43,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider
       attribute="class"
+      forcedTheme="dark"
       defaultTheme="dark"
       enableSystem={false}
       scriptProps={scriptProps}
     >
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider delayDuration={200}>{children}</TooltipProvider>
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

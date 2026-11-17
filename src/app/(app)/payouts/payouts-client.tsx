@@ -8,6 +8,7 @@ import { CollapsibleSection } from "@/components/collapsible-section";
 import { Sensitive } from "@/components/privacy-mode";
 import { useWorkspace } from "@/components/workspace-context";
 import type { PayoutsView } from "@/lib/payouts-data";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 
 async function fetchPayouts(
@@ -72,26 +73,28 @@ export function PayoutsClient() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {data.scopeName ? (
+      <PageHeader
+        title={
+          data.scopeName ? (
             <>
               Payouts · <Sensitive as="span">{data.scopeName}</Sensitive>
             </>
           ) : (
             "Payouts"
-          )}
-        </h1>
-        {data.payouts.length > 0 && (
-          <ExportFormatLinks
-            href={
-              storeId
-                ? `/api/export/payouts?store=${encodeURIComponent(storeId)}`
-                : "/api/export/payouts"
-            }
-          />
-        )}
-      </div>
+          )
+        }
+        actions={
+          data.payouts.length > 0 ? (
+            <ExportFormatLinks
+              href={
+                storeId
+                  ? `/api/export/payouts?store=${encodeURIComponent(storeId)}`
+                  : "/api/export/payouts"
+              }
+            />
+          ) : undefined
+        }
+      />
 
       {data.payoutErrors.length > 0 && (
         <div className="rounded-lg border border-warning/40 bg-warning/10 p-4">

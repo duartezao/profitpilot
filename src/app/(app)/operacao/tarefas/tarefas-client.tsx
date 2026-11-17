@@ -11,6 +11,7 @@ import {
 import { TaskAssigneePicker } from "@/components/operations/task-assignee-picker";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
 
 export function TarefasClient({
   board,
@@ -80,17 +81,17 @@ export function TarefasClient({
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Tarefas e lembretes
-        </h1>
-        <Link
-          href="/operacao"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          Voltar a Hoje
-        </Link>
-      </div>
+      <PageHeader
+        title="Tarefas e lembretes"
+        actions={
+          <Link
+            href="/operacao"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Voltar a Hoje
+          </Link>
+        }
+      />
 
       <div className="flex flex-wrap gap-2">
         {(

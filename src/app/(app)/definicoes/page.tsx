@@ -61,6 +61,7 @@ import { listWorkspaceGoogleLogins } from "@/lib/ad-platform-credentials";
 import { GoogleWorkspaceLoginsPanel } from "@/components/settings/google-workspace-logins-panel";
 import { AccessVaultPanel } from "@/components/settings/access-vault-panel";
 import { listAccessVaultForWorkspace } from "@/lib/workspace-access-vault";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Definições" };
 
@@ -220,9 +221,7 @@ export default async function DefinicoesPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Definições</h1>
-      </div>
+      <PageHeader title="Definições" />
 
       <DefinicoesTabs
         showEquipa={

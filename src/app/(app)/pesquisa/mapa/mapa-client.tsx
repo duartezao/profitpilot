@@ -27,6 +27,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import {
   addCompetitorCompanyAction,
@@ -691,73 +692,68 @@ export function MapaClient({
   // Vista mapa (referência)
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Google Competitors
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Explora as lojas, acompanha as empresas e descobre os destinos dos
-            anúncios.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href="https://adstransparency.google.com/?region=anywhere"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted-foreground hover:bg-muted"
-          >
-            Google Ads <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-          {canEdit && (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowAdd((v) => !v)}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-                  showAdd
-                    ? "border-accent bg-accent/10 text-foreground"
-                    : "border-border bg-surface text-muted-foreground hover:bg-muted",
-                )}
-              >
-                <Plus className="h-4 w-4" />
-                Empresa
-              </button>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => {
-                  startTransition(async () => {
-                    const res = await purgeCompetitorJunkAction();
-                    if (res.error) flashErr(res.error);
-                    else {
-                      flashMsg(res.message ?? "OK");
-                      router.refresh();
-                    }
-                  });
-                }}
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-60"
-              >
-                <Trash2 className="h-4 w-4" />
-                Limpar
-              </button>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => runAction(scanCompetitorsAction, new FormData())}
-                className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground disabled:opacity-60"
-              >
-                <RefreshCw
-                  className={cn("h-4 w-4", pending && "animate-spin")}
-                />
-                Sincronizar
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Google Competitors"
+        description="Explora as lojas, acompanha as empresas e descobre os destinos dos anúncios."
+        actions={
+          <>
+            <a
+              href="https://adstransparency.google.com/?region=anywhere"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted-foreground hover:bg-muted"
+            >
+              Google Ads <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+            {canEdit && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowAdd((v) => !v)}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+                    showAdd
+                      ? "border-accent bg-accent/10 text-foreground"
+                      : "border-border bg-surface text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <Plus className="h-4 w-4" />
+                  Empresa
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => {
+                    startTransition(async () => {
+                      const res = await purgeCompetitorJunkAction();
+                      if (res.error) flashErr(res.error);
+                      else {
+                        flashMsg(res.message ?? "OK");
+                        router.refresh();
+                      }
+                    });
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted-foreground hover:bg-muted disabled:opacity-60"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Limpar
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => runAction(scanCompetitorsAction, new FormData())}
+                  className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-foreground disabled:opacity-60"
+                >
+                  <RefreshCw
+                    className={cn("h-4 w-4", pending && "animate-spin")}
+                  />
+                  Sincronizar
+                </button>
+              </>
+            )}
+          </>
+        }
+      />
 
       {(msg || err) && (
         <Toast

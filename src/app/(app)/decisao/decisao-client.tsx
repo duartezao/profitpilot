@@ -15,6 +15,7 @@ import type {
   DecisionSummary,
   TodayAction,
 } from "@/lib/decision-types";
+import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { withLiveFreshParam } from "@/lib/refresh-live-queries";
 
@@ -476,53 +477,52 @@ export function DecisaoClient() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Decisão — Campanhas</h1>
-          {data?.scopeName && (
-            <p className="text-sm text-muted-foreground">
-              <Sensitive as="span">{data.scopeName}</Sensitive>
-            </p>
-          )}
-        </div>
-
-        {storeId && (
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg border border-border p-0.5">
-              <button
-                type="button"
-                onClick={() => setWindow(7)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium touch-manipulation transition-transform duration-100 active:scale-[0.97]",
-                  windowDays === 7 ? "bg-muted text-foreground" : "text-muted-foreground",
-                )}
-              >
-                7 dias
-              </button>
-              <button
-                type="button"
-                onClick={() => setWindow(5)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium touch-manipulation transition-transform duration-100 active:scale-[0.97]",
-                  windowDays === 5 ? "bg-muted text-foreground" : "text-muted-foreground",
-                )}
-              >
-                5 dias
-              </button>
-            </div>
-            {pauseMessage && (
-              <CopyButton
-                text={pauseMessage}
-                label="Copiar mensagem de pausa (EN)"
-                variant="primary"
-              />
-            )}
-            {data?.agentExport && (
-              <CopyButton text={data.agentExport} label="Copiar análise completa" />
-            )}
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Decisão — Campanhas"
+        description={
+          data?.scopeName ? (
+            <Sensitive as="span">{data.scopeName}</Sensitive>
+          ) : undefined
+        }
+        actions={
+          storeId ? (
+            <>
+              <div className="flex rounded-lg border border-border p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setWindow(7)}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-xs font-medium touch-manipulation transition-transform duration-100 active:scale-[0.97]",
+                    windowDays === 7 ? "bg-muted text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  7 dias
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWindow(5)}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-xs font-medium touch-manipulation transition-transform duration-100 active:scale-[0.97]",
+                    windowDays === 5 ? "bg-muted text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  5 dias
+                </button>
+              </div>
+              {pauseMessage && (
+                <CopyButton
+                  text={pauseMessage}
+                  label="Copiar mensagem de pausa (EN)"
+                  variant="primary"
+                />
+              )}
+              {data?.agentExport && (
+                <CopyButton text={data.agentExport} label="Copiar análise completa" />
+              )}
+            </>
+          ) : undefined
+        }
+      />
 
       {!storeId && (
         <p className="rounded-lg border border-border bg-muted/50 px-4 py-6 text-center text-sm text-muted-foreground">

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { LogOut, MoreHorizontal } from "lucide-react";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { PrivacyToggle } from "@/components/privacy-mode";
 import { AppViewModeToggle } from "@/components/app-view-mode-toggle";
 import { logoutAction } from "@/app/(app)/actions";
@@ -62,7 +61,7 @@ export function TopbarMoreMenu({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-[220] mt-1 w-56 overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-none">
+        <div className="absolute right-0 top-full z-[220] mt-1 w-56 overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
           <div className="flex items-center gap-2.5 border-b border-border px-3 py-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
               {initials(user.name)}
@@ -82,10 +81,6 @@ export function TopbarMoreMenu({
             <AppViewModeToggle className="flex w-full [&>button]:flex-1" />
           </div>
 
-          <div className="flex items-center justify-between gap-2 px-3 py-2">
-            <span className="text-sm text-muted-foreground">Tema</span>
-            <ThemeToggle />
-          </div>
           <div className="flex items-center justify-between gap-2 px-3 py-2">
             <span className="text-sm text-muted-foreground">Privacidade</span>
             <PrivacyToggle />

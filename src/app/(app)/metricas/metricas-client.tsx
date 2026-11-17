@@ -94,9 +94,11 @@ export function MetricasClient({
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <StoreDashboardHeader title={headerTitle} />
-        <div className="flex flex-wrap items-center gap-2">
+      <StoreDashboardHeader
+        title={headerTitle}
+        className="w-full"
+        actions={
+          <>
           <MetricsPanelConfig
             prefs={prefs}
             saving={saving}
@@ -149,8 +151,9 @@ export function MetricasClient({
                   : "Profit Sheet"}
             </span>
           )}
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {isError && (
         <p className="rounded-lg border border-negative/30 bg-negative/10 px-3 py-2 text-sm text-negative">

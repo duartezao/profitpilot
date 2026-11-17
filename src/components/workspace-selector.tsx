@@ -216,7 +216,7 @@ export function WorkspaceSelector({
                   aria-hidden
                 />
                 <div
-                  className="fixed inset-x-3 top-[3.25rem] z-[9999] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-none lg:hidden"
+                  className="fixed inset-x-3 top-[3.25rem] z-[9999] max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-lg lg:hidden"
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   {menuBody}
@@ -232,7 +232,7 @@ export function WorkspaceSelector({
           />
           <div
             className={cn(
-              "z-[210] hidden max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-lg border border-border bg-surface p-1 lg:block",
+              "z-[210] hidden max-h-[min(32rem,calc(100vh-6rem))] overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-lg lg:block",
               menuPlacement === "top"
                 ? "absolute inset-x-auto bottom-full top-auto mb-1"
                 : "absolute inset-x-auto top-full mt-1",

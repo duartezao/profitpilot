@@ -10,6 +10,7 @@ import type {
   VariantPricingSnapshot,
 } from "@/lib/variant-pricing-types";
 import { berRoas } from "@/lib/profit";
+import { PageHeader } from "@/components/page-header";
 import { Sensitive } from "@/components/privacy-mode";
 import { cn } from "@/lib/utils";
 
@@ -270,17 +271,17 @@ export function PrecosClient({
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Preço & COGS
-        </h1>
-        <Link
-          href={`/produtos?store=${encodeURIComponent(storeId)}`}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          Voltar a Produtos
-        </Link>
-      </div>
+      <PageHeader
+        title="Preço & COGS"
+        actions={
+          <Link
+            href={`/produtos?store=${encodeURIComponent(storeId)}`}
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            Voltar a Produtos
+          </Link>
+        }
+      />
 
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
         <div className="rounded-lg border border-border bg-surface p-4">

@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, Layers } from "lucide-react";
 import { ExportFormatLinks } from "@/components/export-format-links";
 import { CollapsibleSection } from "@/components/collapsible-section";
+import { PageHeader } from "@/components/page-header";
 import { Sensitive } from "@/components/privacy-mode";
 import { useWorkspace } from "@/components/workspace-context";
 import { periodQueryFromSearchParams } from "@/lib/period";
@@ -156,13 +157,15 @@ export function ColecoesVendasClient({ storeId }: { storeId: string }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Vendas por coleção ·{" "}
-          <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
-        </h1>
-        <ExportFormatLinks href={exportUrl(storeId, searchParams)} />
-      </div>
+      <PageHeader
+        title={
+          <>
+            Vendas por coleção ·{" "}
+            <Sensitive as="span">{data.storeName || "Loja"}</Sensitive>
+          </>
+        }
+        actions={<ExportFormatLinks href={exportUrl(storeId, searchParams)} />}
+      />
 
       {data.unmappedProductCount > 0 && (
         <p className="text-xs text-warning">

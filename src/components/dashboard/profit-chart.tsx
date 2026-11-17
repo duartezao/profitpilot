@@ -151,7 +151,7 @@ export function ProfitChartSkeleton({
   title?: string;
 }) {
   return (
-    <div className="min-w-0 animate-pulse" aria-hidden>
+    <div className="glass min-w-0 animate-pulse rounded-2xl p-4 sm:p-5" aria-hidden>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="h-7 w-40 rounded-md bg-muted" />
         <div className="flex gap-4">
@@ -259,7 +259,7 @@ function ProfitTooltip({
     point.revenueFmt ?? (revenue != null ? compactBarLabel(revenue) : "—");
 
   return (
-    <div className="max-w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+    <div className="glass max-w-[min(18rem,calc(100vw-2rem))] rounded-xl px-3 py-2 text-sm shadow-lg">
       <p className="text-xs text-muted-foreground">{point.dateLabel}</p>
       <div className="mt-1.5 grid grid-cols-2 gap-3">
         <div>
@@ -440,14 +440,17 @@ export function ProfitChart({
   );
 
   const legend = (
-    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-sm bg-accent/80" aria-hidden />
+        <span
+          className="h-2 w-3 rounded-sm bg-foreground/35"
+          aria-hidden
+        />
         Faturação
       </span>
       <span className="inline-flex items-center gap-1.5">
         <span
-          className="inline-block h-0 w-3.5 border-t-2 border-dashed border-foreground/70"
+          className="inline-block h-0 w-3.5 border-t-2 border-chart-positive"
           aria-hidden
         />
         Lucro
@@ -464,7 +467,10 @@ export function ProfitChart({
 
   if (chartData.length === 0) {
     return (
-      <div className="min-w-0 overflow-hidden" data-sensitive-chart>
+      <div
+        className="glass min-w-0 overflow-hidden rounded-2xl p-4 sm:p-5"
+        data-sensitive-chart
+      >
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="min-w-0 text-lg font-semibold">{title}</h2>
           {legend}
@@ -491,7 +497,10 @@ export function ProfitChart({
   );
 
   return (
-    <div className="min-w-0 overflow-hidden" data-sensitive-chart>
+    <div
+      className="glass min-w-0 overflow-hidden rounded-2xl p-4 sm:p-5"
+      data-sensitive-chart
+    >
       {header}
       {singleDay && singlePoint ? (
         <SingleDayView point={singlePoint} />
@@ -504,15 +513,15 @@ export function ProfitChart({
                   <linearGradient id="revenue-area-total" x1="0" y1="0" x2="0" y2="1">
                     <stop
                       offset="0%"
-                      stopColor="var(--accent)"
-                      stopOpacity={longRangeChart ? 0.28 : 0.36}
+                      stopColor="var(--foreground)"
+                      stopOpacity={longRangeChart ? 0.18 : 0.24}
                     />
                     <stop
                       offset="55%"
-                      stopColor="var(--accent)"
-                      stopOpacity={longRangeChart ? 0.08 : 0.12}
+                      stopColor="var(--foreground)"
+                      stopOpacity={longRangeChart ? 0.05 : 0.08}
                     />
-                    <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+                    <stop offset="100%" stopColor="var(--foreground)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid
@@ -553,8 +562,9 @@ export function ProfitChart({
                   type="monotone"
                   dataKey="revenue"
                   name="Faturação"
-                  stroke="var(--accent)"
-                  strokeWidth={longRangeChart ? 1.5 : 1.75}
+                  stroke="var(--foreground)"
+                  strokeOpacity={0.45}
+                  strokeWidth={longRangeChart ? 1.25 : 1.5}
                   fill="url(#revenue-area-total)"
                   baseValue={0}
                   isAnimationActive={false}
@@ -562,7 +572,7 @@ export function ProfitChart({
                   dot={false}
                   activeDot={{
                     r: 3.5,
-                    fill: "var(--accent)",
+                    fill: "var(--foreground)",
                     stroke: "var(--surface)",
                     strokeWidth: 2,
                   }}
@@ -571,16 +581,14 @@ export function ProfitChart({
                   type="monotone"
                   dataKey="profit"
                   name="Lucro"
-                  stroke="var(--foreground)"
-                  strokeOpacity={0.85}
-                  strokeWidth={longRangeChart ? 1.75 : 2}
-                  strokeDasharray="5 4"
+                  stroke="var(--chart-positive)"
+                  strokeWidth={longRangeChart ? 1.75 : 2.25}
                   dot={<NoteDot />}
                   isAnimationActive={false}
                   connectNulls={false}
                   activeDot={{
                     r: 4,
-                    fill: "var(--foreground)",
+                    fill: "var(--chart-positive)",
                     stroke: "var(--surface)",
                     strokeWidth: 2,
                   }}

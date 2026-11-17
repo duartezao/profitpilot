@@ -2,6 +2,7 @@ import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import { Sparkline } from "@/components/ui/sparkline";
+import { Card } from "@/components/ui/card";
 
 export function KpiCard({
   label,
@@ -9,6 +10,7 @@ export function KpiCard({
   title,
   delta,
   trend,
+  hero: _hero = false,
 }: {
   label: string;
   value: string;
@@ -18,18 +20,20 @@ export function KpiCard({
   delta?: number;
   /** Série para o sparkline (opcional) */
   trend?: number[];
+  /** @deprecated Combo 3 — cards clean iguais. */
+  hero?: boolean;
 }) {
   const positive = (delta ?? 0) >= 0;
   const significant = Math.abs(delta ?? 0) >= 10;
 
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-surface p-5">
-      <p className="truncate text-[13px] font-medium text-muted-foreground">
+    <Card className={cn("relative min-w-0 overflow-hidden p-4 sm:p-5")}>
+      <p className="truncate text-[13px] font-medium tracking-[-0.01em] text-muted-foreground">
         {label}
       </p>
       <Sensitive
         title={title ?? value}
-        className="mt-1 block truncate text-2xl font-semibold tabular-nums sm:text-3xl"
+        className="mt-1 block truncate text-[1.75rem] font-semibold tabular-nums leading-none tracking-[-0.025em] sm:text-[2rem]"
       >
         {value}
       </Sensitive>
@@ -62,6 +66,6 @@ export function KpiCard({
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

@@ -1,199 +1,88 @@
 # ProfitPilot — Design System
 
-> Fonte única e canónica da identidade visual. A app tem de seguir isto a 100%, em todos os ecrãs (ver mockups em `assets/`). Sem gradientes, sem neon, sem sombras pesadas, sem emojis.
+> **Soft Glass B + estética Apple (dark-only)**. Tipografia SF/Inter, Shadcn.
+> Sem light mode, sem cyan neon, sem riscas, sem blobs “AI”.
 
 ---
 
-## 1. Tipografia
+## 1. Tipografia (cara Apple)
 
-* **Fonte**: `Inter` (fallback: `Geist`, depois system-ui, sans-serif).
-* **Números**: sempre **tabulares** → `font-variant-numeric: tabular-nums;` (valores alinhados em KPIs e tabelas).
-* **Pesos**: Regular 400 (corpo), Medium 500 (labels), Semibold 600 (títulos/valores), Bold 700 (raro, só destaques).
+* **Stack**: `-apple-system` / `SF Pro Text` no Apple; **Inter** (`--font-inter`) no resto.
+* Inter é o fallback web mais próximo de SF Pro (Windows/Android).
+* **Números**: tabulares (`tnum`).
+* Tracking negativo estilo SF: body `-0.011em`, títulos/KPIs `-0.022em`…`-0.025em`.
+* Antialiasing + `optimizeLegibility`.
+* Pesos: 400 / 500 / 600 (evitar 700 em UI).
 
-| Uso | Tamanho | Peso | Line-height |
+| Uso | Tamanho | Peso | Tracking |
 |---|---|---|---|
-| Display / valor KPI grande | 30px (`text-3xl`) | 600 | 1.2 |
-| Título de página (H1) | 24px (`text-2xl`) | 600 | 1.3 |
-| Secção (H2) | 18px (`text-lg`) | 600 | 1.4 |
-| Corpo | 14px (`text-sm`) | 400 | 1.5 |
-| Label / rótulo KPI | 13px | 500 | 1.4 |
-| Caption / meta | 12px (`text-xs`) | 400 | 1.4 |
+| Valor KPI | ~28–32px | 600 | `-0.025em` |
+| H1 | 28–32px | 600 | `-0.022em` |
+| H2 | 17–18px | 600 | `-0.015em` |
+| Corpo | 14–15px | 400 | `-0.011em` |
+| Label KPI | 13px | 500 | `-0.01em` |
 
 ---
 
-## 2. Cores
+## 2. Direcção visual — Apple Dark Mode
 
-### Light mode
-
-| Token | Hex | Uso |
-|---|---|---|
-| `background` | `#F2F2F4` | Fundo da área principal (slate frio, menos brilho) |
-| `sidebar` | `#EEEEF0` | Sidebar neutra (sem tom lavanda) |
-| `surface` / card | `#FAFAFA` | Cartões off-white (não puro branco) |
-| `muted` | `#EAEAEC` | Fundos subtis, hover de linha, item ativo |
-| `border` | `#DDDDE1` | Bordas de cartões, tabelas, inputs |
-| `foreground` | `#18181B` | Texto principal |
-| `muted-foreground` | `#71717A` | Texto secundário, labels |
-
-### Dark mode
-
-| Token | Hex | Uso |
-|---|---|---|
-| `background` | `#09090B` | Fundo quase preto (neutro, sem azul) |
-| `sidebar` | `#0C0C0E` | Sidebar ligeiramente elevada |
-| `surface` / card | `#141416` | Cartões |
-| `muted` | `#1A1820` | Fundos subtis, item ativo |
-| `border` | `#27272A` | Bordas |
-| `foreground` | `#FAFAFA` | Texto principal |
-| `muted-foreground` | `#A1A1AA` | Texto secundário |
-
-### Accent e semânticas
-
-| Token | Hex | Uso |
-|---|---|---|
-| `accent` (índigo seco) | `#5B5EA6` light / `#9B9AD4` dark | Item ativo, links, seleção, foco, gráficos |
-| `accent-foreground` | `#FFFFFF` light / `#0A0A0B` dark | Texto sobre accent |
-| `positive` (verde) | `#16A34A` | Lucro, crescimento, status "Scale" |
-| `negative` (vermelho) | `#DC2626` | Prejuízo, queda, status "Kill" |
-| `warning` (âmbar) | `#D97706` | Avisos, status intermédio |
-| `chart-positive` | `#609060` | Barra final do waterfall (lucro) |
-| `chart-neutral` | `#8898A8` | Barras neutras do waterfall |
-
-> Verde/vermelho/âmbar **só** em valores e estados — nunca como decoração ou fundo grande.
+* Hierarquia HIG: canvas `#000` → grouped `#1C1C1E` → elevated `#2C2C2E`.
+* Materiais com blur (`40–48px`) + saturate — vibrancy.
+* Bordas hairline (`0.5px`) = `separator`.
+* Accent **systemBlue** `#0A84FF`.
+* Semânticas exactas: green `#30D158`, red `#FF453A`, yellow `#FFD60A`.
+* KPIs clean; gráfico dual; topbar fixa; dark-only.
 
 ---
 
-## 3. Espaçamento, cantos e bordas
+## 3. Cores (Apple Dark Mode)
 
-* **Grelha base**: 4px. Escala: 4, 8, 12, 16, 24, 32, 48.
-* **Padding de cartão**: 16–24px (`p-4` a `p-6`).
-* **Gap entre cartões/grelha**: 16px (`gap-4`).
-* **Cantos**: `rounded-lg` (8px) em cartões, botões e inputs; `rounded-full` em pills/avatars.
-* **Bordas**: 1px sólido `border`. **Preferir borda a sombra.**
-* **Sombras**: nenhuma por defeito; no máximo `shadow-sm` muito subtil.
+| Token | Valor | Apple |
+|---|---|---|
+| `background` | `#000000` | systemBackground |
+| `surface` | `#1C1C1E` | secondarySystemGroupedBackground |
+| `sidebar` | `#1C1C1E` ~94% | nav material |
+| `popover` | `#2C2C2E` | tertiarySystemGroupedBackground |
+| `muted` | `rgba(120,120,128,0.24)` | tertiaryFill |
+| `border` | `rgba(84,84,88,0.65)` | separator |
+| `foreground` | `#FFFFFF` | label |
+| `muted-foreground` | `rgba(235,235,245,0.6)` | secondaryLabel |
+| `accent` | `#0A84FF` | systemBlue |
+| `positive` | `#30D158` | systemGreen |
+| `negative` | `#FF453A` | systemRed |
+| `warning` | `#FFD60A` | systemYellow |
 
 ---
 
-## 4. Ícones
+## 4. Forma
 
-* **Biblioteca**: `lucide-react` (única biblioteca, não misturar).
-* **Estilo**: traço fino, **monocromático** (herda a cor do texto), tamanho 16–20px (`w-4`/`w-5`).
-* **Sem** ícones coloridos, sem emojis.
+* Radius ~12px (`0.75rem`) em cards; botões ~10px.
+* Gap cards `gap-3` / `gap-4`.
+* `.glass` / `.glass-nav` em `globals.css`.
 
 ---
 
 ## 5. Componentes
 
-### Cartão de KPI
-* Rótulo pequeno (`muted-foreground`, 13px) em cima.
-* Valor grande (`text-3xl`, 600, tabular-nums).
-* Variação: `+18,6%` verde / `-4,8%` vermelho, com seta.
-* Sparkline fina (cor `accent` ou neutra).
-* Cartão: fundo `surface`, borda `border`, `rounded-lg`, `p-5`.
+### KPI
+* Cards iguais; label 13px muted; valor grande tabular.
 
-### Tabela
-* Cabeçalho: 12–13px, `muted-foreground`, 500.
-* Linhas separadas por borda subtil; hover `muted`.
-* Números alinhados à **direita**, tabulares.
-* Status em **pill/badge** (ver abaixo).
+### Gráfico
+* Área Faturação prata/cinza; linha Lucro verde sistema.
 
-### Badge / Pill de status
-* `rounded-full`, padding `px-2.5 py-0.5`, 12px, 500.
-* Scale: texto/fundo verde subtil. Kill: vermelho subtil. Manter: cinza. Aviso: âmbar.
+### Nav
+* Activo: `bg-muted` (pill iOS); bottom nav activo em accent blue.
 
 ### Botões
-* **Primário**: fundo `accent`, texto branco, `rounded-lg`, `h-9`, 14px/500.
-* **Secundário**: fundo `surface`, borda `border`, texto `foreground`.
-* **Ghost**: sem fundo, texto `foreground`, hover `muted`.
-
-### Navegação
-* **Desktop**: sidebar fixa à esquerda, colapsável (~240–256px aberta / ~68px só ícones). Fundo `sidebar`. Preferência guardada no browser. Espaçamento generoso entre grupos (`space-y-6`) e itens (`py-2.5`). Secções em uppercase discreto. Item ativo com fundo `accent/10` (light) ou `muted` (dark) + texto `accent`. Sem borda sob o logo.
-* **Mobile**: barra inferior com 4 itens (ícone + label 11–12px), item ativo a `accent`.
-* Top bar: seletor de loja, seletor de período, avatar.
+* Primário: System Blue filled.
+* Secondary/outline: muted / hairline.
 
 ---
 
-## 6. Gráficos (Recharts / Tremor)
+## 6. Regras de ouro
 
-* Linhas/áreas: cor `accent` (`#5B5EA6`); área com opacidade baixa, sem gradiente forte.
-* Waterfall: barras neutras a `chart-neutral` e barra final de lucro a `chart-positive`; passos negativos com tom neutro mais claro.
-* Eixos e grelha: cinza muito subtil; sem fundos coloridos.
-* Sparklines: 1px, sem pontos, sem eixos.
-
----
-
-## 7. Stack de implementação
-
-* **Tailwind CSS** + **Shadcn/UI** com tema baseado nestes tokens (CSS variables).
-* Definir as variáveis em `globals.css` (`:root` e `.dark`) e mapear no `tailwind.config`.
-
-### CSS variables (exemplo `globals.css`)
-
-```css
-:root {
-  --background: #F2F2F4;
-  --sidebar: #EEEEF0;
-  --surface: #FAFAFA;
-  --muted: #EAEAEC;
-  --border: #DDDDE1;
-  --foreground: #18181B;
-  --muted-foreground: #71717A;
-  --accent: #5B5EA6;
-  --accent-foreground: #FFFFFF;
-  --positive: #16A34A;
-  --negative: #DC2626;
-  --warning: #D97706;
-  --chart-positive: #609060;
-  --chart-neutral: #8898A8;
-  --radius: 0.5rem; /* 8px */
-}
-
-.dark {
-  --background: #09090B;
-  --sidebar: #0C0C0E;
-  --surface: #141416;
-  --muted: #1A1820;
-  --border: #27272A;
-  --foreground: #FAFAFA;
-  --muted-foreground: #A1A1AA;
-  --accent: #9B9AD4;
-  --accent-foreground: #0A0A0B;
-  --chart-positive: #6B9B6B;
-  --chart-neutral: #71717A;
-}
-```
-
-### Tailwind (exemplo `tailwind.config`)
-
-```js
-theme: {
-  extend: {
-    colors: {
-      background: 'var(--background)',
-      surface: 'var(--surface)',
-      muted: 'var(--muted)',
-      border: 'var(--border)',
-      foreground: 'var(--foreground)',
-      'muted-foreground': 'var(--muted-foreground)',
-      accent: 'var(--accent)',
-      positive: 'var(--positive)',
-      negative: 'var(--negative)',
-      warning: 'var(--warning)',
-    },
-    borderRadius: { lg: 'var(--radius)' },
-    fontFamily: { sans: ['Inter', 'Geist', 'system-ui', 'sans-serif'] },
-  },
-}
-```
-
----
-
-## 8. Regras de ouro
-
-1. Seguir os **mockups em `assets/`** como referência canónica.
-2. **Borda, não sombra.** Superfícies planas.
-3. Verde/vermelho/âmbar **só** em valores e estados.
-4. Números sempre **tabulares**.
-5. Ícones Lucide, finos, monocromáticos.
-6. **Sem** gradientes, neon, emojis, ilustrações cartoon.
-7. Mobile-first e responsivo a 100% (telemóvel, tablet, desktop).
+1. Parece **Apple Finance / Settings dark** — limpo, não sci-fi.
+2. Sem undertone azul no fundo (só no accent interactivo).
+3. Sem grain, sem riscas, sem neon.
+4. Números tabulares; Lucide monocromático.
+5. Mobile-first (375 / 768 / 1280+).

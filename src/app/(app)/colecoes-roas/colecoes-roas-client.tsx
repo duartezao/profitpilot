@@ -9,6 +9,7 @@ import type { CollectionRoasReport, CollectionRoasRow, PageRoasRow, ProductRoasR
 import { periodQueryFromSearchParams } from "@/lib/period";
 import { cn } from "@/lib/utils";
 import { syncAdAccountsNowAction } from "@/app/(app)/anuncios/ad-account-actions";
+import { PageHeader } from "@/components/page-header";
 
 type RevenueFilter = "all" | "with_rev" | "no_sales";
 
@@ -625,53 +626,53 @@ export function ColecoesRoasClient({ storeId }: { storeId: string }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            ROAS por coleção
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <PageHeader
+        title="ROAS por coleção"
+        description={
+          <>
             <Sensitive>{storeName}</Sensitive>
             {" — URL ads → coleção. ROAS = REV ÷ spend."}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-lg border border-border p-0.5">
+          </>
+        }
+        actions={
+          <>
+            <div className="inline-flex rounded-lg border border-border p-0.5">
+              <button
+                type="button"
+                onClick={() => setQuickPeriod(5)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium tabular-nums",
+                  quick5
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                5 dias
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickPeriod(7)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-sm font-medium tabular-nums",
+                  quick7
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                7 dias
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setQuickPeriod(5)}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium tabular-nums",
-                quick5
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
+              onClick={() => void refreshUrls()}
+              disabled={isFetching || autoSyncing}
+              className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
             >
-              5 dias
+              {autoSyncing ? "A sincronizar…" : isFetching ? "A actualizar…" : "Actualizar URLs"}
             </button>
-            <button
-              type="button"
-              onClick={() => setQuickPeriod(7)}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium tabular-nums",
-                quick7
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              7 dias
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => void refreshUrls()}
-            disabled={isFetching || autoSyncing}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
-          >
-            {autoSyncing ? "A sincronizar…" : isFetching ? "A actualizar…" : "Actualizar URLs"}
-          </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {isLoading && (
         <p className="text-sm text-muted-foreground">A carregar…</p>

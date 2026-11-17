@@ -86,8 +86,8 @@ function NavLink({
             ? "px-2.5 py-1.5"
             : "px-3 py-2.5",
         active
-          ? "bg-accent/10 text-accent dark:bg-muted"
-          : "text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+          ? "bg-muted font-semibold text-foreground"
+          : "font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground",
       )}
     >
       <NavLinkStatus item={item} collapsed={collapsed} />
