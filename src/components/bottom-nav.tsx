@@ -109,7 +109,7 @@ function BottomNavLinks() {
                   TAP_PRESS,
                   "mx-0.5 flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
                   moreOpen || moreActive
-                    ? "bg-muted font-semibold text-accent"
+                    ? "bg-foreground/10 font-semibold text-foreground"
                     : "text-muted-foreground",
                 )}
               >
@@ -132,7 +132,7 @@ function BottomNavLinks() {
                 TAP_PRESS,
                 "mx-0.5 flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
                 active
-                  ? "bg-muted font-semibold text-accent"
+                  ? "bg-foreground/10 font-semibold text-foreground"
                   : "text-muted-foreground",
               )}
             >

@@ -4,25 +4,25 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] text-sm font-medium tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default:
-          "bg-accent font-semibold text-accent-foreground hover:brightness-110 active:brightness-95",
+          "bg-accent text-accent-foreground shadow-[0_0_0_1px_rgba(226,232,240,0.2)] hover:brightness-110",
         destructive:
-          "bg-negative font-semibold text-white hover:brightness-110",
+          "bg-negative text-white shadow-sm hover:brightness-110",
         outline:
-          "border border-border bg-transparent font-medium text-foreground hover:bg-muted",
+          "glass border-border/80 font-medium text-foreground hover:border-foreground/25",
         secondary:
-          "bg-muted font-medium text-foreground hover:bg-muted/80",
-        ghost: "font-medium text-foreground hover:bg-muted",
-        link: "font-medium text-accent underline-offset-4 hover:underline",
+          "glass font-medium text-foreground hover:border-foreground/20",
+        ghost: "font-medium text-foreground hover:bg-muted/80",
+        link: "font-medium text-foreground underline-offset-4 hover:underline",
       },
       size: {
         default: "h-10 px-4 py-2",
         sm: "h-8 rounded-lg px-3 text-xs font-medium",
-        lg: "h-11 rounded-[12px] px-6",
+        lg: "h-11 rounded-xl px-6",
         icon: "h-10 w-10",
       },
     },

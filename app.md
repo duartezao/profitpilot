@@ -109,7 +109,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 * **Sem emojis** na interface. Ícones consistentes de uma única biblioteca (ex.: Lucide), monocromáticos.
 * **Sem gradientes**, sem sombras exageradas, sem cores "neon". Superfícies planas.
 * **Paleta sóbria e neutra** — fundo neutro, 1 cor de destaque discreta, verde/vermelho apenas para indicar lucro/prejuízo.
-* **Tipografia limpa** (SF Pro no Apple / Inter no resto), números tabulares alinhados para ler valores rapidamente.
+* **Tipografia limpa** (`Poppins`), números tabulares alinhados para ler valores rapidamente.
 * **Densidade controlada** — tabelas e dashboards densos mas legíveis, estilo painel financeiro (ex.: Linear, Stripe Dashboard).
 * **Consistência total** — mesmos espaçamentos, mesmos cantos, mesmos componentes em toda a app.
 * **Dark mode e light mode** sóbrios.
@@ -122,7 +122,7 @@ Criar uma plataforma centralizada para gestão e análise de **múltiplas lojas 
 
 > Resumo abaixo. A **fonte completa e canónica** (cores hex, tipografia, componentes, Tailwind config e variáveis CSS) está em **`design-system.md`** — seguir esse ficheiro a 100%.
 
-* **Tipografia**: SF Pro (Apple) / Inter (resto). Números **tabulares**. UI **Apple dark + soft glass**, accent **System Blue** (`#0A84FF`); sem gradientes roxos / neon. Ver `design-system.md`.
+* **Tipografia**: Poppins. Números **tabulares**. UI **glass/futurista** (blur + superfícies translúcidas), accent **azul frio** (`#2563EB`); sem gradientes roxos / neon lavanda. Ver `design-system.md`.
 * **Cores (light)**: fundo principal `#F2F2F4`, sidebar `#EEEEF0`, cartões `#FAFAFA` com borda `#DDDDE1`, texto principal `#18181B`, texto secundário `#71717A`, muted `#EAEAEC`.
 * **Cores (dark)**: fundo quase preto `#09090B`, sidebar `#0C0C0E`, cartão `#141416`, borda `#27272A`, texto `#FAFAFA`, muted `#1A1820`. Accent índigo `#9B9AD4`.
 * **Accent** (discreto): índigo seco `#5B5EA6` light / `#9B9AD4` dark (item ativo, links, seleção, gráficos).

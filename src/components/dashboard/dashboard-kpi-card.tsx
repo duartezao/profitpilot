@@ -122,8 +122,8 @@ export function DashboardKpiCard({
     >
       <p
         className={cn(
-          "truncate font-medium tracking-[-0.01em] text-muted-foreground",
-          isSecondary ? "text-[11px]" : "text-[13px]",
+          "truncate font-medium text-muted-foreground",
+          isSecondary ? "text-xs" : "text-[13px]",
         )}
       >
         {label}
@@ -131,8 +131,8 @@ export function DashboardKpiCard({
       <Sensitive
         title={title ?? value}
         className={cn(
-          "mt-1 block font-semibold tabular-nums leading-none tracking-[-0.025em]",
-          isSecondary ? "text-lg sm:text-xl" : "text-[1.75rem] sm:text-[2rem]",
+          "mt-1 block font-semibold tabular-nums leading-tight",
+          isSecondary ? "text-base sm:text-lg" : "text-2xl sm:text-3xl",
         )}
       >
         {value}

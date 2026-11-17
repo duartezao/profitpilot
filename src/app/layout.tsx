@@ -1,11 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
-/** Inter ≈ SF Pro em Windows/Android; no Apple usa-se SF via -apple-system. */
-const inter = Inter({
-  variable: "--font-inter",
+const poppins = Poppins({
+  variable: "--font-poppins",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   display: "swap",
@@ -33,7 +32,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#000000",
+  themeColor: "#1c1c1c",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -48,9 +47,9 @@ export default function RootLayout({
     <html
       lang="pt-PT"
       suppressHydrationWarning
-      className={`dark ${inter.variable} h-full antialiased`}
+      className={`dark ${poppins.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-background font-sans text-foreground">
+      <body className="min-h-full bg-background text-foreground">
         <Providers>{children}</Providers>
       </body>
     </html>

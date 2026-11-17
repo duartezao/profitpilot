@@ -19,14 +19,12 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="min-w-0 space-y-1">
-        <h1 className="text-[1.75rem] font-semibold leading-tight tracking-[-0.022em] text-foreground sm:text-[2rem]">
+      <div className="min-w-0 space-y-1.5">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[1.75rem]">
           {title}
         </h1>
         {description ? (
-          <div className="text-[15px] leading-snug tracking-[-0.01em] text-muted-foreground">
-            {description}
-          </div>
+          <div className="text-sm text-muted-foreground">{description}</div>
         ) : null}
       </div>
       {actions ? (

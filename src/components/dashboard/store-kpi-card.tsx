@@ -32,12 +32,10 @@ export function StoreKpiCard({
 
   return (
     <div className="glass min-w-0 rounded-2xl p-4 sm:p-5">
-      <p className="text-[13px] font-medium tracking-[-0.01em] text-muted-foreground">
-        {label}
-      </p>
+      <p className="text-[13px] font-medium text-muted-foreground">{label}</p>
       <Sensitive
         title={title ?? value}
-        className="mt-1 block truncate text-[1.75rem] font-semibold tabular-nums leading-none tracking-[-0.025em] sm:text-[2rem]"
+        className="mt-1 block truncate text-2xl font-semibold tabular-nums sm:text-3xl"
       >
         {value}
       </Sensitive>

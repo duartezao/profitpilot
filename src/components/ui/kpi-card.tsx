@@ -28,12 +28,12 @@ export function KpiCard({
 
   return (
     <Card className={cn("relative min-w-0 overflow-hidden p-4 sm:p-5")}>
-      <p className="truncate text-[13px] font-medium tracking-[-0.01em] text-muted-foreground">
+      <p className="truncate text-[13px] font-medium text-muted-foreground">
         {label}
       </p>
       <Sensitive
         title={title ?? value}
-        className="mt-1 block truncate text-[1.75rem] font-semibold tabular-nums leading-none tracking-[-0.025em] sm:text-[2rem]"
+        className="mt-1 block truncate text-2xl font-semibold tabular-nums sm:text-3xl"
       >
         {value}
       </Sensitive>

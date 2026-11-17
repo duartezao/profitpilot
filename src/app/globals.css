@@ -4,39 +4,31 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
-  ProfitPilot — paleta Apple Dark Mode (HIG / UIKit).
-  https://developer.apple.com/design/human-interface-guidelines/color
+  ProfitPilot — Soft Glass B (Combo 3).
+  Dark-only · fumo suave · glass prateado · sem cyan neon · sem riscas.
 */
 :root,
 .dark {
-  /* System backgrounds */
-  --background: #000000;
-  --sidebar: rgba(28, 28, 30, 0.94);
-  /* secondarySystemGroupedBackground */
-  --surface: #1c1c1e;
-  /* tertiarySystemGroupedBackground — menus opacos */
-  --popover: #2c2c2e;
-  /* systemFill / tertiaryFill */
-  --muted: rgba(120, 120, 128, 0.24);
-  /* opaqueSeparator / separator */
-  --border: rgba(84, 84, 88, 0.65);
-  /* label */
-  --foreground: #ffffff;
-  /* secondaryLabel */
-  --muted-foreground: rgba(235, 235, 245, 0.6);
-  /* systemBlue (dark) */
-  --accent: #0a84ff;
-  --accent-foreground: #ffffff;
-  /* systemGreen / Red / Orange / Yellow (dark) */
-  --positive: #30d158;
-  --negative: #ff453a;
-  --warning: #ffd60a;
-  --chart-positive: #30d158;
-  /* tertiaryLabel-ish */
-  --chart-neutral: rgba(235, 235, 245, 0.3);
-  --radius: 0.75rem;
-  --glass-blur: 40px;
-  --glass-shine: rgba(255, 255, 255, 0.06);
+  /* Carvão neutro mais claro — sem undertone azul */
+  --background: #1c1c1c;
+  --sidebar: rgba(32, 32, 32, 0.9);
+  --surface: rgba(42, 42, 42, 0.78);
+  /* Menus/dropdowns — opaco */
+  --popover: #2a2a2a;
+  --muted: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.12);
+  --foreground: #f5f5f5;
+  --muted-foreground: #a3a3a3;
+  --accent: #ececec;
+  --accent-foreground: #1c1c1c;
+  --positive: #4ade80;
+  --negative: #fb7185;
+  --warning: #fbbf24;
+  --chart-positive: #86efac;
+  --chart-neutral: #8a8a8a;
+  --radius: 1rem;
+  --glass-blur: 22px;
+  --glass-shine: rgba(255, 255, 255, 0.07);
 }
 
 @theme inline {
@@ -57,51 +49,59 @@
   --color-chart-neutral: var(--chart-neutral);
 
   --radius-lg: var(--radius);
-  /* SF Pro no Apple; Inter no resto */
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    var(--font-inter), "Segoe UI", Roboto, "Helvetica Neue", Helvetica, Arial,
-    sans-serif;
+  --font-sans: var(--font-poppins), "Poppins", system-ui, sans-serif;
 }
 
 html {
   min-height: 100%;
   color-scheme: dark;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
 }
 
 body {
   color: var(--foreground);
-  font-family: var(--font-sans);
-  /* systemBackground — preto puro Apple dark */
+  font-family: var(--font-poppins), "Poppins", system-ui, sans-serif;
   background-color: var(--background);
-  background-image: none;
-  letter-spacing: -0.011em;
-  font-weight: 400;
+  /* Carvão médio — fumo cinza claro, sem azul */
+  background-image:
+    radial-gradient(
+      ellipse 80% 55% at 12% 0%,
+      rgba(255, 255, 255, 0.06),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 70% 50% at 92% 8%,
+      rgba(255, 255, 255, 0.045),
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse 100% 70% at 50% 100%,
+      rgba(0, 0, 0, 0.28),
+      transparent 55%
+    ),
+    linear-gradient(180deg, #222222 0%, #1c1c1c 50%, #181818 100%);
+  background-attachment: fixed;
 }
 
-/* Cards = secondarySystemGroupedBackground (#1C1C1E) */
 .glass {
   background: var(--surface);
-  border: 0.5px solid var(--border);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
-  box-shadow: inset 0 0.5px 0 var(--glass-shine);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.15);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.15);
+  box-shadow:
+    inset 0 1px 0 var(--glass-shine),
+    0 8px 28px rgba(0, 0, 0, 0.22);
 }
 
 .glass-nav {
   background: var(--sidebar);
   border-color: var(--border);
-  backdrop-filter: blur(48px) saturate(1.8);
-  -webkit-backdrop-filter: blur(48px) saturate(1.8);
-  box-shadow: inset 0 0.5px 0 var(--glass-shine);
+  backdrop-filter: blur(26px) saturate(1.2);
+  -webkit-backdrop-filter: blur(26px) saturate(1.2);
+  box-shadow: inset 0 1px 0 var(--glass-shine);
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1;
 }
 
 html[data-privacy="true"] [data-sensitive] {
