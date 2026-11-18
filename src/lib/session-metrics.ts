@@ -32,8 +32,11 @@ import {
   blobToBuffer,
   type DaySessionCounts,
 } from "@/lib/session-metrics-codec";
+import { preferSessionDayCounts } from "@/lib/session-metrics-merge";
 import { SessionMetricsMonth } from "@/models/SessionMetricsMonth";
 import { Store } from "@/models/Store";
+
+export { preferSessionDayCounts } from "@/lib/session-metrics-merge";
 
 /** Incrementar quando o filtro ShopifyQL de sessões mudar — força re-sync histórico. */
 export const SESSION_METRICS_QUERY_VERSION = 2;
@@ -148,6 +151,15 @@ function groupContiguousRanges(
   return ranges;
 }
 
+function isAllZero(d: DaySessionCounts): boolean {
+  return (
+    d.sessions === 0 &&
+    d.cart === 0 &&
+    d.checkout === 0 &&
+    d.completed === 0
+  );
+}
+
 async function loadMonthDays(
   storeId: Types.ObjectId,
   countryKey: string,
@@ -156,8 +168,11 @@ async function loadMonthDays(
   const out = new Map<string, DaySessionCounts>();
   if (!monthKeys.length) return out;
 
+  const legacyName = countryKey ? sessionCountryShopifyName(countryKey) : "";
   const keysToTry = countryKey
-    ? [countryKey, sessionCountryShopifyName(countryKey)]
+    ? legacyName && legacyName !== countryKey
+      ? [countryKey, legacyName]
+      : [countryKey]
     : [countryKey];
 
   const docs = await SessionMetricsMonth.find({
@@ -165,13 +180,21 @@ async function loadMonthDays(
     countryKey: { $in: [...new Set(keysToTry)] },
     monthKey: { $in: monthKeys },
   })
-    .select("monthKey blob")
+    .select("monthKey countryKey blob")
     .lean();
 
-  for (const doc of docs) {
+  // 1.º ISO (ou ""), 2.º nome legado Shopify — merge sem last-write-wins cego.
+  const ordered = [...docs].sort((a, b) => {
+    const aIso = a.countryKey === countryKey ? 0 : 1;
+    const bIso = b.countryKey === countryKey ? 0 : 1;
+    return aIso - bIso;
+  });
+
+  for (const doc of ordered) {
     const byDom = decodeMonthBlob(doc.blob);
     for (const [dom, counts] of byDom) {
-      out.set(dateKeyFromMonthDay(doc.monthKey, dom), counts);
+      const dateKey = dateKeyFromMonthDay(doc.monthKey, dom);
+      out.set(dateKey, preferSessionDayCounts(out.get(dateKey), counts));
     }
   }
   return out;
@@ -226,6 +249,18 @@ async function upsertDayRows(
       },
       { upsert: true },
     );
+
+    // Remover blob legado (nome inglês) se já temos a chave ISO.
+    if (countryKey) {
+      const legacyName = sessionCountryShopifyName(countryKey);
+      if (legacyName && legacyName !== countryKey) {
+        await SessionMetricsMonth.deleteOne({
+          storeId,
+          monthKey,
+          countryKey: legacyName,
+        });
+      }
+    }
   }
 
   return written;
@@ -255,15 +290,6 @@ function countsToFunnel(
     countryLabel,
     missingDays: missingDays || undefined,
   };
-}
-
-function isAllZero(d: DaySessionCounts): boolean {
-  return (
-    d.sessions === 0 &&
-    d.cart === 0 &&
-    d.checkout === 0 &&
-    d.completed === 0
-  );
 }
 
 async function ensureSessionMetricsQueryVersion(
@@ -582,6 +608,15 @@ function sumDayCounts(
   return found ? { sessions, cart, checkout, completed } : null;
 }
 
+/** Dia completo só se todos os países seleccionados tiverem blob esse dia. */
+function dayPresentForAllCountries(
+  maps: Map<string, DaySessionCounts>[],
+  key: string,
+): boolean {
+  if (!maps.length) return false;
+  return maps.every((m) => m.has(key));
+}
+
 function resolveCountryKeysInput(
   countryInput: string | string[] | null | undefined,
 ): string[] {
@@ -629,7 +664,9 @@ export async function aggregateSessionFunnelFromDb(
   for (const key of relevantKeys) {
     const d = sumDayCounts(maps, key);
     if (!d) continue;
-    found++;
+    // Incluir dados parciais na soma, mas só marcar completo se todos os países têm o dia
+    // (evita 2.º país em falta a passar despercebido).
+    if (dayPresentForAllCountries(maps, key)) found++;
     totals.sessions += d.sessions;
     totals.cart += d.cart;
     totals.checkout += d.checkout;

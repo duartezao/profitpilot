@@ -2131,6 +2131,8 @@ async function buildStoreDailyMetrics(
       ? sliceFromDateKeys([...liveKeys].sort(), tz)
       : slice;
 
+  // Funil (sessões/ATC/checkout/CVR) vem sempre dos blobs por país — nunca do
+  // DailyMetric (sem checkoutPct e pode estar desactualizado se o país mudou).
   const [orderByDay, adByDay, sessionsByDay, missingCogsByDay, manualDayCogs] =
     await Promise.all([
       liveKeys.length > 0
@@ -2144,14 +2146,12 @@ async function buildStoreDailyMetrics(
           )
         : Promise.resolve(new Map()),
       aggregateDailyAdSpend([storeOid], slice, storeTimeZone),
-      liveKeys.length > 0
-        ? loadDailySessionCountsForSlice(
-            storeOid,
-            analyticsSessionCountries,
-            liveSlice,
-            storeTimeZone,
-          )
-        : Promise.resolve(new Map()),
+      loadDailySessionCountsForSlice(
+        storeOid,
+        analyticsSessionCountries,
+        slice,
+        storeTimeZone,
+      ),
       cogsMode === "order" || cogsMode === "day"
         ? Promise.resolve(new Map<string, number>())
         : countMissingCogsByDay([storeOid], slice, storeTimeZone),
@@ -2223,26 +2223,10 @@ async function buildStoreDailyMetrics(
         profitPositive: profit >= 0,
         profitTitle,
         ordersCount: o.orders,
-        sessions: snap ? snap.sessions : (sess?.sessions ?? null),
-        atcPct: snap
-          ? snap.atcPct != null
-            ? formatPercent(snap.atcPct)
-            : "—"
-          : sess
-            ? pctFmtFromCounts(sess.cart, sess.sessions)
-            : "—",
-        checkoutPct: snap
-          ? "—"
-          : sess
-            ? pctFmtFromCounts(sess.checkout, sess.sessions)
-            : "—",
-        cvrPct: snap
-          ? snap.cvrPct != null
-            ? formatPercent(snap.cvrPct)
-            : "—"
-          : sess
-            ? pctFmtFromCounts(sess.completed, sess.sessions)
-            : "—",
+        sessions: sess?.sessions ?? null,
+        atcPct: sess ? pctFmtFromCounts(sess.cart, sess.sessions) : "—",
+        checkoutPct: sess ? pctFmtFromCounts(sess.checkout, sess.sessions) : "—",
+        cvrPct: sess ? pctFmtFromCounts(sess.completed, sess.sessions) : "—",
       };
     })
     .reverse();
