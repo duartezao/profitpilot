@@ -94,7 +94,7 @@ function BottomNavLinks() {
         items={overflowItems}
       />
 
-      <nav className="glass-nav fixed inset-x-0 bottom-0 z-40 flex gap-0.5 border-t px-1 pt-1 pb-[env(safe-area-inset-bottom)] lg:hidden">
+      <nav className="glass-nav fixed inset-x-0 bottom-0 z-40 flex gap-0.5 bg-background/90 px-1 pt-1 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
         {items.map((item, i) => {
           if (isMobileMoreNavItem(item)) {
             const Icon = item.icon;
@@ -109,7 +109,7 @@ function BottomNavLinks() {
                   TAP_PRESS,
                   "mx-0.5 flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
                   moreOpen || moreActive
-                    ? "bg-foreground/10 font-semibold text-foreground"
+                    ? "bg-muted font-semibold text-foreground"
                     : "text-muted-foreground",
                 )}
               >
@@ -132,7 +132,7 @@ function BottomNavLinks() {
                 TAP_PRESS,
                 "mx-0.5 flex flex-1 flex-col items-center gap-1 rounded-lg py-2 text-[11px] font-medium",
                 active
-                  ? "bg-foreground/10 font-semibold text-foreground"
+                  ? "bg-muted font-semibold text-foreground"
                   : "text-muted-foreground",
               )}
             >

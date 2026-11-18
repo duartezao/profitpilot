@@ -16,7 +16,7 @@ export function Topbar({
   workspaces: UserWorkspace[];
 }) {
   return (
-    <header className="glass-nav z-50 shrink-0 overflow-visible border-b">
+    <header className="glass-nav z-50 shrink-0 overflow-visible">
       {/* Telemóvel + tablet */}
       <div className="flex flex-col gap-2 overflow-visible px-3 py-2.5 sm:px-4 lg:hidden">
         <div className="flex min-w-0 items-center gap-2">

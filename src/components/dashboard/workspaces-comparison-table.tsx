@@ -73,10 +73,12 @@ export function WorkspacesComparisonTable({
   }, [workspaces, sortKey, sortDir]);
 
   return (
-    <div className="min-w-0 space-y-3">
-      <div>
-        <h2 className="text-lg font-semibold">Workspaces</h2>
-        <p className="text-sm text-muted-foreground">
+    <div className="glass min-w-0 overflow-hidden rounded-[20px]">
+      <div className="px-5 pb-2 pt-5 sm:px-6 sm:pt-6">
+        <h2 className="text-[17px] font-semibold tracking-[-0.02em]">
+          Workspaces
+        </h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
           Comparação de rentabilidade · valores em {displayCurrency}.
         </p>
         {top && (
@@ -89,11 +91,11 @@ export function WorkspacesComparisonTable({
           </p>
         )}
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
-            <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
-              <th className="px-5 py-3">Workspace</th>
+            <tr className="border-b border-border/70 text-left text-xs font-medium text-muted-foreground">
+              <th className="px-5 py-3 sm:px-6">Workspace</th>
               <th className="px-5 py-3 text-right">Lojas</th>
               <th className="px-5 py-3 text-right">
                 <SortButton
@@ -146,32 +148,32 @@ export function WorkspacesComparisonTable({
             {sorted.map((w) => (
               <tr
                 key={w.workspaceId}
-                className="border-t border-border hover:bg-muted"
+                className="border-t border-border/60 transition-colors hover:bg-muted/60"
               >
-                <td className="px-5 py-3 font-medium">
-                  <div className="flex items-center gap-2">
+                <td className="px-5 py-3.5 font-medium sm:px-6">
+                  <div className="flex items-center gap-2.5">
                     <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: w.color }}
                       aria-hidden
                     />
                     <Sensitive>{w.name}</Sensitive>
                     {w.profitRank === 1 && (
-                      <span className="rounded-md border border-positive/30 bg-positive/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-positive">
+                      <span className="rounded-full bg-positive/15 px-2 py-0.5 text-[10px] font-medium text-positive">
                         Top
                       </span>
                     )}
                   </div>
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums text-muted-foreground">
+                <td className="px-5 py-3.5 text-right tabular-nums text-muted-foreground sm:px-6">
                   {w.storeCount}
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums">
+                <td className="px-5 py-3.5 text-right tabular-nums sm:px-6">
                   <Sensitive>{w.revenue}</Sensitive>
                 </td>
                 <td
                   className={cn(
-                    "px-5 py-3 text-right tabular-nums",
+                    "px-5 py-3.5 text-right tabular-nums sm:px-6",
                     w.positive ? "text-positive" : "text-negative",
                   )}
                 >
@@ -179,16 +181,16 @@ export function WorkspacesComparisonTable({
                 </td>
                 <td
                   className={cn(
-                    "px-5 py-3 text-right tabular-nums",
+                    "px-5 py-3.5 text-right tabular-nums sm:px-6",
                     !w.positive && "text-negative",
                   )}
                 >
                   <Sensitive>{w.margin}</Sensitive>
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums">
+                <td className="px-5 py-3.5 text-right tabular-nums sm:px-6">
                   <Sensitive>{w.adSpend}</Sensitive>
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums">
+                <td className="px-5 py-3.5 text-right tabular-nums sm:px-6">
                   <Sensitive>{w.roas}</Sensitive>
                 </td>
               </tr>

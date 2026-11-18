@@ -151,7 +151,7 @@ export function ProfitChartSkeleton({
   title?: string;
 }) {
   return (
-    <div className="glass min-w-0 animate-pulse rounded-2xl p-4 sm:p-5" aria-hidden>
+    <div className="glass min-w-0 animate-pulse rounded-[20px] px-5 py-5 sm:px-6 sm:py-6" aria-hidden>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="h-7 w-40 rounded-md bg-muted" />
         <div className="flex gap-4">
@@ -165,7 +165,7 @@ export function ProfitChartSkeleton({
   );
 }
 
-/** Um dia: sem cartões de faturação/lucro (já nos KPIs). Só contexto útil. */
+/** Um dia: sem cartões de faturação/lucro (já nos KPIs). Lista limpa por loja. */
 function SingleDayView({ point }: { point: ProfitChartPoint }) {
   const stores = (point.byStore ?? []).filter(
     (s) => (s.revenue ?? 0) !== 0 || (s.profit ?? 0) !== 0,
@@ -174,68 +174,82 @@ function SingleDayView({ point }: { point: ProfitChartPoint }) {
   const showNote = Boolean(point.hasNote && point.notePreview);
 
   return (
-    <div className="rounded-lg border border-border px-4 py-4 sm:px-5 sm:py-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium text-foreground">{point.dateLabel}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Um só dia — totais nos KPIs; detalhe na repartição de custos.
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold tracking-[-0.015em] text-foreground">
+            {point.dateLabel}
+          </p>
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            Totais nos KPIs · detalhe por loja
           </p>
         </div>
-        {point.consolidated === false && (
-          <span className="text-xs text-muted-foreground">
-            Dentro da janela de reembolsos
+        {(point.consolidated === false || point.consolidated === true) && (
+          <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+            {point.consolidated === false
+              ? "Janela de reembolsos"
+              : "Consolidado"}
           </span>
-        )}
-        {point.consolidated === true && (
-          <span className="text-xs text-muted-foreground">Consolidado</span>
         )}
       </div>
 
       {showStores && (
-        <ul className="mt-4 space-y-2.5 border-t border-border pt-4">
-          <li className="flex justify-end gap-3 text-[11px] text-muted-foreground">
-            <span className="w-16 text-right sm:w-20">Faturação</span>
-            <span className="w-16 text-right sm:w-20">Lucro</span>
-          </li>
-          {stores.map((s: ProfitChartStoreSlice) => (
-            <li
-              key={s.storeId}
-              className="flex items-baseline justify-between gap-3 text-sm"
-            >
-              <span className="flex min-w-0 items-center gap-2 truncate text-muted-foreground">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-sm"
-                  style={{ backgroundColor: s.color }}
-                  aria-hidden
-                />
-                <span className="truncate">{s.name}</span>
-              </span>
-              <span className="flex shrink-0 items-baseline gap-3 tabular-nums">
-                <Sensitive className="w-16 text-right text-muted-foreground sm:w-20">
-                  {s.revenueFmt}
-                </Sensitive>
-                <Sensitive
-                  className={cn(
-                    "w-16 text-right font-medium sm:w-20",
-                    s.profit < 0 ? "text-negative" : "text-foreground",
-                  )}
-                >
-                  {s.profitFmt}
-                </Sensitive>
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-5">
+          <div className="mb-1 flex items-center justify-between gap-3 px-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+            <span>Loja</span>
+            <span className="flex shrink-0 gap-6 sm:gap-8">
+              <span className="w-[4.5rem] text-right sm:w-24">Faturação</span>
+              <span className="w-[4.5rem] text-right sm:w-24">Lucro</span>
+            </span>
+          </div>
+          <ul className="divide-y divide-border/50">
+            {stores.map((s: ProfitChartStoreSlice) => (
+              <li
+                key={s.storeId}
+                className="-mx-1 flex items-center justify-between gap-3 rounded-xl px-1 py-3 transition-colors hover:bg-muted/50"
+              >
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: s.color }}
+                    aria-hidden
+                  />
+                  <span className="truncate text-[15px] font-medium tracking-[-0.01em] text-foreground">
+                    {s.name}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-baseline gap-6 tabular-nums sm:gap-8">
+                  <Sensitive className="w-[4.5rem] text-right text-[13px] text-muted-foreground sm:w-24 sm:text-[15px]">
+                    {s.revenueFmt}
+                  </Sensitive>
+                  <Sensitive
+                    className={cn(
+                      "w-[4.5rem] text-right text-[13px] font-semibold sm:w-24 sm:text-[15px]",
+                      s.profit < 0 ? "text-negative" : "text-positive",
+                    )}
+                  >
+                    {s.profitFmt}
+                  </Sensitive>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!showStores && !showNote && (
+        <p className="mt-5 text-[13px] text-muted-foreground">
+          Sem breakdown por loja neste dia.
+        </p>
       )}
 
       {showNote && (
-        <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
+        <div className="mt-4 rounded-xl bg-muted/60 px-3.5 py-3 text-[13px] leading-relaxed text-muted-foreground">
           {point.didScale && (
-            <span className="mr-1 font-medium text-accent">Scale ·</span>
+            <span className="mr-1 font-semibold text-accent">Scale ·</span>
           )}
           {point.notePreview}
-        </p>
+        </div>
       )}
     </div>
   );
@@ -468,11 +482,13 @@ export function ProfitChart({
   if (chartData.length === 0) {
     return (
       <div
-        className="glass min-w-0 overflow-hidden rounded-2xl p-4 sm:p-5"
+        className="glass min-w-0 overflow-hidden rounded-[20px] px-5 py-5 sm:px-6 sm:py-6"
         data-sensitive-chart
       >
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="min-w-0 text-lg font-semibold">{title}</h2>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="min-w-0 text-[17px] font-semibold tracking-[-0.02em]">
+            {title}
+          </h2>
           {legend}
         </div>
         <div className={CHART_EMPTY_CLASS}>
@@ -487,25 +503,30 @@ export function ProfitChart({
     return null;
   }
 
-  const header = (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <h2 className="min-w-0 text-lg font-semibold">
-        {singleDay ? "Detalhe do dia" : title}
+  const header = singleDay ? null : (
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <h2 className="min-w-0 text-[17px] font-semibold tracking-[-0.015em]">
+        {title}
       </h2>
-      {!singleDay && legend}
+      {legend}
     </div>
   );
 
   return (
     <div
-      className="glass min-w-0 overflow-hidden rounded-2xl p-4 sm:p-5"
+      className="glass min-w-0 overflow-hidden rounded-[20px] px-5 py-5 sm:px-6 sm:py-6"
       data-sensitive-chart
     >
-      {header}
       {singleDay && singlePoint ? (
-        <SingleDayView point={singlePoint} />
+        <>
+          <h2 className="mb-4 text-[17px] font-semibold tracking-[-0.02em]">
+            Detalhe do dia
+          </h2>
+          <SingleDayView point={singlePoint} />
+        </>
       ) : (
         <>
+          {header}
           <div className={CHART_FRAME_CLASS}>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={chartData} margin={chartMargin}>

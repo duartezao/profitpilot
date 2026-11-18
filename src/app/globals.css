@@ -4,16 +4,13 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
-  ProfitPilot — Soft Glass B (Combo 3).
-  Dark-only · fumo suave · glass prateado · sem cyan neon · sem riscas.
+  ProfitPilot — Soft Glass carvão (paleta anterior) + cards limpos.
 */
 :root,
 .dark {
-  /* Carvão neutro mais claro — sem undertone azul */
   --background: #1c1c1c;
-  --sidebar: rgba(32, 32, 32, 0.9);
-  --surface: rgba(42, 42, 42, 0.78);
-  /* Menus/dropdowns — opaco */
+  --sidebar: transparent;
+  --surface: rgba(42, 42, 42, 0.82);
   --popover: #2a2a2a;
   --muted: rgba(255, 255, 255, 0.07);
   --border: rgba(255, 255, 255, 0.12);
@@ -26,7 +23,7 @@
   --warning: #fbbf24;
   --chart-positive: #86efac;
   --chart-neutral: #8a8a8a;
-  --radius: 1rem;
+  --radius: 1.25rem;
   --glass-blur: 22px;
   --glass-shine: rgba(255, 255, 255, 0.07);
 }
@@ -49,19 +46,25 @@
   --color-chart-neutral: var(--chart-neutral);
 
   --radius-lg: var(--radius);
-  --font-sans: var(--font-poppins), "Poppins", system-ui, sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    var(--font-poppins), "Poppins", "Segoe UI", Roboto, "Helvetica Neue",
+    Helvetica, Arial, sans-serif;
 }
 
 html {
   min-height: 100%;
   color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   color: var(--foreground);
-  font-family: var(--font-poppins), "Poppins", system-ui, sans-serif;
+  font-family: var(--font-sans);
   background-color: var(--background);
-  /* Carvão médio — fumo cinza claro, sem azul */
+  /* Fundo carvão Soft Glass — como antes */
   background-image:
     radial-gradient(
       ellipse 80% 55% at 12% 0%,
@@ -80,28 +83,68 @@ body {
     ),
     linear-gradient(180deg, #222222 0%, #1c1c1c 50%, #181818 100%);
   background-attachment: fixed;
+  letter-spacing: -0.011em;
+  font-weight: 400;
 }
 
 .glass {
   background: var(--surface);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.15);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.15);
+  border: none;
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.25);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.25);
   box-shadow:
-    inset 0 1px 0 var(--glass-shine),
-    0 8px 28px rgba(0, 0, 0, 0.22);
+    inset 0 0.5px 0 var(--glass-shine),
+    0 2px 8px rgba(0, 0, 0, 0.16);
 }
 
+/* Shell (sidebar / topbar) — mesmo fundo da página, sem linhas */
 .glass-nav {
-  background: var(--sidebar);
-  border-color: var(--border);
-  backdrop-filter: blur(26px) saturate(1.2);
-  -webkit-backdrop-filter: blur(26px) saturate(1.2);
-  box-shadow: inset 0 1px 0 var(--glass-shine);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Scroll fino estilo overlay — menos “Windows default” */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html[data-privacy="true"] [data-sensitive] {
@@ -133,11 +176,6 @@ html[data-privacy="true"] textarea[data-sensitive] {
     transform: none !important;
   }
 
-  .glass,
-  .glass-nav {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
 }
 
 @media print {

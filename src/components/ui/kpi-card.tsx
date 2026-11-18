@@ -1,4 +1,3 @@
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import { Sparkline } from "@/components/ui/sparkline";
@@ -14,35 +13,31 @@ export function KpiCard({
 }: {
   label: string;
   value: string;
-  /** Valor exato/completo para tooltip (quando `value` é compacto) */
   title?: string;
-  /** Variação em %, ex.: 18.6 ou -4.8 (opcional) */
   delta?: number;
-  /** Série para o sparkline (opcional) */
   trend?: number[];
-  /** @deprecated Combo 3 — cards clean iguais. */
   hero?: boolean;
 }) {
   const positive = (delta ?? 0) >= 0;
   const significant = Math.abs(delta ?? 0) >= 10;
 
   return (
-    <Card className={cn("relative min-w-0 overflow-hidden p-4 sm:p-5")}>
-      <p className="truncate text-[13px] font-medium text-muted-foreground">
+    <Card className="relative flex min-w-0 flex-col overflow-hidden rounded-[20px] px-5 py-5 sm:px-6 sm:py-6">
+      <p className="truncate text-[13px] font-medium tracking-[-0.01em] text-muted-foreground">
         {label}
       </p>
       <Sensitive
         title={title ?? value}
-        className="mt-1 block truncate text-2xl font-semibold tabular-nums sm:text-3xl"
+        className="mt-2 block truncate text-[2rem] font-semibold tabular-nums leading-[1.05] tracking-[-0.03em] sm:text-[2.25rem]"
       >
         {value}
       </Sensitive>
 
-      <div className="mt-2 flex items-center justify-between">
+      <div className="mt-2 flex items-end justify-between gap-2">
         {delta !== undefined ? (
           <Sensitive
             className={cn(
-              "inline-flex items-center gap-0.5 text-sm font-medium tabular-nums",
+              "text-[13px] font-semibold tabular-nums tracking-[-0.01em]",
               significant
                 ? positive
                   ? "text-positive"
@@ -50,11 +45,7 @@ export function KpiCard({
                 : "text-muted-foreground",
             )}
           >
-            {positive ? (
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            ) : (
-              <ArrowDownRight className="h-3.5 w-3.5" />
-            )}
+            {positive ? "+" : "−"}
             {Math.abs(delta).toFixed(1).replace(".", ",")}%
           </Sensitive>
         ) : (
@@ -62,7 +53,16 @@ export function KpiCard({
         )}
         {trend && (
           <div data-sensitive-chart>
-            <Sparkline data={trend} />
+            <Sparkline
+              data={trend}
+              color={
+                significant
+                  ? positive
+                    ? "var(--positive)"
+                    : "var(--negative)"
+                  : "var(--muted-foreground)"
+              }
+            />
           </div>
         )}
       </div>

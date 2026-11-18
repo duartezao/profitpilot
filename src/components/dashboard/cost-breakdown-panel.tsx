@@ -18,9 +18,11 @@ export function CostBreakdownPanel({
   const profitPositive = data.netProfit >= 0;
 
   return (
-    <div className="flex h-full flex-col p-1 sm:p-0">
+    <div className="glass flex h-full flex-col rounded-[20px] px-5 py-5 sm:px-6 sm:py-6">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">Repartição de custos</h2>
+        <h2 className="text-[17px] font-semibold tracking-[-0.02em]">
+          Repartição de custos
+        </h2>
         <Sensitive className="text-xs tabular-nums text-muted-foreground">
           {data.totalCostsFmt}
         </Sensitive>

@@ -66,16 +66,16 @@ export function StoresComparisonTable({ stores }: { stores: SummaryStore[] }) {
   }, [stores, sortKey, sortDir]);
 
   return (
-    <div className="min-w-0 space-y-3">
-      <div>
-        <h2 className="text-lg font-semibold">Lojas</h2>
+    <div className="glass min-w-0 overflow-hidden rounded-[20px]">
+      <div className="px-5 pb-2 pt-5 sm:px-6 sm:pt-6">
+        <h2 className="text-[17px] font-semibold tracking-[-0.02em]">Lojas</h2>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
-            <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
-              <th className="px-5 py-3">Loja</th>
-              <th className="px-5 py-3 text-right">
+            <tr className="border-b border-border/70 text-left text-xs font-medium text-muted-foreground">
+              <th className="px-5 py-3 sm:px-6">Loja</th>
+              <th className="px-5 py-3 text-right sm:px-6">
                 <SortButton
                   label="Revenue"
                   active={sortKey === "revenue"}
@@ -84,7 +84,7 @@ export function StoresComparisonTable({ stores }: { stores: SummaryStore[] }) {
                   className="ml-auto"
                 />
               </th>
-              <th className="px-5 py-3 text-right">
+              <th className="px-5 py-3 text-right sm:px-6">
                 <SortButton
                   label="Lucro"
                   active={sortKey === "profit"}
@@ -93,7 +93,7 @@ export function StoresComparisonTable({ stores }: { stores: SummaryStore[] }) {
                   className="ml-auto"
                 />
               </th>
-              <th className="px-5 py-3 text-right">
+              <th className="px-5 py-3 text-right sm:px-6">
                 <SortButton
                   label="Margem"
                   active={sortKey === "margin"}
@@ -102,7 +102,7 @@ export function StoresComparisonTable({ stores }: { stores: SummaryStore[] }) {
                   className="ml-auto"
                 />
               </th>
-              <th className="px-5 py-3 text-right">
+              <th className="px-5 py-3 text-right sm:px-6">
                 <SortButton
                   label="Ad Spend"
                   active={sortKey === "adSpend"}
@@ -111,7 +111,7 @@ export function StoresComparisonTable({ stores }: { stores: SummaryStore[] }) {
                   className="ml-auto"
                 />
               </th>
-              <th className="px-5 py-3 text-right">
+              <th className="px-5 py-3 text-right sm:px-6">
                 <SortButton
                   label="ROAS"
                   active={sortKey === "roas"}
@@ -120,28 +120,31 @@ export function StoresComparisonTable({ stores }: { stores: SummaryStore[] }) {
                   className="ml-auto"
                 />
               </th>
-              <th className="px-5 py-3 text-right">Tendência</th>
+              <th className="px-5 py-3 text-right sm:px-6">Tendência</th>
             </tr>
           </thead>
           <tbody>
             {sorted.map((s) => (
-              <tr key={s.storeId} className="border-t border-border hover:bg-muted">
-                <td className="px-5 py-3 font-medium">
-                  <div className="flex items-center gap-2">
+              <tr
+                key={s.storeId}
+                className="border-t border-border/60 transition-colors hover:bg-muted/60"
+              >
+                <td className="px-5 py-3.5 font-medium sm:px-6">
+                  <div className="flex items-center gap-2.5">
                     <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: s.color }}
                       aria-hidden
                     />
                     <Sensitive>{s.name}</Sensitive>
                   </div>
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums">
+                <td className="px-5 py-3.5 text-right tabular-nums sm:px-6">
                   <Sensitive>{s.revenue}</Sensitive>
                 </td>
                 <td
                   className={cn(
-                    "px-5 py-3 text-right tabular-nums",
+                    "px-5 py-3.5 text-right tabular-nums sm:px-6",
                     s.positive ? "text-positive" : "text-negative",
                   )}
                 >
@@ -149,19 +152,19 @@ export function StoresComparisonTable({ stores }: { stores: SummaryStore[] }) {
                 </td>
                 <td
                   className={cn(
-                    "px-5 py-3 text-right tabular-nums",
+                    "px-5 py-3.5 text-right tabular-nums sm:px-6",
                     !s.positive && "text-negative",
                   )}
                 >
                   <Sensitive>{s.margin}</Sensitive>
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums">
+                <td className="px-5 py-3.5 text-right tabular-nums sm:px-6">
                   <Sensitive>{s.adSpend}</Sensitive>
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums">
+                <td className="px-5 py-3.5 text-right tabular-nums sm:px-6">
                   <Sensitive>{s.roas}</Sensitive>
                 </td>
-                <td className="px-5 py-3">
+                <td className="px-5 py-3.5 sm:px-6">
                   <div className="flex justify-end" data-sensitive-chart>
                     <Sparkline data={s.trend} color={s.color} />
                   </div>

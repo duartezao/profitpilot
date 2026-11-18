@@ -1,4 +1,3 @@
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sensitive } from "@/components/privacy-mode";
 import { Sparkline } from "@/components/ui/sparkline";
@@ -12,7 +11,6 @@ const CRITICAL_DELTA_LABELS = new Set([
   "POAS",
 ]);
 
-/** Limiar (%) acima do qual o delta ganha cor (evita semáforo em tudo). */
 const DELTA_COLOR_THRESHOLD = 10;
 
 function formatDelta(delta: number, isPoints?: boolean) {
@@ -20,7 +18,6 @@ function formatDelta(delta: number, isPoints?: boolean) {
   return isPoints ? `${abs} pp` : `${abs}%`;
 }
 
-/** Extrai só o período de comparação (ex. "1–7 Set 2026"). */
 function periodFromDeltaLabel(label?: string): string | null {
   if (!label) return null;
   const cleaned = label
@@ -46,12 +43,11 @@ function deltaTone(
 
 type DashboardKpiCardProps = SummaryKpi & {
   layout?: "store" | "workspace";
-  /** @deprecated Combo 3 — cards clean iguais; ignorado. */
   emphasis?: boolean;
-  /** Variante compacta para métricas secundárias. */
   density?: "primary" | "secondary";
 };
 
+/** KPI estilo Apple Stocks — valor grande, delta tipográfico, sem chrome. */
 export function DashboardKpiCard({
   label,
   value,
@@ -78,70 +74,74 @@ export function DashboardKpiCard({
           .join(" · ")
       : undefined;
 
-  const deltaBlock = delta !== undefined && (
-    <Sensitive
-      title={deltaTitle}
-      className={cn(
-        "mt-1.5 text-xs tabular-nums sm:text-sm",
-        tone === "positive" && "text-positive",
-        tone === "negative" && "text-negative",
-        tone === "muted" && "text-muted-foreground",
-        isStore ? "block leading-snug" : "inline-flex max-w-full items-center gap-0.5 truncate",
-      )}
-    >
-      <span className="inline-flex items-center gap-0.5">
-        {rawPositive ? (
-          <ArrowUpRight className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-        ) : (
-          <ArrowDownRight className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-        )}
-        <span>
-          {rawPositive ? "+" : "−"}
-          {formatDelta(delta, deltaIsPoints)}
-        </span>
-      </span>
-      {period && (
-        <span
-          className={cn(
-            "font-normal text-muted-foreground",
-            isStore ? "mt-0.5 block truncate" : "ml-1 truncate",
-          )}
-        >
-          {isStore ? `vs ${period}` : `· vs ${period}`}
-        </span>
-      )}
-    </Sensitive>
-  );
-
   return (
     <div
       className={cn(
-        "glass relative flex h-full flex-col overflow-hidden rounded-2xl",
-        isSecondary ? "p-3 sm:p-3.5" : "p-4 sm:p-5",
+        "glass relative flex h-full flex-col overflow-hidden rounded-[20px]",
+        isSecondary ? "px-4 py-3.5" : "px-5 py-5 sm:px-6 sm:py-6",
       )}
     >
       <p
         className={cn(
-          "truncate font-medium text-muted-foreground",
-          isSecondary ? "text-xs" : "text-[13px]",
+          "truncate font-medium tracking-[-0.01em] text-muted-foreground",
+          isSecondary ? "text-[12px]" : "text-[13px]",
         )}
       >
         {label}
       </p>
+
       <Sensitive
         title={title ?? value}
         className={cn(
-          "mt-1 block font-semibold tabular-nums leading-tight",
-          isSecondary ? "text-base sm:text-lg" : "text-2xl sm:text-3xl",
+          "mt-2 block font-semibold tabular-nums leading-[1.05] tracking-[-0.03em]",
+          isSecondary ? "text-[1.35rem]" : "text-[2rem] sm:text-[2.25rem]",
         )}
       >
         {value}
       </Sensitive>
-      {deltaBlock}
+
+      {delta !== undefined && (
+        <div
+          className={cn(
+            "mt-2 flex min-w-0 items-baseline gap-1.5",
+            isStore && "flex-col items-start gap-0.5",
+          )}
+        >
+          <Sensitive
+            title={deltaTitle}
+            className={cn(
+              "text-[13px] font-semibold tabular-nums tracking-[-0.01em]",
+              tone === "positive" && "text-positive",
+              tone === "negative" && "text-negative",
+              tone === "muted" && "text-muted-foreground",
+            )}
+          >
+            {rawPositive ? "+" : "−"}
+            {formatDelta(delta, deltaIsPoints)}
+          </Sensitive>
+          {period && (
+            <span className="truncate text-[12px] text-muted-foreground">
+              vs {period}
+            </span>
+          )}
+        </div>
+      )}
 
       {Boolean(trend?.length) && !isSecondary && (
-        <div className="mt-2 flex justify-end sm:mt-3" data-sensitive-chart>
-          <Sparkline data={trend!} width={80} height={22} color="var(--muted-foreground)" />
+        <div className="mt-auto pt-5" data-sensitive-chart>
+          <Sparkline
+            data={trend!}
+            width={140}
+            height={36}
+            className="w-full max-w-none"
+            color={
+              tone === "positive"
+                ? "var(--positive)"
+                : tone === "negative"
+                  ? "var(--negative)"
+                  : "var(--muted-foreground)"
+            }
+          />
         </div>
       )}
     </div>

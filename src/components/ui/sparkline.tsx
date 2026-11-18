@@ -32,17 +32,17 @@ export function Sparkline({
 
   return (
     <svg
-      width={width}
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       fill="none"
-      className={cn(!color && "text-muted-foreground", className)}
+      className={cn("block max-w-full", !color && "text-muted-foreground", className)}
       preserveAspectRatio="none"
     >
       <polyline
         points={points}
         stroke={color ?? "currentColor"}
-        strokeWidth="1.5"
+        strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

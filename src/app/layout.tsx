@@ -3,6 +3,7 @@ import { Poppins } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
+/** SF Pro no Apple; Poppins no Windows / resto. */
 const poppins = Poppins({
   variable: "--font-poppins",
   subsets: ["latin"],
@@ -49,7 +50,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`dark ${poppins.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-background text-foreground">
+      <body className="min-h-full bg-background font-sans text-foreground">
         <Providers>{children}</Providers>
       </body>
     </html>

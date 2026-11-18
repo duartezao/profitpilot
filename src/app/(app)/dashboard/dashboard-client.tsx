@@ -104,7 +104,7 @@ function ChartAndCostsSection({
 
   if (!showChart && costBreakdown) {
     return (
-      <div className="max-w-xl">
+      <div className="max-w-md">
         <CostBreakdownPanel data={costBreakdown} omitAnchors />
       </div>
     );
