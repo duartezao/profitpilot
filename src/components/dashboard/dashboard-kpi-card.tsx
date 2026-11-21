@@ -93,8 +93,10 @@ export function DashboardKpiCard({
       <Sensitive
         title={title ?? value}
         className={cn(
-          "mt-2 block font-semibold tabular-nums leading-[1.05] tracking-[-0.03em]",
-          isSecondary ? "text-[1.35rem]" : "text-[2rem] sm:text-[2.25rem]",
+          "mt-2 block min-w-0 font-semibold tabular-nums leading-[1.1] tracking-[-0.03em] [overflow-wrap:anywhere]",
+          isSecondary
+            ? "text-[clamp(1.05rem,3.6vw,1.35rem)]"
+            : "text-[clamp(1.15rem,4.2vw,2.25rem)]",
         )}
       >
         {value}

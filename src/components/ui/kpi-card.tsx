@@ -28,7 +28,7 @@ export function KpiCard({
       </p>
       <Sensitive
         title={title ?? value}
-        className="mt-2 block truncate text-[2rem] font-semibold tabular-nums leading-[1.05] tracking-[-0.03em] sm:text-[2.25rem]"
+        className="mt-2 block min-w-0 text-[clamp(1.15rem,4.2vw,2.25rem)] font-semibold tabular-nums leading-[1.1] tracking-[-0.03em] [overflow-wrap:anywhere]"
       >
         {value}
       </Sensitive>

@@ -9,19 +9,23 @@ export function FinancasView({
   hasStoreCash,
   hasStoreTable,
   expenseCount,
+  personalCount,
   resumo,
   storeCash,
   storeTable,
   expenses,
+  pessoal,
 }: {
   scopeName: string | null;
   hasStoreCash: boolean;
   hasStoreTable: boolean;
   expenseCount: number;
+  personalCount?: number;
   resumo: ReactNode;
   storeCash?: ReactNode;
   storeTable?: ReactNode;
   expenses: ReactNode;
+  pessoal?: ReactNode;
 }) {
   const tabs: PageTab[] = [
     { id: "resumo", label: "Resumo" },
@@ -37,6 +41,20 @@ export function FinancasView({
           </span>
         ) : undefined,
     },
+    ...(pessoal
+      ? [
+          {
+            id: "pessoal",
+            label: "Pessoal",
+            badge:
+              personalCount && personalCount > 0 ? (
+                <span className="rounded-md border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                  {personalCount}
+                </span>
+              ) : undefined,
+          } satisfies PageTab,
+        ]
+      : []),
   ];
 
   const [tab, setTab] = useState(tabs[0]!.id);
@@ -63,6 +81,8 @@ export function FinancasView({
       )}
 
       {tab === "despesas" && <PageTabCard>{expenses}</PageTabCard>}
+
+      {tab === "pessoal" && pessoal && <PageTabCard>{pessoal}</PageTabCard>}
     </div>
   );
 }

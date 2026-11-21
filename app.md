@@ -377,7 +377,7 @@ Net Profit =
 
 * Net Profit ao longo do tempo (gráfico diário na dashboard consolidada)
 * **Waterfall do lucro**: Revenue → menos cada custo → Net Profit (mostra para onde vai o dinheiro)
-* **P&L em `/financas`** — demonstração de resultados com COGS, taxas, ad spend e reembolsos; portes cobrados como linha informativa (margem); avisos de COGS/ad spend em falta. No **overview (todas as lojas)**: cartão **Saldo em conta (banca)** no Resumo + tab **Caixa** com soma e detalhe por loja (`cashOnHand` = inicial + entradas + capital − COGS − ads − levantamentos). Entradas e saídas usam a **mesma data de início** (saldo inicial, ou importação/criação da loja).
+* **P&L em `/financas`** — demonstração de resultados com COGS, taxas, ad spend e reembolsos; portes cobrados como linha informativa (margem); avisos de COGS/ad spend em falta. No **overview (todas as lojas)**: cartão **Saldo em conta (banca)** no Resumo + tab **Caixa** com soma e detalhe por loja (`cashOnHand` = inicial + entradas + capital − COGS − ads − levantamentos). Entradas e saídas usam a **mesma data de início** (saldo inicial, ou importação/criação da loja). Tab **Pessoal**: gastos pessoais dos membros vs % do lucro do período — **não** afecta o P&L.
 * **Gateway externo** (Stripe/PayPal/MB): com `externalGatewayPayoutBusinessDays` definido, entradas de caixa = estimativa por encomenda (total − reembolsos − taxas estimadas/reais). O payout cai tipicamente **~07:00** no fuso da loja; no **dia de payout** só entra em «recebido» **depois das 07:00** (antes fica em «a receber»). **Saldo em conta** mostra o valor **exacto em euros** (ex.: 20.587,32 €), não arredondado a «mil €». Loja **mista**: payouts Shopify = `feesSource: real`; gateway externo = taxa estimada e gateway ≠ `shopify_payments` (inclui `paymentGateway` null até sync). Continua a ser **projecção**, não o extracto Stripe/PayPal.
 * Lucro por loja, por produto, por país, por canal de aquisição
 * **Profit por order** (margem média por encomenda)
@@ -1526,6 +1526,19 @@ Métricas de funil Shopify (sessões, ATC, checkout, CVR) **persistidas e compri
 
 > Custos fixos / apps / subscrições — **implementado** em `/financas` (painel «Apps, subscrições e fixos»). **Adicionar, editar** (ícone lápis, formulário inline) e **apagar** despesas. **Filtros:** período da topbar + tipo (Todas / Pontual / Mensal / Anual) — só lista despesas activas nesse intervalo. Entram no **P&L**, **dashboard**, **gráfico de lucro**, **waterfall** e **relatório diário**: **pontual** só no dia indicado; **mensal** uma vez por mês no dia de início (`startDateKey`); **anual** na data de aniversário. Despesas de **workspace** contam no consolidado (não se repartem por loja); despesas com `storeId` só à loja indicada.
 
+## personal_expenses (despesas pessoais / sócios)
+
+> Tab **Pessoal** em `/financas` — tracking de gastos pessoais dos membros do workspace (sócios). Vista **semana** ou **mês** (selector de mês / navegação de semana, independente da topbar). Soma por pessoa, comparação entre sócios (barra + quota do grupo + vs média) e **% do lucro líquido da empresa** no intervalo escolhido (via snapshots `DailyMetric`). Edição inline + soft delete. **Não entram** no lucro da dashboard, P&L, gráfico, waterfall nem relatório. Quem regista edita/apaga os seus; owner/admin gerem todos.
+
+* `_id`
+* `workspaceId`
+* `userId` (membro a quem pertence o gasto)
+* `dateKey` (dia YYYY-MM-DD)
+* `description`
+* `amount` / `currency` / `amountBase`
+* `deletedAt`
+* `createdBy`
+
 * `_id`
 * `workspaceId` (gasto da conta) ou `storeId` (gasto de uma loja)
 * `name`
@@ -1908,7 +1921,7 @@ Pipeline operacional de dropshipping.
 1. **Dashboard** — visão consolidada (KPIs, lucro, comparação loja a loja).
 2. **Lojas** — lista de lojas e dashboard individual de cada uma.
 3. **Métricas** — funil + tabela dia a dia (requer loja seleccionada).
-4. **Lucro & Finanças** — lucro real, taxas, P&L, saúde financeira, tesouraria.
+4. **Lucro & Finanças** — lucro real, taxas, P&L, saúde financeira, tesouraria, tab **Pessoal** (gastos dos sócios, fora do lucro).
 5. **Payouts** — quanto e quando recebes.
 6. **Decisão** — "o que fazer hoje", kill/scale, recomendações (**só com loja seleccionada**; oculto no overview).
 7. **Notas** — diário, relatório diário automático, exportações.

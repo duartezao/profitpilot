@@ -3530,8 +3530,9 @@ export async function buildWorkspaceSummary(
   const margin = totals.revenue > 0 ? (netProfit / totals.revenue) * 100 : 0;
   const curBer = storeBerRoas(totals);
 
+  /** Compacto no cartão (mobile); valor exacto fica em `title`. */
   const money = (v: number): SummaryKpi["value"] =>
-    formatCurrency(v, currency);
+    formatCurrencyCompact(v, currency);
   const deltaSuffix = `var. % vs ${prevPeriodLabel}`;
 
   let kpis: SummaryKpi[];

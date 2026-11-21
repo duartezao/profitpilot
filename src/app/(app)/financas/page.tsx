@@ -17,13 +17,21 @@ import { FinancasView } from "@/components/financas/financas-view";
 import { StoreCashFlowSection } from "@/components/financas/store-cash-flow";
 import { ConsolidatedCashSection } from "@/components/financas/consolidated-cash-section";
 import { ExpensesPanel } from "@/components/financas/expenses-panel";
+import { PessoalPanel } from "@/components/financas/pessoal-panel";
 import { BusinessPnlPanel } from "@/components/financas/business-pnl-panel";
 import { FinancasModeToggle } from "@/components/financas/financas-mode-toggle";
 import { connectToDatabase } from "@/lib/db";
 import { Store } from "@/models/Store";
 import { listWorkspaceExpenses, sumWorkspaceMonthlyFixedBase } from "@/lib/expenses";
 import { expenseAppliesInPeriod } from "@/lib/expense-proration";
-import { periodToDateKeys } from "@/lib/period-date-keys";
+import {
+  listPersonalExpenses,
+  loadPersonalProfitByDateKey,
+  listRecentMonthKeys,
+  resolvePersonalMonthRange,
+} from "@/lib/personal-expenses";
+import { listWorkspaceMemberOptions } from "@/lib/members";
+import { dateKeyInPeriod, periodToDateKeys } from "@/lib/period-date-keys";
 import {
   dominantStoreTimezone,
   normalizeStoreTimezone,
@@ -196,6 +204,30 @@ export default async function FinancasPage({
     ),
   ).length;
   const canEditExpenses = ["owner", "admin", "editor"].includes(user.role);
+  const canManagePersonalAny = ["owner", "admin"].includes(user.role);
+  const members = await listWorkspaceMemberOptions(
+    user.workspaceId,
+    user.id,
+  );
+  const memberNames = new Map(members.map((m) => [m.userId, m.name]));
+  const personalHistoryMonths = listRecentMonthKeys(24);
+  const personalFrom = resolvePersonalMonthRange(
+    personalHistoryMonths[personalHistoryMonths.length - 1]!,
+  ).startKey;
+  const personalTo = resolvePersonalMonthRange(personalHistoryMonths[0]!).endKey;
+  const [personalEntries, personalProfitByDateKey] = await Promise.all([
+    listPersonalExpenses(user.workspaceId, memberNames, currency, {
+      fromKey: personalFrom,
+      toKey: personalTo,
+    }),
+    loadPersonalProfitByDateKey(user.workspaceId, user.storeAccess, 24),
+  ]);
+  const currentMonthRange = resolvePersonalMonthRange(
+    new Date().toISOString().slice(0, 7),
+  );
+  const personalInPeriodCount = personalEntries.filter((e) =>
+    dateKeyInPeriod(e.dateKey, currentMonthRange),
+  ).length;
   const fixedMonthly = businessMode
     ? await sumWorkspaceMonthlyFixedBase(user.workspaceId)
     : 0;
@@ -447,6 +479,17 @@ export default async function FinancasPage({
     />
   );
 
+  const pessoalPanel = (
+    <PessoalPanel
+      entries={personalEntries}
+      members={members}
+      currentUserId={user.id}
+      canManageAny={canManagePersonalAny}
+      baseCurrency={currency}
+      profitByDateKey={personalProfitByDateKey}
+    />
+  );
+
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader
@@ -505,6 +548,7 @@ export default async function FinancasPage({
         hasStoreCash={Boolean(storeCash || consolidatedCash)}
         hasStoreTable={!scopeName && stores.length > 0}
         expenseCount={expensesInPeriodCount}
+        personalCount={personalInPeriodCount}
         resumo={resumoPanel}
         storeCash={
           storeCash ? (
@@ -519,6 +563,7 @@ export default async function FinancasPage({
         }
         storeTable={storeTablePanel}
         expenses={expensesPanel}
+        pessoal={pessoalPanel}
       />
     </div>
   );
